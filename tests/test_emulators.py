@@ -48,9 +48,9 @@ def test_emulate_gp(dp16data):
 
     X_new = np.array(X.values[100:104, :])
 
-    p_true = np.array([[0.0890002], [0.392], [0.99300008], [1.65899923]])
-    var_true = np.array([[1.00089525e-08], [1.00089317e-08], [1.00089625e-08], [1.00089827e-08]])
-    p, status = emulate_gp(X, Y, X_new, gp.kern.Exponential, stepwise=True)
+    p_true = np.array([[0.089], [0.39199997], [0.99299997], [1.65899989]])
+    var_true = np.array([[9.99999172e-09], [9.99999217e-09], [9.99999239e-09], [9.99999306e-09]])
+    p, status = emulate_gp(X, Y, X_new, gp.kern.Exponential, stepwise=False)
     assert status.lower() == "converged".lower()
     assert_array_almost_equal(p[0], p_true, decimal=4), "Predicted values != true values"
     assert_array_almost_equal(p[1], var_true, decimal=4), "Predicted variances != true variances"
