@@ -25,7 +25,7 @@ requirements = [
     "SALib",
     "pandas>=0.18.1",
     "matplotlib>=2.2.2",
-    "GPy>=1.9.0",
+    "pymc3>=3.6",
     "seaborn>=0.8",
     "xarray",
 ]

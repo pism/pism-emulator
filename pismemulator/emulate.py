@@ -18,7 +18,7 @@
 
 # emulate.py contains functions to generate kernels and perform regression analysis.
 
-import GPy as gp
+import pymc3 as pm
 import numpy as np
 
 from .utils import prepare_data, stepwise_bic
@@ -28,14 +28,14 @@ def generate_kernel(varlist, kernel, varnames):
     """
     Generate a kernel based on a list of model terms
 
-    Currently only supports GPy but could be easily extended
+    Currently only supports pymc3 but could be easily extended
     to gpflow.
 
-    :param varlist: list of strings containing model terms. 
-    :param kernel: GPy.kern instance
+    :param varlist: list of strings containing model terms.
+    :param kernel: pymc3.gp.cov instance
     :param var_names: list of strings containing variable names
 
-    :return kernel: GPy.kern instance
+    :return kernel: pymc3.gp.cov instance
 
     Example:
 
@@ -43,10 +43,10 @@ def generate_kernel(varlist, kernel, varnames):
 
     Y ~ X1 + X2 + X1*X2 with an exponential kernel
 
-    use 
+    use
 
     varlist = ["X1", "X2", "X1*X2"]
-    kernel = GPy.kern.Exponential
+    kernel = pymc3.gp.cov.Exponential
     varnames = ["X1", "X2"]
 
     """
@@ -57,14 +57,16 @@ def generate_kernel(varlist, kernel, varnames):
     interactions = [x.split("*") for x in varlist if "*" in x]
     nfirst = len(first_order)
 
-    kern = kernel(input_dim=nfirst, active_dims=first_order, ARD=True)
+    ls = 1
+    kern = kernel(input_dim=nfirst, active_dims=first_order, ls=np.ones(nfirst) * ls)
 
     mult = []
     active_intx = []
     for i in range(len(interactions)):
         mult.append([])
         for j in list(range(len(interactions[i]))):
-            mult[i].append(kernel(input_dim=1, active_dims=params_dict[interactions[i][j]], ARD=True))
+            active_dims = [params_dict[interactions[i][j]]]
+            mult[i].append(kernel(input_dim=1, active_dims=active_dims, ls=ls))
         active_intx.append(np.prod(mult[i]))
     for k in active_intx:
         kern += k
@@ -73,7 +75,7 @@ def generate_kernel(varlist, kernel, varnames):
 
 
 def emulate_gp(
-    samples, response, X_new, kernel=gp.kern.Exponential, stepwise=False, optimizer_options={}, regressor_options={}
+    samples, response, X_new, kernel=pm.gp.cov.Exponential, stepwise=False, optimizer_options={}, regressor_options={}
 ):
 
     """
@@ -82,7 +84,7 @@ def emulate_gp(
     :param samples: pandas.DataFrame instance of samples
     :param response: pandas.DataFrame instance of response
     :param X_new: numpy.ndarray
-    :param kernel: GPy.kern instance
+    :param kernel: pymc3.gp.cov instance
     :param stepwise: use stepwiseBIC to generate kernel
     :param optimizer_options: dictionary with options to be passed
      on to the optimizer
@@ -92,22 +94,22 @@ def emulate_gp(
     n = X.shape[1]
     varnames = samples.columns
 
-    if stepwise:
-        steplist = stepwise_bic(X, Y, varnames=varnames)
-        kern = generate_kernel(steplist, kernel=kernel, varnames=varnames)
-    else:
-        kern = kernel(input_dim=n, ARD=True)
+    with pm.Model() as model:
+        ls = pm.HalfCauchy("ls", shape=n, beta=3)
+        if stepwise:
+            steplist = stepwise_bic(X, Y, varnames=varnames)
+            kern = generate_kernel(steplist, kernel=kernel, varnames=varnames)
+        else:
+            kern = kernel(input_dim=n, ls=ls)
 
-    m = gp.models.GPRegression(X, Y, kern, **regressor_options)
-    f = m.optimize(messages=True, **optimizer_options)
+        gp = pm.gp.Marginal(cov_func=kern)
+        y_ = gp.marginal_likelihood("y", X=X, y=Y.squeeze(), noise=0)
 
-    try:
-        p = m.predict(X_new.values)
-    except:
-        p = m.predict(X_new)
+        mp = pm.find_MAP(return_raw=True)
+        f_pred = gp.conditional("f_pred", X_new)
+        mu, var = gp.predict(X_new.squeeze(), point=mp, diag=True)
 
-    # Instead of f.status we could also return f or a bool converged.
-    return p, f.status
+    return [mu, var], mp[1]["success"]
 
 
 def emulate_sklearn(samples, response, X_new, method="lasso", alphas=np.linspace(1e-4, 10, 10001), return_stats=False):
@@ -170,10 +172,10 @@ def gp_loo_mp(loo_idx, samples, response, kernel, stepwise, regressor_options={}
 
     Can be called using multiprocessing
 
-    :param loo_idx: indices to be removed from samples and response 
+    :param loo_idx: indices to be removed from samples and response
     :param samples: pandas.DataFrame instance of samples
     :param response: pandas.DataFrame instance of response
-    :param kernel: GPy.kern instance
+    :param kernel: pymc3.gp.cov instance
     :param stepwise: use stepwiseBIC to generate kernel
 
     :return Y_p_i, Y_var_i, (p_i - Y_p_i) ** 2 / Y_var_i
@@ -183,13 +185,13 @@ def gp_loo_mp(loo_idx, samples, response, kernel, stepwise, regressor_options={}
     Example
 
     from functools import partial
-    import GPy as gp
+    import pymc3 as pm
     from multiprocessing import Pool
 
     with Pool(n_procs) as pool:
 
         results = pool.map(
-            partial(gp_loo_mp, samples=samples, response=response, kernel=gp.kern.Exponential, stepwise=False),
+            partial(gp_loo_mp, samples=samples, response=response, kernel=pm.gp.cov.Exponential, stepwise=False),
                     range(len(response)),
                 )
         pool.close()
@@ -221,10 +223,10 @@ def gp_response_mp(response_file, samples_file, X_p, kernel, stepwise, regressor
 
     Can be called using multiprocessing
 
-    :param loo_idx: indices to be removed from samples and response 
+    :param loo_idx: indices to be removed from samples and response
     :param samples: pandas.DataFrame instance of samples
     :param response: pandas.DataFrame instance of response
-    :param kernel: GPy.kern instance
+    :param kernel: pymc3.gp.cov instance
     :param stepwise: use stepwiseBIC to generate kernel
 
     :return Y_p_i, Y_var_i, (p_i - Y_p_i) ** 2 / Y_var_i
@@ -234,13 +236,13 @@ def gp_response_mp(response_file, samples_file, X_p, kernel, stepwise, regressor
     Example
 
     from functools import partial
-    import GPy as gp
+    import pymc3 as pm
     from multiprocessing import Pool
 
     with Pool(n_procs) as pool:
 
         results = pool.map(
-            partial(gp_loo_mp, samples=samples, response=response, kernel=gp.kern.Exponential, stepwise=False),
+            partial(gp_loo_mp, samples=samples, response=response, kernel=pm.gp.cov.Exponential, stepwise=False),
                     range(len(response)),
                 )
         pool.close()

@@ -1,4 +1,4 @@
-# Copyright (C) 2019 Rachel Chen, Andy Aschwanden
+# Copyright (C) 2019 Andy Aschwanden, Rachel Chen
 #
 # This file is part of pism-emulator.
 #
@@ -16,7 +16,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import GPy as gp
+import pymc3 as pm
 
 import numpy as np
 from numpy.testing import assert_array_almost_equal
@@ -33,12 +33,12 @@ def test_generate_kernel():
     """
 
     varlist = ["X1", "X2", "X1*X2"]
-    kernel = gp.kern.Exponential
+    kernel = pm.gp.cov.Exponential
     varnames = ["X1", "X2"]
     k = generate_kernel(varlist, kernel, varnames)
     # Not sure these are useful assertions
     assert k.input_dim == 2
-    assert k.size == 7
+    assert_array_almost_equal(k.active_dims, np.array([0, 1]))
 
 
 def test_emulate_gp(dp16data):
@@ -48,10 +48,10 @@ def test_emulate_gp(dp16data):
 
     X_new = np.array(X.values[100:104, :])
 
-    p_true = np.array([[0.089], [0.39199997], [0.99299997], [1.65899989]])
-    var_true = np.array([[9.99999172e-09], [9.99999217e-09], [9.99999239e-09], [9.99999306e-09]])
-    p, status = emulate_gp(X, Y, X_new, gp.kern.Exponential, stepwise=False)
-    assert status.lower() == "converged".lower()
+    p_true = np.array([0.089, 0.39199997, 0.99299997, 1.65899989])
+    var_true = np.array([9.99999172e-09, 9.99999217e-09, 9.99999239e-09, 9.99999306e-09])
+    p, converged = emulate_gp(X, Y, X_new, pm.gp.cov.Exponential, stepwise=True)
+    assert converged == True
     assert_array_almost_equal(p[0], p_true, decimal=4), "Predicted values != true values"
     assert_array_almost_equal(p[1], var_true, decimal=4), "Predicted variances != true variances"
 
