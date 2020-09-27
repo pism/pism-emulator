@@ -57,7 +57,11 @@ if __name__ == "__main__":
         default="exp",
     )
     parser.add_argument(
-        "--normalizer", dest="normalizer", action="store_true", help=f"Normalize regressor.", default=False,
+        "--normalizer",
+        dest="normalizer",
+        action="store_true",
+        help=f"Normalize regressor.",
+        default=False,
     )
     parser.add_argument(
         "-s",
@@ -154,8 +158,14 @@ if __name__ == "__main__":
     results = np.round(np.squeeze(results), decimals=8)
     n = results.shape[0]
     df = pd.DataFrame(
-        data=np.hstack((results, np.repeat(m, n).reshape(-1, 1), np.repeat(simulation, n).reshape(-1, 1),)),
-        columns=["Y_mean", "Y_var", "distance", "loo_id", "method", "simulation"],
+        data=np.hstack(
+            (
+                results,
+                np.repeat(m, n).reshape(-1, 1),
+                np.repeat(simulation, n).reshape(-1, 1),
+            )
+        ),
+        columns=["Y_true", "Y_mean", "Y_var", "distance", "loo_id", "method", "simulation"],
     )
     if not test:
         df.to_csv(f"{odir}/loo_{m}_{simulation}.csv", index_label="id")

@@ -31,7 +31,7 @@ def generate_kernel(varlist, kernel, varnames):
     Currently only supports GPy but could be easily extended
     to gpflow.
 
-    :param varlist: list of strings containing model terms. 
+    :param varlist: list of strings containing model terms.
     :param kernel: GPy.kern instance
     :param var_names: list of strings containing variable names
 
@@ -43,7 +43,7 @@ def generate_kernel(varlist, kernel, varnames):
 
     Y ~ X1 + X2 + X1*X2 with an exponential kernel
 
-    use 
+    use
 
     varlist = ["X1", "X2", "X1*X2"]
     kernel = GPy.kern.Exponential
@@ -64,7 +64,8 @@ def generate_kernel(varlist, kernel, varnames):
     for i in range(len(interactions)):
         mult.append([])
         for j in list(range(len(interactions[i]))):
-            mult[i].append(kernel(input_dim=1, active_dims=params_dict[interactions[i][j]], ARD=True))
+            active_dims = [params_dict[interactions[i][j]]]
+            mult[i].append(kernel(input_dim=1, active_dims=active_dims, ARD=True))
         active_intx.append(np.prod(mult[i]))
     for k in active_intx:
         kern += k
@@ -170,7 +171,7 @@ def gp_loo_mp(loo_idx, samples, response, kernel, stepwise, regressor_options={}
 
     Can be called using multiprocessing
 
-    :param loo_idx: indices to be removed from samples and response 
+    :param loo_idx: indices to be removed from samples and response
     :param samples: pandas.DataFrame instance of samples
     :param response: pandas.DataFrame instance of response
     :param kernel: GPy.kern instance
@@ -221,7 +222,7 @@ def gp_response_mp(response_file, samples_file, X_p, kernel, stepwise, regressor
 
     Can be called using multiprocessing
 
-    :param loo_idx: indices to be removed from samples and response 
+    :param loo_idx: indices to be removed from samples and response
     :param samples: pandas.DataFrame instance of samples
     :param response: pandas.DataFrame instance of response
     :param kernel: GPy.kern instance
