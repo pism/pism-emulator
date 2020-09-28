@@ -19,15 +19,17 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import GPy as gpy
 import pymc3 as pm
 from math import sqrt
 import numpy as np
 import os
 import pandas as pd
 import sys
+import pylab as plt
+import seaborn as sns
 
 from pismemulator.utils import prepare_data
-from pismemulator.emulate import emulate_gp, emulate_sklearn
 
 default_output_directory = "emulator_results"
 
@@ -85,56 +87,85 @@ if __name__ == "__main__":
     X_true = s_true.values
     Y_true = r_true.values
 
-    n = len(Y_true)
+    X = samples.values
+    Y = response.values
+    n = X.shape[1]
 
-    # Dictionary of GP kernels
-    gp_methods = {
-        "exp": pm.gp.cov.Exponential,
-        "expquad": pm.gp.cov.ExpQuad,
-        "mat32": pm.gp.cov.Matern32,
-        "mat52": pm.gp.cov.Matern52,
-    }
+    varnames = samples.columns
+    X_new = X_true
 
-    # List of regression methods
-    sklearn_methods = ("lasso", "lasso-lars", "ridge")
+    # GPy
+    print("\n\nTesting GPy")
 
-    for method in sklearn_methods:
-        p = emulate_sklearn(samples, response, X_true, method=method)
+    gp_cov = gpy.kern.Exponential
+    gp_kern = gp_cov(input_dim=n, ARD=True)
+    m = gpy.models.GPRegression(X, Y, gp_kern, normalizer=True)
+    f = m.optimize(messages=True, max_iters=4000)
+
+    p = m.predict(X_new)
+
+    if f.status == "Converged":
         df = pd.DataFrame(
             data=np.hstack(
-                [p.reshape(-1, 1), np.repeat(method, n).reshape(-1, 1), np.repeat(n_lhs_samples, n).reshape(-1, 1)]
+                [
+                    p[0].reshape(-1, 1),
+                    p[1].reshape(-1, 1),
+                ]
             ),
-            columns=["Y_mean", "method", "n_lhs"],
+            columns=["Y_mean", "Y_var"],
         )
-        outfile = f"{odir}/dgmsl_rcp_{rcp}_{year}_{method}_lhs_{n_lhs_samples}.csv"
+        outfile = f"test_gpy.csv"
         df.to_csv(outfile, index_label="id")
 
-    for method in gp_methods.keys():
-        for stepwise in (True, False):
-            if stepwise:
-                m = method + "-step"
-            else:
-                m = method
-            p, status = emulate_gp(
-                samples,
-                response,
-                X_true,
-                kernel=gp_methods[method],
-                stepwise=stepwise,
+    print(p[0])
+    # PyMC3
+    print("\n\nTesting PyMC3")
+
+    with pm.Model() as model:
+        ls = pm.Normal("ls", 100, 75, shape=n)
+        nu = pm.Normal("nu", 50, 25)
+        mc3_cov = pm.gp.cov.Exponential
+        mc3_kern = nu * mc3_cov(input_dim=n, ls=ls)
+
+        gp = pm.gp.Marginal(cov_func=mc3_kern)
+        y_ = gp.marginal_likelihood("y", X=X, y=Y.squeeze(), noise=0)
+
+        mp = pm.find_MAP(return_raw=True)
+        f_pred = gp.conditional("f_pred", X_new)
+        mu, var = gp.predict(X_new.squeeze(), point=mp, diag=True)
+
+        if mp[1]["success"]:
+            df = pd.DataFrame(
+                data=np.hstack(
+                    [
+                        mu.reshape(-1, 1),
+                        var.reshape(-1, 1),
+                    ]
+                ),
+                columns=["Y_mean", "Y_var"],
             )
-            if status:
-                df = pd.DataFrame(
-                    data=np.hstack(
-                        [
-                            p[0].reshape(-1, 1),
-                            p[1].reshape(-1, 1),
-                            np.repeat(m, n).reshape(-1, 1),
-                            np.repeat(n_lhs_samples, n).reshape(-1, 1),
-                            np.repeat(rcp, n).reshape(-1, 1),
-                            np.repeat(year, n).reshape(-1, 1),
-                        ]
-                    ),
-                    columns=["Y_mean", "Y_var", "method", "n_lhs", "rcp", "year"],
-                )
-                outfile = f"{odir}/dgmsl_rcp_{rcp}_{year}_{m}_lhs_{n_lhs_samples}.csv"
-                df.to_csv(outfile, index_label="id")
+            outfile = f"test_mc3.csv"
+            df.to_csv(outfile, index_label="id")
+
+    print(mu)
+
+    bins = np.arange(0, 60, 1)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    sns.distplot(mu, ax=ax, label="pymc3")
+    sns.distplot(p[0], ax=ax, label="GPy")
+
+    sns.distplot(
+        Y_true,
+        bins=bins,
+        hist=False,
+        hist_kws={"alpha": 0.3},
+        norm_hist=True,
+        kde=True,
+        kde_kws={"shade": False, "alpha": 1.0, "linewidth": 0.8},
+        ax=ax,
+        color="k",
+        label='"True"',
+    )
+    fig.savefig("gpy_vs_pymc3.pdf")

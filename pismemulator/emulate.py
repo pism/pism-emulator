@@ -57,7 +57,12 @@ def generate_kernel(varlist, kernel, varnames):
     interactions = [x.split("*") for x in varlist if "*" in x]
     nfirst = len(first_order)
 
+<<<<<<< Updated upstream
     kern = kernel(input_dim=nfirst, active_dims=first_order, ARD=True)
+=======
+    ls = 25
+    kern = kernel(input_dim=nfirst, active_dims=first_order, ls=np.ones(nfirst) * ls)
+>>>>>>> Stashed changes
 
     mult = []
     active_intx = []
@@ -73,9 +78,13 @@ def generate_kernel(varlist, kernel, varnames):
     return kern
 
 
+<<<<<<< Updated upstream
 def emulate_gp(
     samples, response, X_new, kernel=gp.kern.Exponential, stepwise=False, optimizer_options={}, regressor_options={}
 ):
+=======
+def emulate_gp(samples, response, X_new, kernel=pm.gp.cov.Exponential, stepwise=False):
+>>>>>>> Stashed changes
 
     """
     Perform Gaussian Process emulation
@@ -93,11 +102,21 @@ def emulate_gp(
     n = X.shape[1]
     varnames = samples.columns
 
+<<<<<<< Updated upstream
     if stepwise:
         steplist = stepwise_bic(X, Y, varnames=varnames)
         kern = generate_kernel(steplist, kernel=kernel, varnames=varnames)
     else:
         kern = kernel(input_dim=n, ARD=True)
+=======
+    with pm.Model() as model:
+        ls = pm.HalfCauchy("ls", shape=n, beta=25)
+        if stepwise:
+            steplist = stepwise_bic(X, Y, varnames=varnames)
+            kern = generate_kernel(steplist, kernel=kernel, varnames=varnames)
+        else:
+            kern = kernel(input_dim=n, ls=ls)
+>>>>>>> Stashed changes
 
     m = gp.models.GPRegression(X, Y, kern, **regressor_options)
     f = m.optimize(messages=True, **optimizer_options)
@@ -164,7 +183,7 @@ def emulate_sklearn(samples, response, X_new, method="lasso", alphas=np.linspace
         return p
 
 
-def gp_loo_mp(loo_idx, samples, response, kernel, stepwise, regressor_options={}):
+def gp_loo_mp(loo_idx, samples, response, kernel, stepwise):
 
     """
     Perform Leave-One-Out validation
@@ -198,24 +217,20 @@ def gp_loo_mp(loo_idx, samples, response, kernel, stepwise, regressor_options={}
     """
     X_p = samples.loc[loo_idx].values.reshape(1, -1)
     Y_p = response.loc[loo_idx].values
-    try:
-        p, status = emulate_gp(
-            samples.drop(loo_idx),
-            response.drop(loo_idx),
-            X_p,
-            kernel=kernel,
-            stepwise=stepwise,
-            optimizer_options={"max_iters": 4000},
-            regressor_options=regressor_options,
-        )
-    except:
-        status = "Failed"
 
-    if status == "Converged":
+    p, converged = emulate_gp(
+        samples.drop(loo_idx),
+        response.drop(loo_idx),
+        X_p,
+        kernel=kernel,
+        stepwise=stepwise,
+    )
+
+    if converged:
         return np.squeeze(Y_p), np.squeeze(p[0]), np.squeeze(p[1]), np.squeeze((p[0] - Y_p) ** 2 / p[1]), loo_idx
 
 
-def gp_response_mp(response_file, samples_file, X_p, kernel, stepwise, regressor_options={}):
+def gp_response_mp(response_file, samples_file, X_p, kernel, stepwise):
 
     """
     Perform emulation
@@ -250,18 +265,15 @@ def gp_response_mp(response_file, samples_file, X_p, kernel, stepwise, regressor
 
     samples, response = prepare_data(samples_file, response_file)
 
-    try:
-        p, status = emulate_gp(
-            samples,
-            response,
-            X_p,
-            kernel=kernel,
-            stepwise=stepwise,
-            optimizer_options={"max_iters": 4000},
-            regressor_options=regressor_options,
-        )
-    except:
-        status = "Failed"
+    p, converged = emulate_gp(
+        samples,
+        response,
+        X_p,
+        kernel=kernel,
+        stepwise=stepwise,
+        optimizer_options={"max_iters": 4000},
+        regressor_options=regressor_options,
+    )
 
-    if status == "Converged":
+    if converged:
         return np.squeeze(p[0]), np.squeeze(p[1]), response_file
