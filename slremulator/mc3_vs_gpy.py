@@ -20,7 +20,7 @@
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import GPy as gpy
-import pymc3 as pm
+import pymc4 as pm
 from math import sqrt
 import numpy as np
 import os
@@ -121,31 +121,46 @@ if __name__ == "__main__":
     # PyMC3
     print("\n\nTesting PyMC3")
 
-    with pm.Model() as model:
-        ls = pm.Normal("ls", 100, 75, shape=n)
-        nu = pm.Normal("nu", 50, 25)
-        mc3_cov = pm.gp.cov.Exponential
-        mc3_kern = nu * mc3_cov(input_dim=n, ls=ls)
+    #    with pm.Model() as model:
+    # ls = pm.Normal("ls", 100, 75, shape=n)
+    # nu = pm.Normal("nu", 25, 25)
+    ls = np.array(
+        [
+            625.40506039,
+            6003.40068124,
+            3542.44105292,
+            16493.31539891,
+            836.95399365,
+            18090.51219435,
+            20473.10283739,
+            12422.90008949,
+            9934.7041307,
+            260.81928847,
+            7041.01799588,
+        ]
+    )
+    mc3_cov = pm.gp.cov.Exponential
+    mc3_kern = mc3_cov(input_dim=n, ls=ls.reshape(1, -1).squeeze())
 
-        gp = pm.gp.Marginal(cov_func=mc3_kern)
-        y_ = gp.marginal_likelihood("y", X=X, y=Y.squeeze(), noise=0)
+    gp = pm.gp.Marginal(cov_func=mc3_kern)
+    y_ = gp.marginal_likelihood("y", X=X, y=Y.squeeze(), noise=0)
 
-        mp = pm.find_MAP(return_raw=True)
-        f_pred = gp.conditional("f_pred", X_new)
-        mu, var = gp.predict(X_new.squeeze(), point=mp, diag=True)
+    mp = pm.find_MAP(return_raw=True)
+    f_pred = gp.conditional("f_pred", X_new)
+    mu, var = gp.predict(X_new.squeeze(), point=mp, diag=True)
 
-        if mp[1]["success"]:
-            df = pd.DataFrame(
-                data=np.hstack(
-                    [
-                        mu.reshape(-1, 1),
-                        var.reshape(-1, 1),
-                    ]
-                ),
-                columns=["Y_mean", "Y_var"],
-            )
-            outfile = f"test_mc3.csv"
-            df.to_csv(outfile, index_label="id")
+    if mp[1]["success"]:
+        df = pd.DataFrame(
+            data=np.hstack(
+                [
+                    mu.reshape(-1, 1),
+                    var.reshape(-1, 1),
+                ]
+            ),
+            columns=["Y_mean", "Y_var"],
+        )
+        outfile = f"test_mc3.csv"
+        df.to_csv(outfile, index_label="id")
 
     print(mu)
 
@@ -168,4 +183,4 @@ if __name__ == "__main__":
         color="k",
         label='"True"',
     )
-    fig.savefig("gpy_vs_pymc3.pdf")
+    fig.savefig("mc3_vs_gpy.pdf")

@@ -57,12 +57,7 @@ def generate_kernel(varlist, kernel, varnames):
     interactions = [x.split("*") for x in varlist if "*" in x]
     nfirst = len(first_order)
 
-<<<<<<< Updated upstream
     kern = kernel(input_dim=nfirst, active_dims=first_order, ARD=True)
-=======
-    ls = 25
-    kern = kernel(input_dim=nfirst, active_dims=first_order, ls=np.ones(nfirst) * ls)
->>>>>>> Stashed changes
 
     mult = []
     active_intx = []
@@ -78,13 +73,9 @@ def generate_kernel(varlist, kernel, varnames):
     return kern
 
 
-<<<<<<< Updated upstream
 def emulate_gp(
     samples, response, X_new, kernel=gp.kern.Exponential, stepwise=False, optimizer_options={}, regressor_options={}
 ):
-=======
-def emulate_gp(samples, response, X_new, kernel=pm.gp.cov.Exponential, stepwise=False):
->>>>>>> Stashed changes
 
     """
     Perform Gaussian Process emulation
@@ -102,21 +93,11 @@ def emulate_gp(samples, response, X_new, kernel=pm.gp.cov.Exponential, stepwise=
     n = X.shape[1]
     varnames = samples.columns
 
-<<<<<<< Updated upstream
     if stepwise:
         steplist = stepwise_bic(X, Y, varnames=varnames)
         kern = generate_kernel(steplist, kernel=kernel, varnames=varnames)
     else:
         kern = kernel(input_dim=n, ARD=True)
-=======
-    with pm.Model() as model:
-        ls = pm.HalfCauchy("ls", shape=n, beta=25)
-        if stepwise:
-            steplist = stepwise_bic(X, Y, varnames=varnames)
-            kern = generate_kernel(steplist, kernel=kernel, varnames=varnames)
-        else:
-            kern = kernel(input_dim=n, ls=ls)
->>>>>>> Stashed changes
 
     m = gp.models.GPRegression(X, Y, kern, **regressor_options)
     f = m.optimize(messages=True, **optimizer_options)
