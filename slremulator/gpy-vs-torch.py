@@ -30,6 +30,9 @@ import pylab as plt
 import seaborn as sns
 
 from pismemulator.utils import prepare_data
+from pismemulator.utils import kl_divergence
+from pismemulator.utils import rmsd
+
 
 default_output_directory = "emulator_results"
 
@@ -95,216 +98,285 @@ if __name__ == "__main__":
     X_new = X_true
     Y_new = Y_true
 
-    # GPy
-    print("\n\nTesting GPy")
+    X_n_std = (X - X.mean(axis=0)) / X.std()
+    Y_n_std = (Y - Y.mean(axis=0)) / Y.std()
+    X_n_std_new = (X_new - X_new.mean(axis=0)) / X_new.std()
+    Y_n_std_new = (Y_new - Y_new.mean(axis=0)) / Y_new.std()
 
-    gp_cov = gpy.kern.Exponential
-    gp_kern = gp_cov(input_dim=n, ARD=True)
-    m = gpy.models.GPRegression(X, Y, gp_kern, normalizer=True)
-    f = m.optimize(messages=True, max_iters=4000)
+    X_n = X - X.mean(axis=0)
+    Y_n = Y - Y.mean(axis=0)
+    X_n_new = X_new - X_new.mean(axis=0)
+    Y_n_new = Y_new - Y_new.mean(axis=0)
 
-    p = m.predict(X_new)
+    covs_name = ["exp", "mat52", "mat32"]
+    covs_gpy = [gpy.kern.Exponential, gpy.kern.Matern52, gpy.kern.Matern32]
+    covs_torch = [
+        gpytorch.kernels.RBFKernel(ard_num_dims=n),
+        gpytorch.kernels.MaternKernel(nu=2.5, ard_num_dims=n),
+        gpytorch.kernels.MaternKernel(nu=1.5, ard_num_dims=n),
+    ]
+    # We will use the simplest form of GP model, exact inference
+    class ExactGPModel(gpytorch.models.ExactGP):
+        def __init__(self, train_x, train_y, likelihood, cov):
+            super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
+            self.mean_module = gpytorch.means.ConstantMean()
+            self.covar_module = gpytorch.kernels.ScaleKernel(cov)
 
-    if f.status == "Converged":
-        df = pd.DataFrame(
-            data=np.hstack(
-                [
-                    p[0].reshape(-1, 1),
-                    p[1].reshape(-1, 1),
-                ]
-            ),
-            columns=["Y_mean", "Y_var"],
+        def forward(self, x):
+            mean_x = self.mean_module(x)
+            covar_x = self.covar_module(x)
+            return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+    for cov_name, cov_gpy, cov_torch in zip(covs_name, covs_gpy, covs_torch):
+
+        # GPy
+        print("\n\nTesting GPy")
+
+        gp_kern = cov_gpy(input_dim=n, ARD=True)
+
+        m = gpy.models.GPRegression(X, Y, gp_kern, normalizer=True)
+        f = m.optimize(messages=True, max_iters=4000)
+        p_gpy = m.predict(X_new)
+
+        m = gpy.models.GPRegression(X_n, Y_n, gp_kern, normalizer=False)
+        f = m.optimize(messages=True, max_iters=4000)
+        p_gpy_n = m.predict(X_n_new)
+
+        m = gpy.models.GPRegression(X_n_std, Y_n_std, gp_kern, normalizer=False)
+        f = m.optimize(messages=True, max_iters=4000)
+        p_gpy_n_std = m.predict(X_n_std_new)
+
+        print("\n\nTesting GPyTorch")
+
+        X_train = torch.tensor(X).to(torch.float)
+        y_train = torch.tensor(np.squeeze(Y)).to(torch.float)
+        X_test = torch.tensor(X_new).to(torch.float)
+        y_test = torch.tensor(np.squeeze(Y_new)).to(torch.float)
+
+        # initialize likelihood and model
+        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        model = ExactGPModel(X_train, y_train, likelihood, cov_torch)
+
+        # Find optimal model hyperparameters
+        model.train()
+        likelihood.train()
+
+        # Use the adam optimizer
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
+
+        # "Loss" for GPs - the marginal log likelihood
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+
+        for i in range(2000):
+            # Zero gradients from previous iteration
+            optimizer.zero_grad()
+            # Output from model
+            output = model(X_train)
+            # Calc loss and backprop gradients
+            loss = -mll(output, y_train)
+            loss.backward()
+            if i % 20 == 0:
+                print(i, loss.item(), model.covar_module.base_kernel.lengthscale[0], model.likelihood.noise.item())
+            optimizer.step()
+
+        # Plot posterior distributions (with test data on x-axis)
+
+        # Get into evaluation (predictive posterior) mode
+        model.eval()
+        likelihood.eval()
+        with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
+            y_pred = likelihood(model(X_test))
+
+        idx = np.argsort(y_test.numpy())
+
+        with torch.no_grad():
+            # Initialize plot
+            f, ax = plt.subplots(1, 1, figsize=(12, 12))
+            lower, upper = y_pred.confidence_region()
+            ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
+            ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
+
+        mu = y_pred.mean.numpy()
+
+        print("\n\nTesting GPyTorch normalized std")
+
+        X_train = torch.tensor(X_n).to(torch.float)
+        y_train = torch.tensor(np.squeeze(Y_n)).to(torch.float)
+        X_test = torch.tensor(X_n_new).to(torch.float)
+        y_test = torch.tensor(np.squeeze(Y_n_new)).to(torch.float)
+
+        # initialize likelihood and model
+        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        model = ExactGPModel(X_train, y_train, likelihood, cov_torch)
+
+        # Find optimal model hyperparameters
+        model.train()
+        likelihood.train()
+
+        # Use the adam optimizer
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
+
+        # "Loss" for GPs - the marginal log likelihood
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+
+        for i in range(1000):
+            # Zero gradients from previous iteration
+            optimizer.zero_grad()
+            # Output from model
+            output = model(X_train)
+            # Calc loss and backprop gradients
+            loss = -mll(output, y_train)
+            loss.backward()
+            if i % 20 == 0:
+                print(i, loss.item(), model.covar_module.base_kernel.lengthscale[0], model.likelihood.noise.item())
+            optimizer.step()
+
+        # Plot posterior distributions (with test data on x-axis)
+
+        # Get into evaluation (predictive posterior) mode
+        model.eval()
+        likelihood.eval()
+        with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
+            y_pred_norm = likelihood(model(X_test))
+
+        mu_norm = y_pred_norm.mean.numpy()
+
+        print("\n\nTesting GPyTorch normalized std")
+
+        X_train = torch.tensor(X_n_std).to(torch.float)
+        y_train = torch.tensor(np.squeeze(Y_n_std)).to(torch.float)
+        X_test = torch.tensor(X_n_std_new).to(torch.float)
+        y_test = torch.tensor(np.squeeze(Y_n_std_new)).to(torch.float)
+
+        # initialize likelihood and model
+        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        model = ExactGPModel(X_train, y_train, likelihood, cov_torch)
+
+        # Find optimal model hyperparameters
+        model.train()
+        likelihood.train()
+
+        # Use the adam optimizer
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
+
+        # "Loss" for GPs - the marginal log likelihood
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+
+        for i in range(1000):
+            # Zero gradients from previous iteration
+            optimizer.zero_grad()
+            # Output from model
+            output = model(X_train)
+            # Calc loss and backprop gradients
+            loss = -mll(output, y_train)
+            loss.backward()
+            if i % 20 == 0:
+                print(i, loss.item(), model.covar_module.base_kernel.lengthscale[0], model.likelihood.noise.item())
+            optimizer.step()
+
+        # Get into evaluation (predictive posterior) mode
+        model.eval()
+        likelihood.eval()
+        with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
+            y_pred_norm_std = likelihood(model(X_test))
+
+        mu_norm_std = y_pred_norm_std.mean.numpy()
+
+        bins = np.arange(np.floor(Y_true.min()), np.ceil(Y_true.max()), 1.0)
+
+        p_mean_gpy = p_gpy[0]
+        p_mean_gpy_norm = p_gpy_n[0] + Y_new.mean(axis=0)
+        p_mean_gpy_norm_std = p_gpy_n_std[0] * Y_new.std(axis=0) + Y_new.mean(axis=0)
+
+        p_mean_torch = mu
+        p_mean_torch_norm = mu_norm + Y_new.mean(axis=0)
+        p_mean_torch_norm_std = mu_norm_std * Y_new.std(axis=0) + Y_new.mean(axis=0)
+
+        for pred, pred_t in zip(
+            [p_mean_gpy, p_mean_gpy_norm, p_mean_gpy_norm_std, p_mean_torch, p_mean_torch_norm, p_mean_torch_norm_std],
+            ["GPy", "GPy-norm", "GPy-std", "Torch", "Torch-norm", "Torch-std"],
+        ):
+            print(f"{pred_t}: {rmsd(Y_true, pred):.4f}")
+
+        P = np.histogram(Y_true, bins=bins, density=True)[0]
+        Q_gpy = np.histogram(p_mean_gpy, bins=bins, density=True)[0]
+        Q_gpy_norm = np.histogram(p_mean_gpy_norm, bins=bins, density=True)[0]
+        Q_gpy_norm_std = np.histogram(p_mean_gpy_norm_std, bins=bins, density=True)[0]
+        Q_torch = np.histogram(p_mean_torch, bins=bins, density=True)[0]
+        Q_torch_norm = np.histogram(p_mean_torch_norm, bins=bins, density=True)[0]
+        Q_torch_norm_std = np.histogram(p_mean_torch_norm_std, bins=bins, density=True)[0]
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        sns.distplot(
+            Y_true,
+            bins=bins,
+            ax=ax,
+            norm_hist=True,
+            kde_kws={"linewidth": 0.8},
+            color="0",
+            label='"True" $D_{KL}$ RMSD',
         )
-        outfile = f"test_gpy.csv"
-        df.to_csv(outfile, index_label="id")
+        sns.distplot(
+            p_mean_torch,
+            bins=bins,
+            ax=ax,
+            norm_hist=True,
+            kde_kws={"linewidth": 0.6},
+            hist_kws={"histtype": "step"},
+            color="#08519c",
+            label=f"Torch {kl_divergence(P, Q_torch):.3f} {rmsd(Y_true, p_mean_torch):.3f}",
+        )
+        sns.distplot(
+            p_mean_torch_norm,
+            bins=bins,
+            ax=ax,
+            norm_hist=True,
+            kde_kws={"linewidth": 0.6},
+            hist_kws={"histtype": "step"},
+            color="#3182bd",
+            label=f"Torch-norm {kl_divergence(P, Q_torch_norm):.3f} {rmsd(Y_true, p_mean_torch_norm):.3f}",
+        )
+        sns.distplot(
+            p_mean_torch_norm_std,
+            bins=bins,
+            ax=ax,
+            norm_hist=True,
+            kde_kws={"linewidth": 0.6},
+            hist_kws={"histtype": "step"},
+            color="#6baed6",
+            label=f"Torch-norm-std {kl_divergence(P, Q_torch_norm_std):.3f} {rmsd(Y_true, p_mean_torch_norm_std):.3f}",
+        )
+        sns.distplot(
+            p_mean_gpy,
+            bins=bins,
+            ax=ax,
+            norm_hist=True,
+            kde_kws={"linewidth": 0.6},
+            hist_kws={"histtype": "step"},
+            color="#54278f",
+            label=f"GPy {kl_divergence(P, Q_gpy):.3f} {rmsd(Y_true, p_mean_gpy):.3f}",
+        )
+        sns.distplot(
+            p_mean_gpy_norm,
+            bins=bins,
+            color="#756bb1",
+            kde_kws={"linewidth": 0.6},
+            hist_kws={"histtype": "step"},
+            ax=ax,
+            norm_hist=True,
+            label=f"GPy-norm {kl_divergence(P, Q_gpy_norm):.3f} {rmsd(Y_true, p_mean_gpy_norm):.3f}",
+        )
+        sns.distplot(
+            p_mean_gpy_norm_std,
+            bins=bins,
+            color="#9e9ac8",
+            kde_kws={"linewidth": 0.6},
+            hist_kws={"histtype": "step"},
+            ax=ax,
+            norm_hist=True,
+            label=f"GPy-norm-std {kl_divergence(P, Q_gpy_norm_std):.3f} {rmsd(Y_true, p_mean_gpy_norm_std):.3f}",
+        )
 
-    print(p[0])
-
-    print("\n\nTesting GPyTorch")
-    training_iter = 300
-    X_train = torch.tensor(X).to(torch.float)
-    y_train = torch.tensor(np.squeeze(Y)).to(torch.float)
-    X_test = torch.tensor(X_new).to(torch.float)
-    y_test = torch.tensor(np.squeeze(Y_new)).to(torch.float)
-
-    # We will use the simplest form of GP model, exact inference
-    class ExactGPModel(gpytorch.models.ExactGP):
-        def __init__(self, train_x, train_y, likelihood):
-            super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
-            self.mean_module = gpytorch.means.ConstantMean()
-            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=n))
-
-        def forward(self, x):
-            mean_x = self.mean_module(x)
-            covar_x = self.covar_module(x)
-            return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
-
-    # initialize likelihood and model
-    likelihood = gpytorch.likelihoods.GaussianLikelihood()
-    model = ExactGPModel(X_train, y_train, likelihood)
-
-    # Plot test set predictions prior to training
-
-    # Get into evaluation (predictive posterior) mode
-    model.eval()
-    likelihood.eval()
-    with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
-        y_pred = likelihood(model(X_test))
-
-    idx = np.argsort(y_test.numpy())
-
-    with torch.no_grad():
-        # Initialize plot
-        f, ax = plt.subplots(1, 1, figsize=(12, 12))
-        lower, upper = y_pred.confidence_region()
-        ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
-        ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
-
-    # Find optimal model hyperparameters
-    model.train()
-    likelihood.train()
-
-    # Use the adam optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
-
-    # "Loss" for GPs - the marginal log likelihood
-    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
-
-    for i in range(1000):
-        # Zero gradients from previous iteration
-        optimizer.zero_grad()
-        # Output from model
-        output = model(X_train)
-        # Calc loss and backprop gradients
-        loss = -mll(output, y_train)
-        loss.backward()
-        if i % 20 == 0:
-            print(i, loss.item(), model.covar_module.base_kernel.lengthscale[0], model.likelihood.noise.item())
-        optimizer.step()
-
-    # Plot posterior distributions (with test data on x-axis)
-
-    # Get into evaluation (predictive posterior) mode
-    model.eval()
-    likelihood.eval()
-    with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
-        y_pred = likelihood(model(X_test))
-
-    idx = np.argsort(y_test.numpy())
-
-    with torch.no_grad():
-        # Initialize plot
-        f, ax = plt.subplots(1, 1, figsize=(12, 12))
-        lower, upper = y_pred.confidence_region()
-        ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
-        ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
-
-    mu = y_pred.mean.numpy()
-
-    print("\n\nTesting GPyTorch normalized ")
-
-    X_n = (X - X.mean(axis=0)) / X.std()
-    Y_n = (Y - Y.mean(axis=0)) / Y.std()
-    X_n_new = (X_new - X_new.mean(axis=0)) / X_new.std()
-    Y_n_new = (Y_new - Y_new.mean(axis=0)) / Y_new.std()
-
-    X_train = torch.tensor(X_n).to(torch.float)
-    y_train = torch.tensor(np.squeeze(Y_n)).to(torch.float)
-    X_test = torch.tensor(X_n_new).to(torch.float)
-    y_test = torch.tensor(np.squeeze(Y_n_new)).to(torch.float)
-
-    # We will use the simplest form of GP model, exact inference
-    class ExactGPModel(gpytorch.models.ExactGP):
-        def __init__(self, train_x, train_y, likelihood):
-            super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
-            self.mean_module = gpytorch.means.ConstantMean()
-            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=n))
-
-        def forward(self, x):
-            mean_x = self.mean_module(x)
-            covar_x = self.covar_module(x)
-            return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
-
-    # initialize likelihood and model
-    likelihood = gpytorch.likelihoods.GaussianLikelihood()
-    model = ExactGPModel(X_train, y_train, likelihood)
-
-    # Plot test set predictions prior to training
-
-    # Get into evaluation (predictive posterior) mode
-    model.eval()
-    likelihood.eval()
-    with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
-        y_pred = likelihood(model(X_test))
-
-    idx = np.argsort(y_test.numpy())
-
-    with torch.no_grad():
-        # Initialize plot
-        f, ax = plt.subplots(1, 1, figsize=(12, 12))
-        lower, upper = y_pred.confidence_region()
-        ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
-        ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
-
-    # Find optimal model hyperparameters
-    model.train()
-    likelihood.train()
-
-    # Use the adam optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
-
-    # "Loss" for GPs - the marginal log likelihood
-    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
-
-    for i in range(1000):
-        # Zero gradients from previous iteration
-        optimizer.zero_grad()
-        # Output from model
-        output = model(X_train)
-        # Calc loss and backprop gradients
-        loss = -mll(output, y_train)
-        loss.backward()
-        if i % 20 == 0:
-            print(i, loss.item(), model.covar_module.base_kernel.lengthscale[0], model.likelihood.noise.item())
-        optimizer.step()
-
-    # Plot posterior distributions (with test data on x-axis)
-
-    # Get into evaluation (predictive posterior) mode
-    model.eval()
-    likelihood.eval()
-    with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
-        y_pred = likelihood(model(X_test))
-
-    idx = np.argsort(y_test.numpy())
-
-    with torch.no_grad():
-        # Initialize plot
-        f, ax = plt.subplots(1, 1, figsize=(12, 12))
-        lower, upper = y_pred.confidence_region()
-        ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
-        ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
-
-    mu_norm = y_pred.mean.numpy() * Y_new.std(axis=0) + Y_new.mean(axis=0)
-
-    bins = np.arange(0, 60, 1)
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    sns.distplot(mu, ax=ax, label="GPyTorch")
-    sns.distplot(mu_norm, ax=ax, label="GPyTorch-norm")
-    sns.distplot(p[0], ax=ax, label="GPy")
-
-    sns.distplot(
-        Y_true,
-        bins=bins,
-        hist=False,
-        hist_kws={"alpha": 0.3},
-        norm_hist=True,
-        kde=True,
-        kde_kws={"shade": False, "alpha": 1.0, "linewidth": 0.8},
-        ax=ax,
-        color="k",
-        label='"True"',
-    )
-    plt.legend()
-    fig.savefig("gpytorch_vs_gpy.pdf")
+        plt.legend()
+        fig.savefig(f"gpytorch_vs_gpy_{cov_name}.pdf")
