@@ -33,36 +33,14 @@ from pismemulator.utils import prepare_data
 from pismemulator.utils import kl_divergence
 from pismemulator.utils import rmsd
 from pismemulator.utils import stepwise_bic
-from pismemulator.emulate import generate_kernel as generate_gpy_kernel
 
 
-from sklearn.metrics import mean_squared_error, r2_score
-
-
-def r2_f(df):
-
-    return r2_score(df["Y_pred_mean"], df["Y_true"])
-
-
-def s_res(df):
-    """
-    Standardized residual
-    """
-
-    df["sres"] = (df["Y_pred_mean"] - df["Y_true"]) / df["Y_pred_var"]
-    return df["sres"]
-
-
-def rmsd_f(df):
-
-    return rmsd(df["Y_pred_mean"], df["Y_true"])
-
-
-def generate_torch_kernel(varlist, kernel, varnames):
+def generate_kernel(varlist, kernel, varnames):
     """
     Generate a kernel based on a list of model terms
 
-    Same as GPy but for GPyTorch
+    Currently only supports GPy but could be easily extended
+    to gpflow.
 
     :param varlist: list of strings containing model terms.
     :param kernel: GPy.kern instance
@@ -162,19 +140,23 @@ if __name__ == "__main__":
     X_true = s_true.values
     Y_true = r_true.values
 
-    # The training data set is the 500 member ensemble from AS2019
     X = samples.values
     Y = response.values
-    m_train, n_train = X.shape
+    n = X.shape[1]
 
-    # The test data set is the 5200 member ensemble
     varnames = samples.columns
     X_new = X_true
     Y_new = Y_true
-    m_test, n_test = X_true.shape
 
-    # Perfom model selection with BIC
-    steplist = stepwise_bic(X, Y, varnames=varnames)
+    X_n_std = (X - X.mean(axis=0)) / X.std()
+    Y_n_std = (Y - Y.mean(axis=0)) / Y.std()
+    X_n_std_new = (X_new - X_new.mean(axis=0)) / X_new.std()
+    Y_n_std_new = (Y_new - Y_new.mean(axis=0)) / Y_new.std()
+
+    X_n = X - X.mean(axis=0)
+    Y_n = Y - Y.mean(axis=0)
+    X_n_new = X_new - X_new.mean(axis=0)
+    Y_n_new = Y_new - Y_new.mean(axis=0)
 
     # We will use the simplest form of GP model, exact inference
     class ExactGPModel(gpytorch.models.ExactGP):
@@ -188,36 +170,21 @@ if __name__ == "__main__":
             covar_x = self.covar_module(x)
             return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
+    print("\n\nTesting GPyTorch")
+
     X_train = torch.tensor(X).to(torch.float)
     y_train = torch.tensor(np.squeeze(Y)).to(torch.float)
     X_test = torch.tensor(X_new).to(torch.float)
     y_test = torch.tensor(np.squeeze(Y_new)).to(torch.float)
 
-    # GPy
-    print("\n\nTesting GPy")
-
-    gpy_kern = gpy.kern.RBF
-
-    # Without BIC model selection
-    m = gpy.models.GPRegression(X, Y, gpy_kern(input_dim=n_train, ARD=True), normalizer=True)
-    f = m.optimize(messages=True, max_iters=4000)
-    p_gpy = m.predict(X_new)
-    gpy_mean, gpy_var = p_gpy
-
-    # With BIC model selection
-    gpy_kern_bic = generate_gpy_kernel(steplist, kernel=gpy_kern, varnames=varnames)
-    m = gpy.models.GPRegression(X, Y, gpy_kern_bic, normalizer=True)
-    f = m.optimize(messages=True, max_iters=4000)
-    p_gpy_bic = m.predict(X_new)
-    gpy_mean_bic, gpy_var_bic = p_gpy_bic
-
-    print("\n\nTesting GPyTorch")
-
-    torch_kern = gpytorch.kernels.RBFKernel
+    # initialize likelihood and model
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
-    # Without BIC model selection
-    model = ExactGPModel(X_train, y_train, likelihood, torch_kern(ard_num_dims=n_train))
+    cov = gpytorch.kernels.RBFKernel
+    steplist = stepwise_bic(X, Y, varnames=varnames)
+    cov_func = generate_kernel(steplist, kernel=cov, varnames=varnames)
+
+    model = ExactGPModel(X_train, y_train, likelihood, cov())
 
     # Find optimal model hyperparameters
     model.train()
@@ -238,21 +205,30 @@ if __name__ == "__main__":
         loss = -mll(output, y_train)
         loss.backward()
         if i % 20 == 0:
-            print(i, loss.item(), model.covar_module.base_kernel.lengthscale, model.likelihood.noise.item())
+            print(i, loss.item(), model.likelihood.noise.item())
         optimizer.step()
+
+    # Plot posterior distributions (with test data on x-axis)
 
     # Get into evaluation (predictive posterior) mode
     model.eval()
     likelihood.eval()
     with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
         y_pred = likelihood(model(X_test))
-        torch_mean = y_pred.mean.numpy()
-        torch_var = y_pred.variance.numpy()
 
-    # With BIC model selection
-    torch_kern_bic = generate_torch_kernel(steplist, kernel=torch_kern, varnames=varnames)
+    idx = np.argsort(y_test.numpy())
 
-    model = ExactGPModel(X_train, y_train, likelihood, torch_kern_bic)
+    with torch.no_grad():
+        # Initialize plot
+        f, ax = plt.subplots(1, 1, figsize=(12, 12))
+        lower, upper = y_pred.confidence_region()
+        ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
+        ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
+
+    mu = y_pred.mean.numpy()
+    var = y_pred.variance.numpy()
+
+    model = ExactGPModel(X_train, y_train, likelihood, cov_func)
 
     # Find optimal model hyperparameters
     model.train()
@@ -273,46 +249,37 @@ if __name__ == "__main__":
         loss = -mll(output, y_train)
         loss.backward()
         if i % 20 == 0:
-            print(i, loss.item(), model.covar_module.base_kernel.lengthscale, model.likelihood.noise.item())
+            print(i, loss.item(), model.likelihood.noise.item())
         optimizer.step()
+
+    # Plot posterior distributions (with test data on x-axis)
 
     # Get into evaluation (predictive posterior) mode
     model.eval()
     likelihood.eval()
     with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
         y_pred = likelihood(model(X_test))
-        torch_mean_bic = y_pred.mean.numpy()
-        torch_var_bic = y_pred.variance.numpy()
 
-    bins = np.arange(np.floor(Y_true.min()), np.ceil(Y_true.max()), 1.0)
+    idx = np.argsort(y_test.numpy())
 
-    dfs = []
+    with torch.no_grad():
+        # Initialize plot
+        f, ax = plt.subplots(1, 1, figsize=(12, 12))
+        lower, upper = y_pred.confidence_region()
+        ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
+        ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
+
+    mu_step = y_pred.mean.numpy()
+    var_step = y_pred.variance.numpy()
+
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    for name, mean, var in zip(
-        ["GPy", "GPy-BIC", "Torch", "Torch-BIC"],
-        [gpy_mean, gpy_mean_bic, torch_mean, torch_mean_bic],
-        [gpy_var, gpy_var_bic, torch_var, torch_var_bic],
-    ):
-        dfs.append(
-            pd.DataFrame(
-                data=np.hstack(
-                    [
-                        Y_true.reshape(-1, 1),
-                        mean.reshape(-1, 1),
-                        var.reshape(-1, 1),
-                        np.repeat(name, m_test).reshape(-1, 1),
-                    ]
-                ),
-                columns=["Y_true", "Y_pred_mean", "Y_pred_var", "Model"],
-            )
-        )
-        sns.distplot(mean, bins=bins, hist=False, kde=True, ax=ax, label=name)
-    sns.distplot(Y_true, bins=bins, color="k", ax=ax, label="True")
+    # ax.errorbar(mu, Y_true, yerr=var, alpha=0.25, label="default")
+    # ax.errorbar(mu_step, Y_true, yerr=var_step, alpha=0.25, label="BIC")
+    ax.plot(mu, Y_true, ".", label="default")
+    ax.plot(mu_step, Y_true, ".", label="BIC")
+    ax.plot([-20, 60], [-20, 60], color="k")
+    ax.set_xlim(0, 50)
+    ax.set_ylim(0, 50)
+    ax.set_aspect("equal", "box")
     plt.legend()
-    fig.savefig("gpy_vs_torch_rbf.pdf")
-    df = pd.concat(dfs)
-    df = df.astype({"Y_true": float, "Y_pred_mean": float, "Y_pred_var": float, "Model": str})
-
-    print("RMSE")
-    print(df.groupby(by=["Model"]).apply(rmsd_f))

@@ -102,9 +102,16 @@ if __name__ == "__main__":
         p = emulate_sklearn(samples, response, X_true, method=method)
         df = pd.DataFrame(
             data=np.hstack(
-                [p.reshape(-1, 1), np.repeat(method, n).reshape(-1, 1), np.repeat(n_lhs_samples, n).reshape(-1, 1)]
+                [
+                    Y_true.reshape(-1, 1),
+                    p.reshape(-1, 1),
+                    np.repeat(method, n).reshape(-1, 1),
+                    np.repeat(n_lhs_samples, n).reshape(-1, 1),
+                    np.repeat(rcp, n).reshape(-1, 1),
+                    np.repeat(year, n).reshape(-1, 1),
+                ]
             ),
-            columns=["Y_mean", "method", "n_lhs"],
+            columns=["Y_true", "Y_mean", "method", "n_lhs", "rcp", "year"],
         )
         outfile = f"{odir}/dgmsl_rcp_{rcp}_{year}_{method}_lhs_{n_lhs_samples}.csv"
         df.to_csv(outfile, index_label="id")
@@ -126,6 +133,7 @@ if __name__ == "__main__":
                 df = pd.DataFrame(
                     data=np.hstack(
                         [
+                            Y_true.reshape(-1, 1),
                             p[0].reshape(-1, 1),
                             p[1].reshape(-1, 1),
                             np.repeat(m, n).reshape(-1, 1),
@@ -134,7 +142,7 @@ if __name__ == "__main__":
                             np.repeat(year, n).reshape(-1, 1),
                         ]
                     ),
-                    columns=["Y_mean", "Y_var", "method", "n_lhs", "rcp", "year"],
+                    columns=["Y_true", "Y_mean", "Y_var", "method", "n_lhs", "rcp", "year"],
                 )
                 outfile = f"{odir}/dgmsl_rcp_{rcp}_{year}_{m}_lhs_{n_lhs_samples}.csv"
                 df.to_csv(outfile, index_label="id")

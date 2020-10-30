@@ -39,10 +39,24 @@ from pismemulator.utils import prepare_data
 from pismemulator.utils import rmsd
 from pismemulator.utils import set_size
 
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, r2_score
 
 default_les_directory = "emulator_results"
 default_loo_directory = "loo_results"
+
+
+def r2_f(df):
+
+    return r2_score(df["Y_mean"], df["Y_true"])
+
+
+def s_res(df):
+    """
+    Standardized residual
+    """
+
+    df["sres"] = (df["Y_mean"] - df["Y_true"]) / df["Y_var"]
+    return df["sres"]
 
 
 def distance_f(df):
@@ -52,7 +66,7 @@ def distance_f(df):
 
 def rmsd_f(df):
 
-    return rmsd(df["Y_mean"], Y_true)
+    return rmsd(df["Y_mean"], df["Y_true"])
 
 
 def nrmsd_f(df):
@@ -138,6 +152,20 @@ def evaluate_kldiv(df):
 def evaluate_loo_nrmsd(df):
     """
     Evaluate LOO using the normalized RMSD
+    """
+
+    d_df = df.groupby(["method", "n_lhs"]).apply(nrmsd_f)
+    d_df = d_df.to_frame(name="rmsd").reset_index()
+    # Make sure n_lhs is int
+    d_df = d_df.astype({"n_lhs": "int"})
+    print("\nNRMSD validation")
+    print("-----------------------------------")
+    print(d_df.sort_values(["rmsd"]))
+
+
+def evaluate_rmsd(df):
+    """
+    Evaluate RMSD
     """
 
     d_df = df.groupby(["method", "n_lhs"]).apply(nrmsd_f)
@@ -295,7 +323,12 @@ if __name__ == "__main__":
     sns.pointplot(
         x="method",
         y="kldiv",
-        order=["exp", "expquad", "mat32", "mat52",],
+        order=[
+            "exp",
+            "expquad",
+            "mat32",
+            "mat52",
+        ],
         hue="method",
         data=les_stats_df,
         ax=ax,
@@ -693,7 +726,12 @@ if __name__ == "__main__":
                 hist_kws={"alpha": 0.3},
                 norm_hist=True,
                 kde=True,
-                kde_kws={"shade": False, "alpha": 1.0, "linewidth": 0.6, "linestyle": "dashed",},
+                kde_kws={
+                    "shade": False,
+                    "alpha": 1.0,
+                    "linewidth": 0.6,
+                    "linestyle": "dashed",
+                },
                 ax=ax,
                 label=f"{method} ({kldiv:.4f})",
                 color=cmap2[k],
