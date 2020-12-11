@@ -62,9 +62,6 @@ if __name__ == "__main__":
         default="exp",
     )
     parser.add_argument(
-        "--normalizer", dest="normalizer", action="store_true", help=f"Normalize regressor.", default=False,
-    )
-    parser.add_argument(
         "--output_dir",
         dest="odir",
         help=f"Output directory. Default = {default_output_directory}.",
@@ -83,7 +80,7 @@ if __name__ == "__main__":
 
     options = parser.parse_args()
     method = options.method
-    normalizer = options.normalizer
+    normalizer = True
     n_lhs_samples = options.n_lhs_samples
     n_procs = options.n_procs
     odir = options.odir

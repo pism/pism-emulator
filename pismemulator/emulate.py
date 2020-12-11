@@ -164,7 +164,7 @@ def emulate_sklearn(samples, response, X_new, method="lasso", alphas=np.linspace
         return p
 
 
-def gp_loo_mp(loo_idx, samples, response, kernel, stepwise):
+def gp_loo_mp(loo_idx, samples, response, kernel, stepwise, regressor_options={}):
 
     """
     Perform Leave-One-Out validation
@@ -205,6 +205,7 @@ def gp_loo_mp(loo_idx, samples, response, kernel, stepwise):
         X_p,
         kernel=kernel,
         stepwise=stepwise,
+        optimizer_options={"max_iters": 4000},
     )
 
     if converged:
