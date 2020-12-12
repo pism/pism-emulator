@@ -103,33 +103,83 @@ for d, data in domain.items():
 
     as19 = pd.read_csv("../data/validation/aschwanden_et_al_2019_les.gz")
     as19["SLE (cm)"] = -as19["Mass (Gt)"] / 362.5 / 10
-    as19 = as19.astype({"RCP": int})
+    as19 = as19.astype({"RCP": int, "Experiment": int})
 
-    df = calculate_trend(as19, "Year", "Mass", "Gt")
+    samples_file = "../data/samples/lhs_samples_500.csv"
+    samples = pd.read_csv(samples_file).rename(columns={"id": "Experiment"})
 
-    bins = np.arange(np.floor(df["Mass Trend (Gt/yr)"].min()), np.ceil(df["Mass Trend (Gt/yr)"].max()), 10)
-    sns.histplot(data=df, x="Mass Trend (Gt/yr)", bins=bins, color="0.5")
-    ax = plt.gca()
+    as19 = pd.merge(as19, samples, on="Experiment")
+    params = samples.columns[1::]
 
-    # Plot dashed line for GRACE
-    # ax.fill_between(
-    #     [grace_trend - grace_trend_stderr, grace_trend + grace_trend_stderr],
-    #     [ymin, ymin],
-    #     [ymax, ymax],
-    #     color=grace_sigma_color,
-    # )
-    ax.axvline(grace_trend, linestyle="solid", color=grace_signal_color, linewidth=1)
-    ax.axvline(grace_trend - grace_trend_stderr, linestyle="dotted", color=grace_signal_color, linewidth=1)
-    ax.axvline(grace_trend + grace_trend_stderr, linestyle="dotted", color=grace_signal_color, linewidth=1)
-
-    fig = plt.gcf()
-    fig.savefig("trend_histogram.pdf")
-
+    trend = calculate_trend(as19, "Year", "Mass", "Gt")
     as19_2100 = as19[as19["Year"] == 2100]
     for beta in [1, 2, 3]:
-        df[f"{beta}-sigma"] = np.abs(df["Mass Trend (Gt/yr)"] - grace_trend) < beta * 2 * grace_trend_stderr
+        trend[f"{beta}-sigma"] = np.abs(trend["Mass Trend (Gt/yr)"] - grace_trend) < beta * 2 * grace_trend_stderr
 
-    as19_2100 = pd.merge(as19_2100, df, on=["RCP", "Experiment"])
+    as19_2100 = pd.merge(as19_2100, trend, on=["RCP", "Experiment"])
+
+    rcp_list = ["26", "45", "85"]
+    rcp_col_dict = {"CTRL": "k", 85: "#990002", 45: "#5492CD", 26: "#003466"}
+    rcp_shade_col_dict = {"CTRL": "k", "85": "#F4A582", "45": "#92C5DE", "26": "#4393C3"}
+    rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
+    param_bins_dict = {
+        "GCM": np.arange(0, 5, 1),
+        "FICE": np.arange(4, 13, 0.25),
+        "FSNOW": np.arange(2, 8, 0.25),
+        "PRS": np.arange(5, 8, 1),
+        "RFR": np.arange(0.2, 0.8, 0.1),
+        "OCM": np.arange(-1.5, 1.5, 1),
+        "OCS": np.arange(-1.5, 1.5, 1),
+        "TCT": np.arange(-1.5, 1.5, 1),
+        "VCM": np.arange(0.6, 1.3, 0.1),
+        "PPQ": np.arange(0.2, 0.9, 0.1),
+        "SIAE": np.arange(1, 10, 0.25),
+    }
+
+    fig_k, ax_k = plt.subplots(len(params), 3, sharey="row", figsize=[20, 20])
+    fig_k.subplots_adjust(hspace=0.25, wspace=0.25)
+
+    fig_p, ax_p = plt.subplots(len(params), 3, sharey="row", figsize=[20, 20])
+    fig_p.subplots_adjust(hspace=0.25, wspace=0.25)
+
+    cmap = sns.color_palette("mako_r", n_colors=4)
+
+    for q, rcp in enumerate([26, 45, 85]):
+        for p, param in enumerate(params):
+            sns.histplot(
+                data=as19_2100[as19_2100["RCP"] == rcp],
+                y=param,
+                bins=param_bins_dict[param],
+                stat="density",
+                element="step",
+                fill=False,
+                color=cmap[-1],
+                ax=ax_p[p, q],
+            )
+            sns.kdeplot(
+                data=as19_2100[as19_2100["RCP"] == rcp],
+                y=param,
+                color=cmap[-1],
+                ax=ax_k[p, q],
+            )
+
+    # bins = np.arange(np.floor(trend["Mass Trend (Gt/yr)"].min()), np.ceil(trend["Mass Trend (Gt/yr)"].max()), 10)
+    # sns.histplot(data=trend, x="Mass Trend (Gt/yr)", bins=bins, color="0.5")
+    # ax = plt.gca()
+
+    # # Plot dashed line for GRACE
+    # # ax.fill_between(
+    # #     [grace_trend - grace_trend_stderr, grace_trend + grace_trend_stderr],
+    # #     [ymin, ymin],
+    # #     [ymax, ymax],
+    # #     color=grace_sigma_color,
+    # # )
+    # ax.axvline(grace_trend, linestyle="solid", color=grace_signal_color, linewidth=1)
+    # ax.axvline(grace_trend - grace_trend_stderr, linestyle="dotted", color=grace_signal_color, linewidth=1)
+    # ax.axvline(grace_trend + grace_trend_stderr, linestyle="dotted", color=grace_signal_color, linewidth=1)
+
+    # fig = plt.gcf()
+    # fig.savefig("trend_histogram.pdf")
 
     sle_min = np.floor(as19_2100["SLE (cm)"].min())
     sle_max = np.ceil(as19_2100["SLE (cm)"].max())
@@ -158,6 +208,7 @@ for d, data in domain.items():
         palette=["#003466", "#5492CD", "#990002"],
         ax=ax,
     )
+    k = 0
     for beta, lw in zip([1, 2, 3], [0.25, 0.5, 0.75]):
         as19_2100_calib = as19_2100[as19_2100[f"{beta}-sigma"] == True]
         for rcp in [26, 45, 85]:
@@ -167,14 +218,35 @@ for d, data in domain.items():
             data=as19_2100_calib,
             x="SLE (cm)",
             hue="RCP",
-            palette=["#003466", "#5492CD", "#990002"],
             linewidth=lw,
             linestyle="dashed",
             ax=ax,
         )
+        for q, rcp in enumerate([26, 45, 85]):
+            for p, param in enumerate(params):
+                sns.histplot(
+                    data=as19_2100_calib[as19_2100_calib["RCP"] == rcp],
+                    y=param,
+                    bins=param_bins_dict[param],
+                    stat="density",
+                    element="step",
+                    fill=False,
+                    color=cmap[k],
+                    ax=ax_p[p, q],
+                )
+                sns.kdeplot(
+                    data=as19_2100_calib[as19_2100_calib["RCP"] == rcp],
+                    y=param,
+                    color=cmap[k],
+                    ax=ax_k[p, q],
+                )
+
+        k += 1
     ax.set_xlim(sle_min, sle_max)
     fig.savefig("sle_pdf_2100.pdf")
 
+    fig_p.savefig("marginal_distributions_hist.pdf")
+    fig_k.savefig("marginal_distributions_kde.pdf")
     # ax.text(-340, 2.2, "Observed (GRACE)", rotation=90, fontsize=12)
 
     # rcps = []
