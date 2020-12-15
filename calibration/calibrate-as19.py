@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 
-# Copyright (C) 2019-20 Andy Aschwanden
+# Copyright (C) 2020 Andy Aschwanden
 
-from glob import glob
 import matplotlib.lines as mlines
 from netCDF4 import Dataset as NC
 import numpy as np
@@ -113,8 +112,15 @@ for d, data in domain.items():
 
     trend = calculate_trend(as19, "Year", "Mass", "Gt")
     as19_2100 = as19[as19["Year"] == 2100]
+    trend["interval"] = pd.arrays.IntervalArray.from_arrays(
+        trend["Mass Trend (Gt/yr)"] - trend["Mass Trend Sigma (Gt/yr)"],
+        trend["Mass Trend (Gt/yr)"] + trend["Mass Trend Sigma (Gt/yr)"],
+    )
     for beta in [1, 2, 3]:
-        trend[f"{beta}-sigma"] = np.abs(trend["Mass Trend (Gt/yr)"] - grace_trend) < beta * 2 * grace_trend_stderr
+
+        trend[f"{beta}-sigma"] = trend["interval"].array.overlaps(
+            pd.Interval(grace_trend - beta * grace_trend_stderr, grace_trend + beta * grace_trend_stderr)
+        )
 
     as19_2100 = pd.merge(as19_2100, trend, on=["RCP", "Experiment"])
 
@@ -123,14 +129,14 @@ for d, data in domain.items():
     rcp_shade_col_dict = {"CTRL": "k", "85": "#F4A582", "45": "#92C5DE", "26": "#4393C3"}
     rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
     param_bins_dict = {
-        "GCM": np.arange(0, 5, 1),
+        "GCM": np.arange(-0.5, 4.5, 1),
         "FICE": np.arange(4, 13, 0.25),
         "FSNOW": np.arange(2, 8, 0.25),
         "PRS": np.arange(5, 8, 1),
         "RFR": np.arange(0.2, 0.8, 0.1),
-        "OCM": np.arange(-1.5, 1.5, 1),
-        "OCS": np.arange(-1.5, 1.5, 1),
-        "TCT": np.arange(-1.5, 1.5, 1),
+        "OCM": np.arange(-1.5, 2.5, 1),
+        "OCS": np.arange(-1.5, 2.5, 1),
+        "TCT": np.arange(-1.5, 2.5, 1),
         "VCM": np.arange(0.6, 1.3, 0.1),
         "PPQ": np.arange(0.2, 0.9, 0.1),
         "SIAE": np.arange(1, 10, 0.25),
@@ -142,6 +148,9 @@ for d, data in domain.items():
     fig_p, ax_p = plt.subplots(len(params), 3, sharey="row", figsize=[20, 20])
     fig_p.subplots_adjust(hspace=0.25, wspace=0.25)
 
+    fig_r, ax_r = plt.subplots(len(params), 1, sharey="row", figsize=[6, 20])
+    fig_r.subplots_adjust(hspace=0.25, wspace=0.25)
+
     cmap = sns.color_palette("mako_r", n_colors=4)
 
     for q, rcp in enumerate([26, 45, 85]):
@@ -150,7 +159,7 @@ for d, data in domain.items():
                 data=as19_2100[as19_2100["RCP"] == rcp],
                 y=param,
                 bins=param_bins_dict[param],
-                stat="density",
+                stat="probability",
                 element="step",
                 fill=False,
                 color=cmap[-1],
@@ -161,6 +170,12 @@ for d, data in domain.items():
                 y=param,
                 color=cmap[-1],
                 ax=ax_k[p, q],
+            )
+            sns.kdeplot(
+                data=as19_2100,
+                y=param,
+                color=cmap[-1],
+                ax=ax_r[p],
             )
 
     # bins = np.arange(np.floor(trend["Mass Trend (Gt/yr)"].min()), np.ceil(trend["Mass Trend (Gt/yr)"].max()), 10)
@@ -212,8 +227,9 @@ for d, data in domain.items():
     for beta, lw in zip([1, 2, 3], [0.25, 0.5, 0.75]):
         as19_2100_calib = as19_2100[as19_2100[f"{beta}-sigma"] == True]
         for rcp in [26, 45, 85]:
-            ratio = len(as19_2100_calib[as19_2100_calib["RCP"] == rcp]) / len(as19_2100[as19_2100["RCP"] == rcp]) * 100
-            print(f"RCP {rcp} {beta}-sigma: {ratio:.1f} %")
+            no = len(as19_2100_calib[as19_2100_calib["RCP"] == rcp])
+            ratio = no / len(as19_2100[as19_2100["RCP"] == rcp]) * 100
+            print(f"RCP {rcp} {beta}-sigma: {no} ({ratio:.1f} %)")
         sns.kdeplot(
             data=as19_2100_calib,
             x="SLE (cm)",
@@ -228,7 +244,7 @@ for d, data in domain.items():
                     data=as19_2100_calib[as19_2100_calib["RCP"] == rcp],
                     y=param,
                     bins=param_bins_dict[param],
-                    stat="density",
+                    stat="probability",
                     element="step",
                     fill=False,
                     color=cmap[k],
@@ -240,13 +256,39 @@ for d, data in domain.items():
                     color=cmap[k],
                     ax=ax_k[p, q],
                 )
+                sns.kdeplot(
+                    data=as19_2100_calib,
+                    y=param,
+                    color=cmap[k],
+                    ax=ax_r[p],
+                )
 
         k += 1
     ax.set_xlim(sle_min, sle_max)
     fig.savefig("sle_pdf_2100.pdf")
 
+    l_s = []
+    for m, label in enumerate(["AS19", "3-sigma", "2-sigma", "1-sigma"]):
+        l_ = mlines.Line2D(
+            [],
+            [],
+            color=cmap[::-1][m],
+            linewidth=1.0,
+            linestyle="solid",
+            label=label,
+        )
+        l_s.append(l_)
+
+    legend = ax_r[-1].legend(
+        handles=l_s,
+        loc="upper right",
+    )
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+
     fig_p.savefig("marginal_distributions_hist.pdf")
-    fig_k.savefig("marginal_distributions_kde.pdf")
+    fig_k.savefig("marginal_distributions_kde_rcp.pdf")
+    fig_r.savefig("marginal_distributions_kde.pdf")
     # ax.text(-340, 2.2, "Observed (GRACE)", rotation=90, fontsize=12)
 
     # rcps = []
