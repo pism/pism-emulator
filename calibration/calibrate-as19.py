@@ -17,6 +17,28 @@ import matplotlib.cm as cmx
 import matplotlib.colors as colors
 
 
+def toDecimalYear(date):
+    """
+    Convert date to decimal year
+
+    %In: toDecimalYear(datetime(2020, 10, 10))
+    %Out: 2020.7732240437158
+
+    """
+    
+    from datetime import datetime
+    import time
+
+    year = date.year
+    startOfThisYear = datetime(year=year, month=1, day=1)
+    startOfNextYear = datetime(year=year + 1, month=1, day=1)
+    yearElapsed = (date - startOfThisYear).total_seconds()
+    yearDuration = (startOfNextYear - startOfThisYear).total_seconds()
+    fraction = yearElapsed / yearDuration
+
+    return date.year + fraction
+
+
 def set_size(w, h, ax=None):
     """ w, h: width, height in inches """
 
@@ -32,7 +54,7 @@ def set_size(w, h, ax=None):
 
 
 def trend_f(df, x_var, y_var):
-    m_df = df[(df[x_var] >= trend_start) & (df[x_var] <= trend_end)]
+    m_df = df[(df[x_var] >= calibration_start) & (df[x_var] <= calibration_end)]
     x = m_df[x_var]
     y = m_df[y_var]
     X = sm.add_constant(x)
@@ -50,10 +72,21 @@ def calculate_trend(df, x_var, y_var, y_units):
     x = x_var
     y = f"{y_var} ({y_units})"
     y_var_trend = f"{y_var} Trend ({y_units}/yr)"
-    y_var_sigma = f"{y_var} Trend Sigma ({y_units}/yr)"
+    y_var_sigma = f"{y_var} Trend Error ({y_units}/yr)"
     r_df = df.groupby(by=["RCP", "Experiment"]).apply(trend_f, x, y)
     r_df = r_df.reset_index().rename({0: y_var_trend, 1: y_var_sigma}, axis=1)
 
+    return r_df
+
+
+def calculate_mean(df, x_var, y_var, y_units):
+    m_df = df[(df[x_var] >= calibration_start) & (df[x_var] <= calibration_end)]
+    r_df = m_df.groupby(by=["RCP", "Experiment"]).mean()
+    r_df = (
+        r_df[f"{y_var} ({y_units})"]
+        .reset_index()
+        .rename({f"{y_var} ({y_units})": f"{y_var} Mean ({y_units})"}, axis=1)
+    )
     return r_df
 
 
@@ -71,8 +104,8 @@ simulated_signal_color = "#bdbdbd"
 gt2cmSLE = 1.0 / 362.5 / 10.0
 
 
-trend_start = 2008
-trend_end = 2020
+calibration_start = 2010
+calibration_end = 2020
 
 # Greenland only though this could easily be extended to Antarctica
 domain = {"GIS": "../data/validation/greenland_mass_200204_202008.txt"}
@@ -80,19 +113,20 @@ domain = {"GIS": "../data/validation/greenland_mass_200204_202008.txt"}
 for d, data in domain.items():
     print(f"Analyzing {d}")
 
+    
     # Load the GRACE data
     grace = pd.read_csv(
-        data, header=30, delim_whitespace=True, skipinitialspace=True, names=["Year", "Mass (Gt)", "Sigma (Gt)"]
+        data, header=30, delim_whitespace=True, skipinitialspace=True, names=["Year", "Mass (Gt)", "Error (Gt)"]
     )
     # Normalize GRACE signal to the starting date of the projection
-    grace["Mass (Gt)"] -= np.interp(trend_start, grace["Year"], grace["Mass (Gt)"])
+    grace["Mass (Gt)"] -= np.interp(calibration_start, grace["Year"], grace["Mass (Gt)"])
 
     # Get the GRACE trend
-    grace_time = (grace["Year"] >= trend_start) & (grace["Year"] <= trend_end)
+    grace_time = (grace["Year"] >= calibration_start) & (grace["Year"] <= calibration_end)
     grace_hist_df = grace[grace_time]
     x = grace_hist_df["Year"]
     y = grace_hist_df["Mass (Gt)"]
-    s = grace_hist_df["Sigma (Gt)"]
+    s = grace_hist_df["Error (Gt)"]
     X = sm.add_constant(x)
     ols = sm.OLS(y, X).fit()
     p = ols.params
@@ -100,6 +134,17 @@ for d, data in domain.items():
     grace_trend = p[1]
     grace_trend_stderr = ols.bse[1]
 
+    # Load the Mankoff ice discharge data
+    man_d = pd.read_csv("../data/validation/GIS_D.csv", parse_dates=[0])
+    man_d["Year"] = [toDecimalYear(d) for d in man_d["Date"]]
+    man_d = man_d.astype({"Discharge [Gt yr-1]": float})
+    man_d["Discharge [Gt yr-1]"] = -man_d["Discharge [Gt yr-1]"]
+    man_err = pd.read_csv("../data/validation/GIS_err.csv", parse_dates=[0])
+    man_err["Year"] = [toDecimalYear(d) for d in man_err["Date"]]
+    man_err = man_err.astype({"Discharge Error [Gt yr-1]": float})
+    man = pd.merge(man_d, man_err, on="Year").drop(columns=["Date_x", "Date_y"])
+
+    # Load AS19
     as19 = pd.read_csv("../data/validation/aschwanden_et_al_2019_les.gz")
     as19["SLE (cm)"] = -as19["Mass (Gt)"] / 362.5 / 10
     as19 = as19.astype({"RCP": int, "Experiment": int})
@@ -110,19 +155,26 @@ for d, data in domain.items():
     as19 = pd.merge(as19, samples, on="Experiment")
     params = samples.columns[1::]
 
-    trend = calculate_trend(as19, "Year", "Mass", "Gt")
     as19_2100 = as19[as19["Year"] == 2100]
-    trend["interval"] = pd.arrays.IntervalArray.from_arrays(
-        trend["Mass Trend (Gt/yr)"] - trend["Mass Trend Sigma (Gt/yr)"],
-        trend["Mass Trend (Gt/yr)"] + trend["Mass Trend Sigma (Gt/yr)"],
+
+    metrics = {}
+    mass_trend = calculate_trend(as19, "Year", "Mass", "Gt")
+    mass_trend["interval"] = pd.arrays.IntervalArray.from_arrays(
+        mass_trend["Mass Trend (Gt/yr)"] - mass_trend["Mass Trend Error (Gt/yr)"],
+        mass_trend["Mass Trend (Gt/yr)"] + mass_trend["Mass Trend Error (Gt/yr)"],
     )
+    discharge_mean = calculate_mean(as19, "Year", "D", "Gt/yr")
     for beta in [1, 2, 3]:
 
-        trend[f"{beta}-sigma"] = trend["interval"].array.overlaps(
+        mass_trend[f"Mass Trend {beta}-sigma (Gt/yr)"] = mass_trend["interval"].array.overlaps(
             pd.Interval(grace_trend - beta * grace_trend_stderr, grace_trend + beta * grace_trend_stderr)
         )
+        discharge_mean[f"D Mean {beta}-sigma (Gt/yr)"] = np.abs(discharge_mean["D Mean (Gt/yr)"] + 500) < beta * 50
+        
 
-    as19_2100 = pd.merge(as19_2100, trend, on=["RCP", "Experiment"])
+    as19_2100 = pd.merge(as19_2100, mass_trend, on=["RCP", "Experiment"])
+
+    as19_2100 = pd.merge(as19_2100, discharge_mean, on=["RCP", "Experiment"])
 
     rcp_list = ["26", "45", "85"]
     rcp_col_dict = {"CTRL": "k", 85: "#990002", 45: "#5492CD", 26: "#003466"}
@@ -178,24 +230,6 @@ for d, data in domain.items():
                 ax=ax_r[p],
             )
 
-    # bins = np.arange(np.floor(trend["Mass Trend (Gt/yr)"].min()), np.ceil(trend["Mass Trend (Gt/yr)"].max()), 10)
-    # sns.histplot(data=trend, x="Mass Trend (Gt/yr)", bins=bins, color="0.5")
-    # ax = plt.gca()
-
-    # # Plot dashed line for GRACE
-    # # ax.fill_between(
-    # #     [grace_trend - grace_trend_stderr, grace_trend + grace_trend_stderr],
-    # #     [ymin, ymin],
-    # #     [ymax, ymax],
-    # #     color=grace_sigma_color,
-    # # )
-    # ax.axvline(grace_trend, linestyle="solid", color=grace_signal_color, linewidth=1)
-    # ax.axvline(grace_trend - grace_trend_stderr, linestyle="dotted", color=grace_signal_color, linewidth=1)
-    # ax.axvline(grace_trend + grace_trend_stderr, linestyle="dotted", color=grace_signal_color, linewidth=1)
-
-    # fig = plt.gcf()
-    # fig.savefig("trend_histogram.pdf")
-
     sle_min = np.floor(as19_2100["SLE (cm)"].min())
     sle_max = np.ceil(as19_2100["SLE (cm)"].max())
     bin_width = 1
@@ -212,7 +246,37 @@ for d, data in domain.items():
         stat="probability",
         ax=ax,
     )
-    ax.set_xlim(sle_min, sle_max)
+    fig.savefig("calibrated_histogram_2100.pdf")
+    fig, ax = plt.subplots(1, 3, sharey="row", figsize=[6, 3])
+    fig.subplots_adjust(hspace=0.05, wspace=0.30)
+    for q, rcp in enumerate([26, 45, 85]):
+        df = as19_2100[as19_2100["RCP"] == rcp]
+        sns.kdeplot(data=df, x="SLE (cm)", ax=ax[q], color=cmap[-1])
+        ax[q].set_title(f"RCP {rcp}")
+        for (beta, c) in zip([1, 2, 3], cmap[::-1]):
+            df_calib = df[df[f"Mass Trend {beta}-sigma (Gt/yr)"] == True]
+            sns.kdeplot(data=df_calib, x="SLE (cm)", ax=ax[q], color=c, linewidth=0.75)
+            df_calib = df[df[f"D Mean {beta}-sigma (Gt/yr)"] == True]
+            sns.kdeplot(data=df_calib, x="SLE (cm)", ax=ax[q], color=c, linewidth=0.75, linestyle="dashed")
+    l_s = []
+    for m, label in enumerate(["AS19", "3-sigma", "2-sigma", "1-sigma"]):
+        l_ = mlines.Line2D(
+            [],
+            [],
+            color=cmap[::-1][m],
+            linewidth=1.0,
+            linestyle="solid",
+            label=label,
+        )
+        l_s.append(l_)
+
+    legend = ax[-1].legend(
+        handles=l_s,
+        loc="upper right",
+    )
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+    fig.savefig("sle_pdf_rcps_2100.pdf", bbox_inches="tight")
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -225,7 +289,7 @@ for d, data in domain.items():
     )
     k = 0
     for beta, lw in zip([1, 2, 3], [0.25, 0.5, 0.75]):
-        as19_2100_calib = as19_2100[as19_2100[f"{beta}-sigma"] == True]
+        as19_2100_calib = as19_2100[as19_2100[f"Mass Trend {beta}-sigma (Gt/yr)"] == True]
         for rcp in [26, 45, 85]:
             no = len(as19_2100_calib[as19_2100_calib["RCP"] == rcp])
             ratio = no / len(as19_2100[as19_2100["RCP"] == rcp]) * 100
@@ -291,21 +355,40 @@ for d, data in domain.items():
     fig_r.savefig("marginal_distributions_kde.pdf")
     # ax.text(-340, 2.2, "Observed (GRACE)", rotation=90, fontsize=12)
 
-    # rcps = []
-    # exps = []
-    # trends = []
-    # sigmas = []
-    # for g in as19.groupby(by=["RCP", "Experiment"]):
-    #     m_df = g[-1][(g[-1]["Year"] >= trend_start) & (g[-1]["Year"] <= trend_end)]
-    #     x = m_df["Year"]
-    #     y = m_df["Mass (Gt)"]
-    #     X = sm.add_constant(x)
-    #     ols = sm.OLS(y, X).fit()
-    #     p = ols.params
-    #     model_bias = p[0]
-    #     model_trend = p[1]
-    #     model_trend_sigma = ols.bse[-1]
-    #     rcps.append(g[0][0])
-    #     exps.append(g[0][2])
-    #     trends.append(model_trend)
-    #     sigmas.append(model_trend_sigma)
+    # param="GCM"
+    # vals = as19_2100[param].values
+    # p = np.histogram(vals,bins=param_bins_dict[param], density=True)
+    # plt.plot([0,1,2,3],p[0], ".", color=cmap[-1])
+    # for beta in [1, 2, 3]:
+    #     vals = as19_2100[as19_2100[f"{beta}-sigma"] == True][param].values
+    #     p = np.histogram(vals,bins=param_bins_dict[param], density=True)
+    #     plt.plot([0,1,2,3],p[0], ".", color=cmap[beta])
+
+    def plot_d(g):
+        return ax.plot(g[-1]["Year"], g[-1]["D (Gt/yr)"], linewidth=0.5, color="0.5", zorder=-1)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    df = as19
+    x_var = "Year"
+    y_var = "D (Gt/yr)"
+    df = df[(df[x_var] >= calibration_start) & (df[x_var] <= calibration_end)]
+    [plot_d(g) for g in df.groupby(by=["RCP", "Experiment"])]
+    ax.fill_between(
+        man["Year"],
+        man["Discharge [Gt yr-1]"] - man["Discharge Error [Gt yr-1]"],
+        man["Discharge [Gt yr-1]"] + man["Discharge Error [Gt yr-1]"],
+        linewidth=0,
+        color=cmap[0],
+        alpha=0.5,
+        zorder=2,
+    )
+    ax.plot(man["Year"], man["Discharge [Gt yr-1]"], linewidth=2, color=cmap[0],label="Mankoff")
+    legend = ax.legend()
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+
+    ax.set_xlim(calibration_start, calibration_end)
+    ax.set_xlabel("Year")
+    ax.set_ylabel("Discharge (Gt/yr)")
+    fig.savefig("discharge_calibrated.pdf")
