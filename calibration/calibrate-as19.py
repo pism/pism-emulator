@@ -157,7 +157,6 @@ for d, data in domain.items():
 
     as19_2100 = as19[as19["Year"] == 2100]
 
-    metrics = {}
     mass_trend = calculate_trend(as19, "Year", "Mass", "Gt")
     mass_trend["interval"] = pd.arrays.IntervalArray.from_arrays(
         mass_trend["Mass Trend (Gt/yr)"] - mass_trend["Mass Trend Error (Gt/yr)"],
@@ -165,7 +164,7 @@ for d, data in domain.items():
     )
     discharge_mean = calculate_mean(as19, "Year", "D", "Gt/yr")
     for beta in [1, 2, 3]:
-
+        # This should NOT be the standard error of the OLS regression:
         mass_trend[f"Mass Trend {beta}-sigma (Gt/yr)"] = mass_trend["interval"].array.overlaps(
             pd.Interval(grace_trend - beta * grace_trend_stderr, grace_trend + beta * grace_trend_stderr)
         )
