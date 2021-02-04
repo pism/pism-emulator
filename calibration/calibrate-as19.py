@@ -172,7 +172,6 @@ for d, data in domain.items():
         
 
     as19_2100 = pd.merge(as19_2100, mass_trend, on=["RCP", "Experiment"])
-
     as19_2100 = pd.merge(as19_2100, discharge_mean, on=["RCP", "Experiment"])
 
     rcp_list = ["26", "45", "85"]

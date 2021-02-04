@@ -175,7 +175,6 @@ if __name__ == "__main__":
     X_train = torch.tensor(X).to(torch.float)
     y_train = torch.tensor(np.squeeze(Y)).to(torch.float)
     X_test = torch.tensor(X_new).to(torch.float)
-    y_test = torch.tensor(np.squeeze(Y_new)).to(torch.float)
 
     # initialize likelihood and model
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
@@ -260,26 +259,18 @@ if __name__ == "__main__":
     with torch.no_grad():  # , gpytorch.settings.fast_pred_var():
         y_pred = likelihood(model(X_test))
 
-    idx = np.argsort(y_test.numpy())
 
     with torch.no_grad():
         # Initialize plot
-        f, ax = plt.subplots(1, 1, figsize=(12, 12))
-        lower, upper = y_pred.confidence_region()
-        ax.plot(y_test.numpy()[idx], y_pred.mean.numpy()[idx], "k*")
-        ax.fill_between(y_test.numpy()[idx], lower.numpy()[idx], upper.numpy()[idx], alpha=0.5)
+        f, ax = plt.subplots(1, 1, figsize=(4, 3))
 
-    mu_step = y_pred.mean.numpy()
-    var_step = y_pred.variance.numpy()
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    # ax.errorbar(mu, Y_true, yerr=var, alpha=0.25, label="default")
-    # ax.errorbar(mu_step, Y_true, yerr=var_step, alpha=0.25, label="BIC")
-    ax.plot(mu, Y_true, ".", label="default")
-    ax.plot(mu_step, Y_true, ".", label="BIC")
-    ax.plot([-20, 60], [-20, 60], color="k")
-    ax.set_xlim(0, 50)
-    ax.set_ylim(0, 50)
-    ax.set_aspect("equal", "box")
-    plt.legend()
+        # Get upper and lower confidence bounds
+        lower, upper = observed_pred.confidence_region()
+        # Plot training data as black stars
+        ax.plot(train_x.numpy(), train_y.numpy(), 'k*')
+        # Plot predictive means as blue line
+        ax.plot(test_x.numpy(), observed_pred.mean.numpy(), 'b')
+        # Shade between the lower and upper confidence bounds
+        ax.fill_between(test_x.numpy(), lower.numpy(), upper.numpy(), alpha=0.5)
+        ax.set_ylim([-3, 3])
+        ax.legend(['Observed Data', 'Mean', 'Confidence'])
