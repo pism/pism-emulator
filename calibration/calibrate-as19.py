@@ -25,7 +25,7 @@ def toDecimalYear(date):
     %Out: 2020.7732240437158
 
     """
-    
+
     from datetime import datetime
     import time
 
@@ -113,7 +113,6 @@ domain = {"GIS": "../data/validation/greenland_mass_200204_202008.txt"}
 for d, data in domain.items():
     print(f"Analyzing {d}")
 
-    
     # Load the GRACE data
     grace = pd.read_csv(
         data, header=30, delim_whitespace=True, skipinitialspace=True, names=["Year", "Mass (Gt)", "Error (Gt)"]
@@ -169,7 +168,6 @@ for d, data in domain.items():
             pd.Interval(grace_trend - beta * grace_trend_stderr, grace_trend + beta * grace_trend_stderr)
         )
         discharge_mean[f"D Mean {beta}-sigma (Gt/yr)"] = np.abs(discharge_mean["D Mean (Gt/yr)"] + 500) < beta * 50
-        
 
     as19_2100 = pd.merge(as19_2100, mass_trend, on=["RCP", "Experiment"])
     as19_2100 = pd.merge(as19_2100, discharge_mean, on=["RCP", "Experiment"])
@@ -245,6 +243,56 @@ for d, data in domain.items():
         ax=ax,
     )
     fig.savefig("calibrated_histogram_2100.pdf")
+
+    fig, ax = plt.subplots(1, 3, sharey="row", figsize=[6, 3])
+    fig.subplots_adjust(hspace=0.05, wspace=0.30)
+    for q, rcp in enumerate([26, 45, 85]):
+        df = as19_2100[as19_2100["RCP"] == rcp]
+        sns.kdeplot(data=df, x="SLE (cm)", ax=ax[q], color=cmap[-1])
+        ax[q].set_title(f"RCP {rcp}")
+        # for (beta, c) in zip([1, 2, 3], cmap[::-1]):
+        #     df_calib = df[df[f"Mass Trend {beta}-sigma (Gt/yr)"] == True]
+        #     sns.kdeplot(data=df_calib, x="SLE (cm)", ax=ax[q], color=c, linewidth=0.75)
+        #     df_calib = df[df[f"D Mean {beta}-sigma (Gt/yr)"] == True]
+        #     sns.kdeplot(data=df_calib, x="SLE (cm)", ax=ax[q], color=c, linewidth=0.75, linestyle="dashed")
+    l_s = []
+    for m, label in enumerate(
+        [
+            "AS19",
+        ]
+    ):
+        l_ = mlines.Line2D(
+            [],
+            [],
+            color=cmap[::-1][m],
+            linewidth=1.0,
+            linestyle="solid",
+            label=label,
+        )
+        l_s.append(l_)
+
+    legend = ax[-1].legend(
+        handles=l_s,
+        loc="upper right",
+    )
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+
+    ax[0].set_ylim(0, 0.18)
+    fig.savefig("sle_pdf_rcps_2100.pdf", bbox_inches="tight")
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    sns.histplot(
+        data=as19_2100,
+        x="SLE (cm)",
+        hue="RCP",
+        palette=["#003466", "#5492CD", "#990002"],
+        bins=sle_bins,
+        stat="probability",
+        ax=ax,
+    )
+    fig.savefig("calibrated_histogram_2100.pdf")
     fig, ax = plt.subplots(1, 3, sharey="row", figsize=[6, 3])
     fig.subplots_adjust(hspace=0.05, wspace=0.30)
     for q, rcp in enumerate([26, 45, 85]):
@@ -274,7 +322,8 @@ for d, data in domain.items():
     )
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
-    fig.savefig("sle_pdf_rcps_2100.pdf", bbox_inches="tight")
+    ax[0].set_ylim(0, 0.18)
+    fig.savefig("sle_pdf_calibrated_rcps_2100.pdf", bbox_inches="tight")
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -360,7 +409,7 @@ for d, data in domain.items():
     # for beta in [1, 2, 3]:
     #     vals = as19_2100[as19_2100[f"{beta}-sigma"] == True][param].values
     #     p = np.histogram(vals,bins=param_bins_dict[param], density=True)
-    #     plt.plot([0,1,2,3],p[0], ".", color=cmap[beta])
+    #     plt.plot([0,1,2,3],p[0], ".", color=cmap[beta]
 
     def plot_d(g):
         return ax.plot(g[-1]["Year"], g[-1]["D (Gt/yr)"], linewidth=0.5, color="0.5", zorder=-1)
@@ -381,7 +430,7 @@ for d, data in domain.items():
         alpha=0.5,
         zorder=2,
     )
-    ax.plot(man["Year"], man["Discharge [Gt yr-1]"], linewidth=2, color=cmap[0],label="Mankoff")
+    ax.plot(man["Year"], man["Discharge [Gt yr-1]"], linewidth=2, color=cmap[0], label="Mankoff")
     legend = ax.legend()
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
