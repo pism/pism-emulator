@@ -151,33 +151,26 @@ class GlacierEmulator(pl.LightningModule):
         x, f, o = batch
         f_pred = self.forward(x)
         loss = criterion_ae(f_pred, f, o, self.area)
+        self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        return {"loss": loss, "log": {"loss": loss}}
+        return loss
 
 
 response_file = "log_speeds.csv.gz"
 samples_file = "../data/samples/velocity_calibration_samples_100.csv"
 samples, response = prepare_data(samples_file, response_file)
 
-F = response.values
-X = samples.values
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+X = np.array(samples.values, dtype=np.float32)
+F = np.array(response.values, dtype=np.float32)
 
 X = torch.from_numpy(X)
 F = torch.from_numpy(F)
 F[F < 0] = 0
 
-X = X.to(torch.float32)
-F = F.to(torch.float32)
-
-X = X.to(device)
-F = F.to(device)
-
 X_m = X.mean(axis=0)
 X_s = X.std(axis=0)
 
-X = (X - X_m) / X_s
+X_train = (X - X_m) / X_s
 
 
 n_parameters = X.shape[1]
@@ -202,8 +195,6 @@ if not os.path.isdir(emulator_dir):
 n_models = 1
 n_epochs = 5
 
-X_train = X
-
 data_module = False
 if data_module:
 
@@ -211,7 +202,7 @@ if data_module:
         omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        train_loader = GlacierDataModule(X, F, omegas)
+        train_loader = GlacierDataModule(X_train, F, omegas)
         train_loader.setup()
         n_eigenglaciers = train_loader.n_eigenglaciers
         e = GlacierEmulator(
@@ -231,7 +222,7 @@ if data_module:
         torch.save(e.state_dict(), "emulator_ensemble/emulator_pl2_{0:03d}.h5".format(model_index))
 else:
     for model_index in range(n_models):
-        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float, device=device).T
+        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
         V_hat, F_bar, F_mean = get_eigenglaciers(omegas, F)
