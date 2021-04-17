@@ -10,25 +10,33 @@ from scipy.stats import dirichlet
 
 from pismemulator.utils import prepare_data
 
-from torch.utils.data import TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
+
 
 class GlacierDataModule(pl.LightningDataModule):
-
-    def __init__(self, X, F, batch_size: int = 128):
+    def __init__(self, X, F, omegas, batch_size: int = 128):
         super().__init__()
         self.X = X
         self.F = F
+        self.omegas = omegas
         self.batch_size = batch_size
 
-    def setup(self, stage: Optional[str] = None):
-        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
-        V_hat, F_bar, F_mean = get_eigenglaciers(omegas, self.F)
+    def setup(self):
+        V_hat, F_bar, F_mean = self.get_eigenglaciers()
         n_eigenglaciers = V_hat.shape[1]
-        training_data = TensorDataset(self.X, F_hat, omegas)
-        train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=self.batch_size, shuffle=True)
+        self.V_hat = V_hat
+        self.F_bar = F_bar
+        self.F_mean = F_mean
+        self.n_eigenglaciers = n_eigenglaciers
+        print(self.X.shape, self.F.shape, self.omegas.shape)
+        training_data = TensorDataset(self.X, self.F_mean, self.omegas)
+        train_loader = DataLoader(dataset=training_data, batch_size=self.batch_size, shuffle=True)
         self.train_loader = train_loader
 
-    def get_eigenglaciers(omegas, F, cutoff=0.999):
+    def get_eigenglaciers(self, cutoff=0.999):
+        print("Eigen")
+        F = self.F
+        omegas = self.omegas
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
         Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
@@ -39,11 +47,11 @@ class GlacierDataModule(pl.LightningDataModule):
         lamda_truncated = lamda.detach()[:cutoff_index]
         V = V.detach()[:, :cutoff_index]
         V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))
-        
+
         return V_hat, F_bar, F_mean
-    
+
     def train_dataloader(self):
-        return DataLoader(self.mnist_train, batch_size=self.batch_size)
+        return self.train_loader
 
     def val_dataloader(self):
         return DataLoader(self.mnist_val, batch_size=self.batch_size)
@@ -51,8 +59,6 @@ class GlacierDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.mnist_test, batch_size=self.batch_size)
 
-    def teardown(self, stage: Optional[str] = None):
-        # Used to clean-up when the run is finished
 
 def get_eigenglaciers(omegas, F, cutoff=0.999):
     F_mean = (F * omegas).sum(axis=0)
@@ -290,22 +296,16 @@ if not os.path.isdir(emulator_dir):
     os.makedir(emulator_dir)
 
 n_models = 1
-n_epochs = 3000
+n_epochs = 5
 
 X_train = X
 for model_index in range(n_models):
-    omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float, device=device).T
-
-    V_hat, F_bar, F_mean = get_eigenglaciers(omegas, F)
-    n_eigenglaciers = V_hat.shape[1]
-
+    omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
     omegas_0 = torch.ones_like(omegas) / len(omegas)
-    F_train = F_bar
-    training_data = TensorDataset(X_train, F_train, omegas)
 
-    batch_size = 128
-    train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
-
+    train_loader = GlacierDataModule(X, F, omegas)
+    train_loader.setup()
+    n_eigenglaciers = train_loader.n_eigenglaciers
     e = GlacierEmulator(
         n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
     )
@@ -317,4 +317,30 @@ for model_index in range(n_models):
     # Make a prediction based on the model
     loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
 
-    torch.save(e.state_dict(), "emulator_ensemble/emulator_pl_{0:03d}.h5".format(model_index))
+    torch.save(e.state_dict(), "emulator_ensemble/emulator_pl2_{0:03d}.h5".format(model_index))
+
+# for model_index in range(n_models):
+#     omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float, device=device).T
+
+#     V_hat, F_bar, F_mean = get_eigenglaciers(omegas, F)
+#     n_eigenglaciers = V_hat.shape[1]
+
+#     omegas_0 = torch.ones_like(omegas) / len(omegas)
+#     F_train = F_bar
+#     training_data = TensorDataset(X_train, F_train, omegas)
+
+#     batch_size = 128
+#     train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
+
+#     e = GlacierEmulator(
+#         n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
+#     )
+#     trainer = pl.Trainer(max_epochs=n_epochs)
+#     trainer.fit(e, train_loader)
+#     F_train_pred = e(X_train)
+#     # Make a prediction based on the model
+#     loss_train = criterion_ae(F_train_pred, F_train, omegas, normed_area)
+#     # Make a prediction based on the model
+#     loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
+
+#     torch.save(e.state_dict(), "emulator_ensemble/emulator_pl_{0:03d}.h5".format(model_index))
