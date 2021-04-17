@@ -11,6 +11,7 @@ from scipy.stats import dirichlet
 from pismemulator.utils import prepare_data
 
 from torch.utils.data import DataLoader, TensorDataset
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 class GlacierDataModule(pl.LightningDataModule):
@@ -28,7 +29,7 @@ class GlacierDataModule(pl.LightningDataModule):
         self.F_bar = F_bar
         self.F_mean = F_mean
         self.n_eigenglaciers = n_eigenglaciers
-        print(self.X.shape, self.F.shape, self.omegas.shape)
+        print(self.X.shape, self.F_mean.shape, self.omegas.shape)
         training_data = TensorDataset(self.X, self.F_mean, self.omegas)
         train_loader = DataLoader(dataset=training_data, batch_size=self.batch_size, shuffle=True)
         self.train_loader = train_loader
@@ -135,7 +136,12 @@ class GlacierEmulator(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=0.01, weight_decay=0.0)
-        return optimizer
+        scheduler = {
+            "scheduler": ReduceLROnPlateau(optimizer),
+            "reduce_on_plateau": True,
+            "monitor": "loss",
+        }
+        return [optimizer], [scheduler]
 
     def criterion_ae(F_pred, F_obs, omegas, area):
         instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
@@ -146,109 +152,7 @@ class GlacierEmulator(pl.LightningModule):
         f_pred = self.forward(x)
         loss = criterion_ae(f_pred, f, o, self.area)
 
-        return loss
-
-
-class Emulator(nn.Module):
-    def __init__(self, n_parameters, n_eigenglaciers, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean):
-        super().__init__()
-        # Inputs to hidden layer linear transformation
-        self.l_1 = nn.Linear(n_parameters, n_hidden_1)
-        self.norm_1 = nn.LayerNorm(n_hidden_1)
-        self.dropout_1 = nn.Dropout(p=0.0)
-        self.l_2 = nn.Linear(n_hidden_1, n_hidden_2)
-        self.norm_2 = nn.LayerNorm(n_hidden_2)
-        self.dropout_2 = nn.Dropout(p=0.5)
-        self.l_3 = nn.Linear(n_hidden_2, n_hidden_3)
-        self.norm_3 = nn.LayerNorm(n_hidden_3)
-        self.dropout_3 = nn.Dropout(p=0.5)
-        self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
-        self.norm_4 = nn.LayerNorm(n_hidden_3)
-        self.dropout_4 = nn.Dropout(p=0.5)
-        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
-
-        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
-        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
-
-    def forward(self, x, add_mean=False):
-        # Pass the input tensor through each of our operations
-
-        a_1 = self.l_1(x)
-        a_1 = self.norm_1(a_1)
-        a_1 = self.dropout_1(a_1)
-        z_1 = torch.relu(a_1)
-
-        a_2 = self.l_2(z_1)
-        a_2 = self.norm_2(a_2)
-        a_2 = self.dropout_2(a_2)
-        z_2 = torch.relu(a_2) + z_1
-
-        a_3 = self.l_3(z_2)
-        a_3 = self.norm_3(a_3)
-        a_3 = self.dropout_3(a_3)
-        z_3 = torch.relu(a_3) + z_2
-
-        a_4 = self.l_4(z_3)
-        a_4 = self.norm_3(a_4)
-        a_4 = self.dropout_3(a_4)
-        z_4 = torch.relu(a_4) + z_3
-
-        z_5 = self.l_5(z_4)
-        if add_mean:
-            F_pred = z_5 @ self.V_hat.T + self.F_mean
-        else:
-            F_pred = z_5 @ self.V_hat.T
-
-        return F_pred
-
-
-def criterion_ae(F_pred, F_obs, omegas, area):
-    instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
-    return torch.sum(instance_misfit * omegas.squeeze())
-
-
-def train_surrogate(e, X_train, F_train, omegas, area, batch_size=128, epochs=3000, eta_0=0.01, k=1000.0):
-
-    omegas_0 = torch.ones_like(omegas) / len(omegas)
-    training_data = TensorDataset(X_train, F_train, omegas)
-
-    batch_size = 128
-    train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
-
-    optimizer = torch.optim.Adam(e.parameters(), lr=eta_0, weight_decay=0.0)
-
-    # Loop over the data
-    for epoch in range(epochs):
-        # Loop over each subset of data
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = eta_0 * (10 ** (-epoch / k))
-
-        for x, f, o in train_loader:
-            e.train()
-            # Zero out the optimizer's gradient buffer
-            optimizer.zero_grad()
-
-            f_pred = e(x)
-
-            # Compute the loss
-            loss = criterion_ae(f_pred, f, o, area)
-
-            # Use backpropagation to compute the derivative of the loss with respect to the parameters
-            loss.backward()
-
-            # Use the derivative information to update the parameters
-            optimizer.step()
-
-        e.eval()
-        F_train_pred = e(X_train)
-        # Make a prediction based on the model
-        loss_train = criterion_ae(F_train_pred, F_train, omegas, area)
-        # Make a prediction based on the model
-        loss_test = criterion_ae(F_train_pred, F_train, omegas_0, area)
-
-        # Print the epoch, the training loss, and the test set accuracy.
-        if epoch % 10 == 0:
-            print(epoch, loss_train.item(), loss_test.item())
+        return {"loss": loss, "log": {"loss": loss}}
 
 
 response_file = "log_speeds.csv.gz"
@@ -279,7 +183,7 @@ X = (X - X_m) / X_s
 n_parameters = X.shape[1]
 n_samples, n_grid_points = F.shape
 
-normed_area = torch.tensor(np.ones(n_grid_points), device=device)
+normed_area = torch.tensor(np.ones(n_grid_points))
 normed_area /= normed_area.sum()
 
 torch.manual_seed(0)
@@ -299,48 +203,58 @@ n_models = 1
 n_epochs = 5
 
 X_train = X
-for model_index in range(n_models):
-    omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
-    omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    train_loader = GlacierDataModule(X, F, omegas)
-    train_loader.setup()
-    n_eigenglaciers = train_loader.n_eigenglaciers
-    e = GlacierEmulator(
-        n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
-    )
-    trainer = pl.Trainer(max_epochs=n_epochs)
-    trainer.fit(e, train_loader)
-    F_train_pred = e(X_train)
-    # Make a prediction based on the model
-    loss_train = criterion_ae(F_train_pred, F_train, omegas, normed_area)
-    # Make a prediction based on the model
-    loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
+data_module = False
+if data_module:
 
-    torch.save(e.state_dict(), "emulator_ensemble/emulator_pl2_{0:03d}.h5".format(model_index))
+    for model_index in range(n_models):
+        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
+        omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-# for model_index in range(n_models):
-#     omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float, device=device).T
+        train_loader = GlacierDataModule(X, F, omegas)
+        train_loader.setup()
+        n_eigenglaciers = train_loader.n_eigenglaciers
+        e = GlacierEmulator(
+            n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
+        )
 
-#     V_hat, F_bar, F_mean = get_eigenglaciers(omegas, F)
-#     n_eigenglaciers = V_hat.shape[1]
+        lr_monitor = LearningRateMonitor(logging_interval="step")
+        trainer = pl.Trainer(max_epochs=n_epochs, callbacks=[lr_monitor])
+        trainer.fit(e, train_loader)
 
-#     omegas_0 = torch.ones_like(omegas) / len(omegas)
-#     F_train = F_bar
-#     training_data = TensorDataset(X_train, F_train, omegas)
+        F_train_pred = e(X_train)
+        # Make a prediction based on the model
+        loss_train = criterion_ae(F_train_pred, F_train, omegas, normed_area)
+        # Make a prediction based on the model
+        loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
 
-#     batch_size = 128
-#     train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
+        torch.save(e.state_dict(), "emulator_ensemble/emulator_pl2_{0:03d}.h5".format(model_index))
+else:
+    for model_index in range(n_models):
+        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float, device=device).T
+        omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-#     e = GlacierEmulator(
-#         n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
-#     )
-#     trainer = pl.Trainer(max_epochs=n_epochs)
-#     trainer.fit(e, train_loader)
-#     F_train_pred = e(X_train)
-#     # Make a prediction based on the model
-#     loss_train = criterion_ae(F_train_pred, F_train, omegas, normed_area)
-#     # Make a prediction based on the model
-#     loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
+        V_hat, F_bar, F_mean = get_eigenglaciers(omegas, F)
+        n_eigenglaciers = V_hat.shape[1]
 
-#     torch.save(e.state_dict(), "emulator_ensemble/emulator_pl_{0:03d}.h5".format(model_index))
+        F_train = F_bar
+        training_data = TensorDataset(X_train, F_train, omegas)
+
+        batch_size = 128
+        train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
+
+        e = GlacierEmulator(
+            n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
+        )
+
+        lr_monitor = LearningRateMonitor(logging_interval="step")
+        trainer = pl.Trainer(max_epochs=n_epochs, callbacks=[lr_monitor])
+        trainer.fit(e, train_loader)
+
+        F_train_pred = e(X_train)
+        # Make a prediction based on the model
+        loss_train = criterion_ae(F_train_pred, F_train, omegas, normed_area)
+        # Make a prediction based on the model
+        loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
+
+        torch.save(e.state_dict(), "emulator_ensemble/emulator_pl_lr_{0:03d}.h5".format(model_index))
