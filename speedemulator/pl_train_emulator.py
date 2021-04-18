@@ -22,7 +22,7 @@ class GlacierDataModule(pl.LightningDataModule):
         self.omegas = omegas
         self.batch_size = batch_size
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str = None):
 
         if stage == "fit" or stage is None:
             training_data = TensorDataset(self.X, self.F_mean, self.omegas)
@@ -236,7 +236,7 @@ else:
         training_data = TensorDataset(X_train, F_train, omegas)
 
         batch_size = 128
-        train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
+        train_loader = DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
 
         e = GlacierEmulator(
             n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
