@@ -4,17 +4,15 @@ from netCDF4 import Dataset as ds
 from glob import glob
 from os.path import join
 import pandas as pd
-from torchvision import transforms
 from tqdm import tqdm
 import re
 import numpy as np
 
 
 class PISMDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir="path/to/dir", samples_file="path/to/file", transform=None):
+    def __init__(self, data_dir="path/to/dir", samples_file="path/to/file"):
         self.data_dir = data_dir
         self.samples_file = samples_file
-        self.transform = transform
 
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))

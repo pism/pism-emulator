@@ -6,12 +6,12 @@ import os
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import LearningRateMonitor
 from scipy.stats import dirichlet
-
-from pismemulator.utils import prepare_data
-
 from torch.utils.data import DataLoader, TensorDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+from pismemulator.utils import prepare_data
 
 
 class GlacierDataModule(pl.LightningDataModule):
@@ -146,14 +146,14 @@ class GlacierEmulator(pl.LightningModule):
         }
         return [optimizer], [scheduler]
 
-    def criterion_ae(F_pred, F_obs, omegas, area):
+    def criterion_ae(self, F_pred, F_obs, omegas, area):
         instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def training_step(self, batch, batch_idx):
         x, f, o = batch
         f_pred = self.forward(x)
-        loss = criterion_ae(f_pred, f, o, self.area)
+        loss = self.criterion_ae(f_pred, f, o, self.area)
         self.log("loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss
@@ -193,10 +193,10 @@ n_hidden_4 = 128
 emulator_dir = "emulator_ensemble"
 
 if not os.path.isdir(emulator_dir):
-    os.makedir(emulator_dir)
+    os.makedirs(emulator_dir)
 
-n_models = 1
-n_epochs = 5
+n_models = 2
+n_epochs = 3000
 
 data_module = False
 if data_module:
