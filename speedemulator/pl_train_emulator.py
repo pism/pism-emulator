@@ -22,20 +22,23 @@ class GlacierDataModule(pl.LightningDataModule):
         self.omegas = omegas
         self.batch_size = batch_size
 
-    def setup(self):
+    def setup(self, stage: Optional[str] = None):
+
+        if stage == "fit" or stage is None:
+            training_data = TensorDataset(self.X, self.F_mean, self.omegas)
+            train_loader = DataLoader(dataset=training_data, batch_size=self.batch_size, shuffle=True)
+            self.train_loader = train_loader
+            self.dims = self.train_loader[0][0].shape
+
+    def prepare_data(self):
         V_hat, F_bar, F_mean = self.get_eigenglaciers()
         n_eigenglaciers = V_hat.shape[1]
         self.V_hat = V_hat
         self.F_bar = F_bar
         self.F_mean = F_mean
         self.n_eigenglaciers = n_eigenglaciers
-        print(self.X.shape, self.F_mean.shape, self.omegas.shape)
-        training_data = TensorDataset(self.X, self.F_mean, self.omegas)
-        train_loader = DataLoader(dataset=training_data, batch_size=self.batch_size, shuffle=True)
-        self.train_loader = train_loader
 
     def get_eigenglaciers(self, cutoff=0.999):
-        print("Eigen")
         F = self.F
         omegas = self.omegas
         F_mean = (F * omegas).sum(axis=0)
@@ -203,7 +206,8 @@ if data_module:
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
         train_loader = GlacierDataModule(X_train, F, omegas)
-        train_loader.setup()
+        train_loader.prepare_data()
+        train_loader.setup(stage="fit")
         n_eigenglaciers = train_loader.n_eigenglaciers
         e = GlacierEmulator(
             n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
