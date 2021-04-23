@@ -10,7 +10,7 @@ import numpy as np
 
 
 class PISMDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir="path/to/dir", samples_file="path/to/file"):
+    def __init__(self, data_dir="path/to/dir", samples_file="path/to/file", thin=1, epsilon=1e-10):
         self.data_dir = data_dir
         self.samples_file = samples_file
 
@@ -40,32 +40,21 @@ class PISMDataset(torch.utils.data.Dataset):
         samples = samples.drop(samples.columns[0], axis=1)
         m_samples, n_parameters = samples.shape
 
-        nc0 = ds(training_files[0])
-        _, my, mx = nc0.variables["velsurf_mag"][:].shape
-        nc0.close()
+        ds0 = xr.open_dataset(training_files[0])
+        _, my, mx = ds0.variables["velsurf_mag"][:].shape
+        ds0.close()
 
         response = np.zeros((m_samples, my * mx))
 
         print("  Loading data sets...")
         for idx, m_file in tqdm(enumerate(training_files)):
-            nc = ds(m_file)
-            data = nc.variables["velsurf_mag"][0, :, :]
-            response[idx, :] = data.filled(fill_value=0).reshape(1, -1)
-            nc.close()
+            ds = xr.open_dataset(m_file)
+            data = np.nan_to_num(ds.variables["velsurf_mag"].values[:, ::thin, ::thin].flatten(), epsilon)
+            response[idx, :] = data
+            ds.close()
 
         self.samples = samples
         self.response = response
-        self.mean, self.std = response.mean(), response.std()
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(self.mean, self.std)])
-        samples = transform(samples)
-
-        return {"samples": samples, "response": response}
 
 
 class PISMDataModule(pl.LightningDataModule):

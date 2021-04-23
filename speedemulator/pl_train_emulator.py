@@ -1,20 +1,73 @@
 #!/bin/env python3
 
+from glob import glob
 import numpy as np
 import pandas as pd
 import os
+from os.path import join
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 from torch.utils.data import DataLoader, TensorDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+import xarray as xr
+import re
+from tqdm import tqdm
 
-from pismemulator.utils import prepare_data
+
+class PISMDataset(torch.utils.data.Dataset):
+    def __init__(self, data_dir="path/to/dir", samples_file="path/to/file", thin=1, epsilon=1e-10):
+        self.data_dir = data_dir
+        self.samples_file = samples_file
+
+        identifier_name = "id"
+        training_files = glob(join(self.data_dir, "*.nc"))
+        ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
+        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+            by=identifier_name
+        )
+        samples.index = samples[identifier_name]
+        samples.index.name = None
+
+        ids_df = pd.DataFrame(data=ids, columns=["id"])
+        ids_df.index = ids_df[identifier_name]
+        ids_df.index.name = None
+
+        # It is possible that not all ensemble simulations succeeded and returned a value
+        # so we much search for missing response values
+        missing_ids = list(set(samples["id"]).difference(ids_df["id"]))
+        if missing_ids:
+            print(f"The following simulations are missing:\n   {missing_ids}")
+            print("  ... adjusting priors")
+            # and remove the missing samples and responses
+            samples_missing_removed = samples[~samples["id"].isin(missing_ids)]
+            samples = samples_missing_removed
+
+        samples = samples.drop(samples.columns[0], axis=1)
+        m_samples, n_parameters = samples.shape
+
+        ds0 = xr.open_dataset(training_files[0])
+        _, my, mx = ds0.variables["velsurf_mag"].values[:, ::thin, ::thin].shape
+        ds0.close()
+
+        response = np.zeros((m_samples, my * mx))
+
+        print("  Loading data sets...")
+        for idx, m_file in tqdm(enumerate(training_files)):
+            ds = xr.open_dataset(m_file)
+            data = np.nan_to_num(ds.variables["velsurf_mag"].values[:, ::thin, ::thin].flatten(), epsilon)
+            response[idx, :] = data
+            ds.close()
+
+        self.samples = samples
+        self.response = response
 
 
-class GlacierDataModule(pl.LightningDataModule):
+class PISMDataModule(pl.LightningDataModule):
     def __init__(self, X, F, omegas, batch_size: int = 128):
         super().__init__()
         self.X = X
@@ -25,10 +78,9 @@ class GlacierDataModule(pl.LightningDataModule):
     def setup(self, stage: str = None):
 
         if stage == "fit" or stage is None:
-            training_data = TensorDataset(self.X, self.F_mean, self.omegas)
+            training_data = TensorDataset(self.X, self.F_bar, self.omegas)
             train_loader = DataLoader(dataset=training_data, batch_size=self.batch_size, shuffle=True)
             self.train_loader = train_loader
-            self.dims = self.train_loader[0][0].shape
 
     def prepare_data(self):
         V_hat, F_bar, F_mean = self.get_eigenglaciers()
@@ -138,7 +190,7 @@ class GlacierEmulator(pl.LightningModule):
         return F_pred
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.01, weight_decay=0.0)
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.1, weight_decay=0.0)
         scheduler = {
             "scheduler": ReduceLROnPlateau(optimizer),
             "reduce_on_plateau": True,
@@ -159,12 +211,21 @@ class GlacierEmulator(pl.LightningModule):
         return loss
 
 
-response_file = "log_speeds.csv.gz"
-samples_file = "../data/samples/velocity_calibration_samples_100.csv"
-samples, response = prepare_data(samples_file, response_file)
+# response_file = "log_speeds_prune_1.csv.gz"
+# samples_file = "../data/samples/velocity_calibration_samples_100.csv"
+# samples, response = prepare_data(samples_file, response_file)
 
-X = np.array(samples.values, dtype=np.float32)
-F = np.array(response.values, dtype=np.float32)
+dataset = PISMDataset(
+    data_dir="../data/speeds_v2/", samples_file="../data/samples/velocity_calibration_samples_100.csv", thin=5
+)
+response = dataset.response
+samples = dataset.samples.values
+
+response = np.log10(response)
+response[np.isneginf(response)] = 0
+
+X = np.array(samples, dtype=np.float32)
+F = np.array(response, dtype=np.float32)
 
 X = torch.from_numpy(X)
 F = torch.from_numpy(F)
@@ -195,61 +256,38 @@ emulator_dir = "emulator_ensemble"
 if not os.path.isdir(emulator_dir):
     os.makedirs(emulator_dir)
 
-n_models = 2
-n_epochs = 3000
+n_models = 1
+max_epochs = 1000
+batch_size = 128
 
-data_module = False
-if data_module:
 
-    for model_index in range(n_models):
-        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
-        omegas_0 = torch.ones_like(omegas) / len(omegas)
+for model_index in range(n_models):
+    omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
+    omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        train_loader = GlacierDataModule(X_train, F, omegas)
-        train_loader.prepare_data()
-        train_loader.setup(stage="fit")
-        n_eigenglaciers = train_loader.n_eigenglaciers
-        e = GlacierEmulator(
-            n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
-        )
+    train_loader = PISMDataModule(X_train, F, omegas)
+    train_loader.prepare_data()
+    train_loader.setup(stage="fit")
+    n_eigenglaciers = train_loader.n_eigenglaciers
+    V_hat = train_loader.V_hat
+    F_mean = train_loader.F_mean
+    F_train = train_loader.F_bar
+    e = GlacierEmulator(
+        n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
+    )
 
-        lr_monitor = LearningRateMonitor(logging_interval="step")
-        trainer = pl.Trainer(max_epochs=n_epochs, callbacks=[lr_monitor])
-        trainer.fit(e, train_loader)
+    lr_monitor = LearningRateMonitor(logging_interval="step")
+    early_stop_callback = EarlyStopping(
+        monitor="loss", min_delta=0.01, patience=10, verbose=False, mode="min", strict=True
+    )
+    logger = TensorBoardLogger(f"tb_logs_{model_index}", name="PISM Speed Emulator")
+    trainer = pl.Trainer(max_epochs=max_epochs, callbacks=[lr_monitor, early_stop_callback], logger=logger)
+    trainer.fit(e, train_loader)
 
-        F_train_pred = e(X_train)
-        # Make a prediction based on the model
-        loss_train = criterion_ae(F_train_pred, F_train, omegas, normed_area)
-        # Make a prediction based on the model
-        loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
+    F_train_pred = e(X_train)
+    # Make a prediction based on the model
+    loss_train = e.criterion_ae(F_train_pred, F_train, omegas, normed_area)
+    # Make a prediction based on the model
+    loss_test = e.criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
 
-        torch.save(e.state_dict(), "emulator_ensemble/emulator_pl2_{0:03d}.h5".format(model_index))
-else:
-    for model_index in range(n_models):
-        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
-        omegas_0 = torch.ones_like(omegas) / len(omegas)
-
-        V_hat, F_bar, F_mean = get_eigenglaciers(omegas, F)
-        n_eigenglaciers = V_hat.shape[1]
-
-        F_train = F_bar
-        training_data = TensorDataset(X_train, F_train, omegas)
-
-        batch_size = 128
-        train_loader = DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
-
-        e = GlacierEmulator(
-            n_parameters, n_eigenglaciers, normed_area, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean
-        )
-
-        lr_monitor = LearningRateMonitor(logging_interval="step")
-        trainer = pl.Trainer(max_epochs=n_epochs, callbacks=[lr_monitor])
-        trainer.fit(e, train_loader)
-
-        F_train_pred = e(X_train)
-        # Make a prediction based on the model
-        loss_train = criterion_ae(F_train_pred, F_train, omegas, normed_area)
-        # Make a prediction based on the model
-        loss_test = criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
-
-        torch.save(e.state_dict(), "emulator_ensemble/emulator_pl_lr_{0:03d}.h5".format(model_index))
+    torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{0:03d}.h5".format(model_index))
