@@ -170,7 +170,15 @@ def MALA(
 
 
 class PISMDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir="path/to/dir", samples_file="path/to/file", thinning_factor=1, epsilon=1e-10):
+    def __init__(
+        self,
+        data_dir="path/to/dir",
+        samples_file="path/to/file",
+        thinning_factor=1,
+        normalize_x=True,
+        log_y=True,
+        epsilon=1e-10,
+    ):
         self.data_dir = data_dir
         self.samples_file = samples_file
 
@@ -215,27 +223,64 @@ class PISMDataset(torch.utils.data.Dataset):
             response[idx, :] = data
             ds.close()
 
-        self.samples = samples
-        self.response = response
+        if log_y:
+            response = np.log10(response)
+            response[np.isneginf(response)] = 0
+
+        X = np.array(samples, dtype=np.float32)
+        Y = np.array(response, dtype=np.float32)
+
+        X = torch.from_numpy(X)
+        Y = torch.from_numpy(Y)
+        Y[Y < 0] = 0
+
+        if normalize_x:
+            X_mean = X.mean(axis=0)
+            X_std = X.std(axis=0)
+            self.X_mean = X_mean
+            self.X_std = X_std
+            X = (X - X_mean) / X_std
+
+        self.X = X
+        self.Y = Y
+        self.normalize_x = normalize_x
+
+        n_parameters = X.shape[1]
+        self.n_parameters = n_parameters
+        n_samples, n_grid_points = Y.shape
+        self.n_samples = n_samples
+        self.n_grid_points = n_grid_points
+
+        normed_area = torch.tensor(np.ones(n_grid_points))
+        normed_area /= normed_area.sum()
+        self.normed_area = normed_area
 
 
 class PISMDataModule(pl.LightningDataModule):
-    def __init__(self, X, F, omegas, omegas_0, batch_size: int = 128):
+    def __init__(self, X, F, omegas, omegas_0, batch_size: int = 128, test_size: float = 0.1, num_workers: int = 0):
         super().__init__()
         self.X = X
         self.F = F
         self.omegas = omegas
         self.omegas_0 = omegas_0
         self.batch_size = batch_size
+        self.test_size = test_size
+        self.num_workers = num_workers
 
     def setup(self, stage: str = None):
 
         data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
-        training_data, test_data = train_test_split(data, test_size=0.1)
+        training_data, test_data = train_test_split(data, test_size=self.test_size)
+        self.training_data = training_data
+        self.test_data = test_data
 
-        train_loader = DataLoader(dataset=training_data, batch_size=self.batch_size, shuffle=True)
+        train_loader = DataLoader(
+            dataset=training_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
+        )
         self.train_loader = train_loader
-        test_loader = DataLoader(dataset=test_data, batch_size=self.batch_size, shuffle=True)
+        test_loader = DataLoader(
+            dataset=test_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
+        )
         self.test_loader = test_loader
 
     def prepare_data(self):
@@ -248,6 +293,7 @@ class PISMDataModule(pl.LightningDataModule):
 
     def get_eigenglaciers(self, cutoff=0.999):
         F = self.F
+        n_grid_points = F.shape[1]
         omegas = self.omegas
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
@@ -267,24 +313,6 @@ class PISMDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return self.test_loader
-
-
-def get_eigenglaciers(omegas, F, cutoff=0.999):
-    F_mean = (F * omegas).sum(axis=0)
-    F_bar = F - F_mean  # Eq. 28
-    Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-    U, S, V = torch.svd_lowrank(Z @ F_bar, q=100)
-    lamda = S ** 2 / (n_samples)
-
-    cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
-    lamda_truncated = lamda.detach()[:cutoff_index]
-    V = V.detach()[:, :cutoff_index]
-    V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))  # A slight departure from the paper: Vhat is the
-    # eigenvectors scaled by the eigenvalue size.  This
-    # has the effect of allowing the outputs of the neural
-    # network to be O(1).  Otherwise, it doesn't make
-    # any difference.
-    return V_hat, F_bar, F_mean
 
 
 class GlacierEmulator(pl.LightningModule):
@@ -429,29 +457,13 @@ if __name__ == "__main__":
         samples_file="../data/samples/velocity_calibration_samples_100.csv",
         thinning_factor=thinning_factor,
     )
-    response = dataset.response
-    samples = dataset.samples.values
 
-    response = np.log10(response)
-    response[np.isneginf(response)] = 0
-
-    X = np.array(samples, dtype=np.float32)
-    F = np.array(response, dtype=np.float32)
-
-    X = torch.from_numpy(X)
-    F = torch.from_numpy(F)
-    F[F < 0] = 0
-
-    X_m = X.mean(axis=0)
-    X_s = X.std(axis=0)
-
-    X_train = (X - X_m) / X_s
-
-    n_parameters = X.shape[1]
-    n_samples, n_grid_points = F.shape
-
-    normed_area = torch.tensor(np.ones(n_grid_points))
-    normed_area /= normed_area.sum()
+    X = dataset.X
+    F = dataset.Y
+    n_grid_points = dataset.n_grid_points
+    n_parameters = dataset.n_parameters
+    n_samples = dataset.n_samples
+    normed_area = dataset.normed_area
 
     torch.manual_seed(0)
     np.random.seed(0)
@@ -469,7 +481,12 @@ if __name__ == "__main__":
         omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        data_loader = PISMDataModule(X_train, F, omegas, omegas_0)
+        data_loader = PISMDataModule(
+            X,
+            F,
+            omegas,
+            omegas_0,
+        )
         data_loader.prepare_data()
         data_loader.setup(stage="fit")
         n_eigenglaciers = data_loader.n_eigenglaciers
@@ -499,8 +516,9 @@ if __name__ == "__main__":
         # trainer = pl.Trainer(logger=logger, auto_lr_find="my_value")
         # lr_finder = trainer.tuner.lr_find(e, train_loader)
         trainer.fit(e, data_loader)
-        trainer.test(e, data_loader)
-
+        # trainer.test(e, data_loader)
+        # e.eval()
+        # X_test, F_test, omegas_test, omegas_0_test = data_loader.test_data
         # F_train_pred = e(X_train)
         # # Make a prediction based on the model
         # loss_train = e.criterion_ae(F_train_pred, F_train, omegas, normed_area)
