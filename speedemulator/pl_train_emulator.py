@@ -22,151 +22,159 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 
 
-def V(X, m):
-    U_pred = 10 ** m(X, add_mean=True)
-    r = U_pred - U_obs
-    X_bar = (X - X_min) / (X_max - X_min)
+class MALASampler(object):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model.eval()
 
-    L1 = torch.sum(
-        np.log(gamma((nu + 1) / 2.0))
-        - np.log(gamma(nu / 2.0))
-        - np.log(np.sqrt(np.pi * nu) * sigma_hat)
-        - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
-    )
-    L2 = torch.sum((alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar))
+    def find_MAP(self, X, Y_obs, n_iters=50, print_interval=10):
+        print("***********************************************")
+        print("***********************************************")
+        print("Finding MAP point")
+        print("***********************************************")
+        print("***********************************************")
+        # Line search distances
+        alphas = np.logspace(-4, 0, 11)
+        # Find MAP point
+        for i in range(n_iters):
+            log_pi, g, H, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(X, Y_obs, compute_hessian=True)
+            p = Hinv @ -g
+            alpha_index = np.nanargmin(
+                [
+                    self.get_log_like_gradient_and_hessian(X + alpha * p, Y_obs, compute_hessian=False)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    for alpha in alphas
+                ]
+            )
+            mu = X + alphas[alpha_index] * p
+            X.data = mu.data
+            if i % print_interval == 0:
+                print("===============================================")
+                print(
+                    "iter: {0:d}, ln(P): {1:6.1f}, curr. m: {2:4.4f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f},{8:4.2f},{9:4.2f}".format(
+                        i, log_pi, *X.data.cpu().numpy()
+                    )
+                )
+                print("===============================================")
+        return X
 
-    return -(alpha * L1 + L2)
-
-
-def get_log_like_gradient_and_hessian(V, X, m, eps=1e-2, compute_hessian=False):
-    print(V, X, m)
-    log_pi = V(X, m)
-    if compute_hessian:
-        g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-        H = torch.stack([torch.autograd.grad(e, X, retain_graph=True)[0] for e in g])
-        lamda, Q = torch.eig(H, eigenvectors=True)
-        lamda_prime = torch.sqrt(lamda[:, 0] ** 2 + eps)
-        lamda_prime_inv = 1.0 / torch.sqrt(lamda[:, 0] ** 2 + eps)
-        H = Q @ torch.diag(lamda_prime) @ Q.T
-        Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
-        log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
-        return log_pi, g, H, Hinv, log_det_Hinv
-    else:
-        return log_pi
-
-
-def find_MAP(X, m, n_iters=50, print_interval=10):
-    print("***********************************************")
-    print("***********************************************")
-    print("Finding MAP point")
-    print("***********************************************")
-    print("***********************************************")
-    # Line search distances
-    alphas = np.logspace(-4, 0, 11)
-    # Find MAP point
-    for i in range(n_iters):
-        log_pi, g, H, Hinv, log_det_Hinv = get_log_like_gradient_and_hessian(V, X, m, compute_hessian=True)
-        p = Hinv @ -g
-        alpha_index = np.nanargmin(
-            [
-                get_log_like_gradient_and_hessian(V, X + alpha * p, m, compute_hessian=False).detach().cpu().numpy()
-                for alpha in alphas
-            ]
+    def V(self, X, Y_obs):
+        Y_pred = 10 ** self.model(X, add_mean=True)
+        r = Y_pred - Y_obs
+        X_bar = (X - X_min) / (X_max - X_min)
+        L1 = torch.sum(
+            np.log(gamma((nu + 1) / 2.0))
+            - np.log(gamma(nu / 2.0))
+            - np.log(np.sqrt(np.pi * nu) * sigma_hat)
+            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
         )
-        mu = X + alphas[alpha_index] * p
-        X.data = mu.data
-        if i % print_interval == 0:
-            print("===============================================")
-            print(
-                "iter: {0:d}, ln(P): {1:6.1f}, curr. m: {2:4.4f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f},{8:4.2f},{9:4.2f}".format(
-                    i, log_pi, *X.data.cpu().numpy()
+        L2 = torch.sum((alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar))
+
+        return -(alpha * L1 + L2)
+
+    def get_log_like_gradient_and_hessian(self, X, Y_obs, eps=1e-2, compute_hessian=False):
+
+        log_pi = self.V(X, Y_obs)
+        if compute_hessian:
+            g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
+            H = torch.stack([torch.autograd.grad(e, X, retain_graph=True)[0] for e in g])
+            lamda, Q = torch.eig(H, eigenvectors=True)
+            lamda_prime = torch.sqrt(lamda[:, 0] ** 2 + eps)
+            lamda_prime_inv = 1.0 / torch.sqrt(lamda[:, 0] ** 2 + eps)
+            H = Q @ torch.diag(lamda_prime) @ Q.T
+            Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
+            log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
+            return log_pi, g, H, Hinv, log_det_Hinv
+        else:
+            return log_pi
+
+    def draw_sample(self, mu, cov, eps=1e-10):
+        L = torch.cholesky(cov + eps * torch.eye(cov.shape[0], device=device))
+        return mu + L @ torch.randn(L.shape[0], device=device)
+
+    def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
+        return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+
+    def MALA_step(self, X, Y_obs, h, local_data=None):
+        if local_data is not None:
+            pass
+        else:
+            local_data = self.get_log_like_gradient_and_hessian(X, Y_obs, compute_hessian=True)
+
+        log_pi, g, H, Hinv, log_det_Hinv = local_data
+
+        X_ = self.draw_sample(X, 2 * h * Hinv).detach()
+        X_.requires_grad = True
+
+        log_pi_ = self.get_log_like_gradient_and_hessian(X_, Y_obs, compute_hessian=False)
+
+        logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
+        logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
+
+        log_alpha = -log_pi_ + logq_ + log_pi - logq
+        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
+        u = torch.rand(1, device=device)
+        if u <= alpha and log_alpha != np.inf:
+            X.data = X_.data
+            local_data = self.get_log_like_gradient_and_hessian(X, Y_obs, compute_hessian=True)
+            s = 1
+        else:
+            s = 0
+        return X, local_data, s
+
+    def MALA(
+        self,
+        X,
+        Y_obs,
+        n_iters=10001,
+        h=0.1,
+        h_max=1.0,
+        acc_target=0.25,
+        k=0.01,
+        beta=0.99,
+        posterior_dir="./posterior_samples/",
+        model_index=0,
+        save_interval=1000,
+        print_interval=50,
+    ):
+        print("***********************************************")
+        print("***********************************************")
+        print("Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(model_index))
+        print("***********************************************")
+        print("***********************************************")
+
+        if not os.path.isdir(posterior_dir):
+            os.makedirs(posterior_dir)
+
+        local_data = None
+        vars = []
+        acc = acc_target
+        print(n_iters)
+        for i in range(n_iters):
+            X, local_data, s = self.MALA_step(X, Y_obs, h, local_data=local_data)
+            vars.append(X.detach())
+            acc = beta * acc + (1 - beta) * s
+            h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
+            if i % print_interval == 0:
+                print("===============================================")
+                print("sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(i, acc, local_data[0].item()))
+                print(
+                    "curr. m: {0:4.4f},{1:4.2f},{2:4.2f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f}".format(
+                        *X.data.cpu().numpy()
+                    )
                 )
-            )
-            print("===============================================")
-    return X
+                print("===============================================")
 
-
-def draw_sample(mu, cov, eps=1e-10):
-    L = torch.cholesky(cov + eps * torch.eye(cov.shape[0], device=device))
-    return mu + L @ torch.randn(L.shape[0], device=device)
-
-
-def get_proposal_likelihood(Y, mu, inverse_cov, log_det_cov):
-    return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
-
-
-def MALA_step(X, h, local_data=None):
-    if local_data is not None:
-        pass
-    else:
-        local_data = get_log_like_gradient_and_hessian(V, X, compute_hessian=True)
-
-    log_pi, g, H, Hinv, log_det_Hinv = local_data
-
-    X_ = draw_sample(X, 2 * h * Hinv).detach()
-    X_.requires_grad = True
-
-    log_pi_ = get_log_like_gradient_and_hessian(V, X_, compute_hessian=False)
-
-    logq = get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
-    logq_ = get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
-
-    log_alpha = -log_pi_ + logq_ + log_pi - logq
-    alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
-    u = torch.rand(1, device=device)
-    if u <= alpha and log_alpha != np.inf:
-        X.data = X_.data
-        local_data = get_log_like_gradient_and_hessian(V, X, compute_hessian=True)
-        s = 1
-    else:
-        s = 0
-    return X, local_data, s
-
-
-def MALA(
-    X,
-    n_iters=10001,
-    h=0.1,
-    h_max=1.0,
-    acc_target=0.25,
-    k=0.01,
-    beta=0.99,
-    sample_path="./samples/",
-    model_index=0,
-    save_interval=1000,
-    print_interval=50,
-):
-    print("***********************************************")
-    print("***********************************************")
-    print("Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(model_index))
-    print("***********************************************")
-    print("***********************************************")
-    local_data = None
-    vars = []
-    acc = acc_target
-    for i in range(n_iters):
-        X, local_data, s = MALA_step(X, h, local_data=local_data)
-        vars.append(X.detach())
-        acc = beta * acc + (1 - beta) * s
-        h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
-        if i % print_interval == 0:
-            print("===============================================")
-            print("sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(i, acc, local_data[0].item()))
-            print(
-                "curr. m: {0:4.4f},{1:4.2f},{2:4.2f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f}".format(
-                    *X.data.cpu().numpy()
-                )
-            )
-            print("===============================================")
-
-        if i % save_interval == 0:
-            print("///////////////////////////////////////////////")
-            print("Saving samples for model {0:03d}".format(model_index))
-            print("///////////////////////////////////////////////")
-            X_posterior = torch.stack(vars).cpu().numpy()
-            np.save(open(sample_path + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"), X_posterior)
-    X_posterior = torch.stack(vars).cpu().numpy()
-    return X_posterior
+            if i % save_interval == 0:
+                print("///////////////////////////////////////////////")
+                print("Saving samples for model {0:03d}".format(model_index))
+                print("///////////////////////////////////////////////")
+                X_posterior = torch.stack(vars).cpu().numpy()
+                np.save(open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"), X_posterior)
+        X_posterior = torch.stack(vars).cpu().numpy()
+        return X_posterior
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -174,6 +182,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self,
         data_dir="path/to/dir",
         samples_file="path/to/file",
+        target_file=None,
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
@@ -181,7 +190,16 @@ class PISMDataset(torch.utils.data.Dataset):
     ):
         self.data_dir = data_dir
         self.samples_file = samples_file
+        self.target_file = target_file
+        self.thinning_factor = thinning_factor
+        self.epsilon = epsilon
+        self.log_y = log_y
+        self.normalize_x = normalize_x
+        self.load_data()
 
+    def load_data(self):
+        epsilon = self.epsilon
+        thinning_factor = self.thinning_factor
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
@@ -207,6 +225,7 @@ class PISMDataset(torch.utils.data.Dataset):
 
         samples = samples.drop(samples.columns[0], axis=1)
         m_samples, n_parameters = samples.shape
+        self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
         _, my, mx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
@@ -223,7 +242,7 @@ class PISMDataset(torch.utils.data.Dataset):
             response[idx, :] = data
             ds.close()
 
-        if log_y:
+        if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
 
@@ -234,7 +253,7 @@ class PISMDataset(torch.utils.data.Dataset):
         Y = torch.from_numpy(Y)
         Y[Y < 0] = 0
 
-        if normalize_x:
+        if self.normalize_x:
             X_mean = X.mean(axis=0)
             X_std = X.std(axis=0)
             self.X_mean = X_mean
@@ -243,7 +262,6 @@ class PISMDataset(torch.utils.data.Dataset):
 
         self.X = X
         self.Y = Y
-        self.normalize_x = normalize_x
 
         n_parameters = X.shape[1]
         self.n_parameters = n_parameters
@@ -321,13 +339,13 @@ class GlacierEmulator(pl.LightningModule):
         n_parameters,
         n_eigenglaciers,
         area,
-        n_hidden_1,
-        n_hidden_2,
-        n_hidden_3,
-        n_hidden_4,
         V_hat,
         F_mean,
         hparams,
+        n_hidden_1: int = 128,
+        n_hidden_2: int = 128,
+        n_hidden_3: int = 128,
+        n_hidden_4: int = 128,
     ):
         super().__init__()
         # Inputs to hidden layer linear transformation
@@ -468,11 +486,6 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     np.random.seed(0)
 
-    n_hidden_1 = 128
-    n_hidden_2 = 128
-    n_hidden_3 = 128
-    n_hidden_4 = 128
-
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
 
@@ -497,10 +510,6 @@ if __name__ == "__main__":
             n_parameters,
             n_eigenglaciers,
             normed_area,
-            n_hidden_1,
-            n_hidden_2,
-            n_hidden_3,
-            n_hidden_4,
             V_hat,
             F_mean,
             hparams,
@@ -514,22 +523,15 @@ if __name__ == "__main__":
         trainer = pl.Trainer(callbacks=[lr_monitor, early_stop_callback], logger=logger)
         # trainer = pl.Trainer(callbacks=[lr_monitor], logger=logger)
         # trainer = pl.Trainer(logger=logger, auto_lr_find="my_value")
-        # lr_finder = trainer.tuner.lr_find(e, train_loader)
+        # lr_finder = trainer.tuner.lr_find(e, data_loader)
         trainer.fit(e, data_loader)
         # trainer.test(e, data_loader)
-        # e.eval()
-        # X_test, F_test, omegas_test, omegas_0_test = data_loader.test_data
-        # F_train_pred = e(X_train)
-        # # Make a prediction based on the model
-        # loss_train = e.criterion_ae(F_train_pred, F_train, omegas, normed_area)
-        # # Make a prediction based on the model
-        # loss_test = e.criterion_ae(F_train_pred, F_train, omegas_0, normed_area)
 
-        # torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
+        torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
 
     o_file = "../data/validation/greenland_vel_mosaic250_v1_g1800m.nc"
     o_xr = xr.open_dataset(o_file)
-    grid_resolution = np.abs(np.diff(o_xr.variables["x"][0:2]))
+    grid_resolution = np.abs(np.diff(o_xr.variables["x"][0:2]))[0]
     o_speed = o_xr.variables["velsurf_mag"].values[::thinning_factor, ::thinning_factor]
     o_speed_sigma = o_xr.variables["velsurf_mag_error"].values[::thinning_factor, ::thinning_factor]
 
@@ -549,28 +551,21 @@ if __name__ == "__main__":
 
     models = []
     for i in range(num_models):
-        state_dict = torch.load(f"emulator_ensemble/emulator_pl_lr_{i}.h5")
+        state_dict = torch.load(f"{emulator_dir}/emulator_pl_lr_{i}.h5")
         e = GlacierEmulator(
             state_dict["l_1.weight"].shape[1],
             state_dict["V_hat"].shape[1],
             normed_area,
-            n_hidden_1,
-            n_hidden_2,
-            n_hidden_3,
-            n_hidden_4,
             state_dict["V_hat"],
             state_dict["F_mean"],
+            hparams,
         )
         e.load_state_dict(state_dict)
         e.to(device)
         e.eval()
         models.append(e)
 
-    from scipy.spatial.distance import pdist, squareform
-
     sigma2 = 10 ** 2
-
-    l_model = 1e4
 
     rho = 1.0 / (1e4 ** 2)
     point_area = (grid_resolution * thinning_factor) ** 2
@@ -594,18 +589,29 @@ if __name__ == "__main__":
     X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
     torch.manual_seed(0)
     np.random.seed(0)
+
+    # Needs
+    # alpha_b, beta_b: float
+    # alpha: float
+    # nu: float
+    # gamma
+    # sigma_hat
+
+    X_posteriors = []
     for j, m in enumerate(models):
         X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device)
-        X_0 = find_MAP(X_0, m, n_iters=50)
+        mala = MALASampler(models[0])
+        X_map = mala.find_MAP(X_0, U_obs)
         # To reproduce the paper, n_iters should be 10^5
-        X_posterior = MALA(X_0, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
+        X_posterior = mala.MALA(X_map, U_obs, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
+        X_posteriors.append(X_posterior)
 
     from matplotlib.ticker import NullFormatter, ScalarFormatter
     from matplotlib.patches import Polygon
     from matplotlib.collections import PatchCollection
 
     # X_posterior = X_posterior*X_s.cpu().numpy() + X_m.cpu().numpy()
-    X_prior = X_prior * X_s.cpu().numpy() + X_m.cpu().numpy()
+    X_prior = X_prior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
     X_hat = X_prior
 
@@ -613,10 +619,10 @@ if __name__ == "__main__":
     X_list = []
 
     for model_index in range(n_models):
-        X_list.append(np.load(open("./samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
+        X_list.append(np.load(open("./posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
 
         X_posterior = np.vstack(X_list)
-        X_posterior = X_posterior * X_s.cpu().numpy() + X_m.cpu().numpy()
+        X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
         C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
         Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
@@ -714,7 +720,7 @@ if __name__ == "__main__":
             else:
                 axs[i, j].remove()
 
-    keys = samples.keys()
+    keys = dataset.X_keys
 
     for i, ax in enumerate(axs[:, 0]):
         ax.set_ylabel(keys[i])
