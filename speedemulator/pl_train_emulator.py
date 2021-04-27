@@ -27,7 +27,7 @@ class MALASampler(object):
         super().__init__()
         self.model = model.eval()
 
-    def find_MAP(self, X, Y_obs, n_iters=50, print_interval=10):
+    def find_MAP(self, X, Y_target, n_iters=50, print_interval=10):
         print("***********************************************")
         print("***********************************************")
         print("Finding MAP point")
@@ -37,11 +37,13 @@ class MALASampler(object):
         alphas = np.logspace(-4, 0, 11)
         # Find MAP point
         for i in range(n_iters):
-            log_pi, g, H, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(X, Y_obs, compute_hessian=True)
+            log_pi, g, H, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+                X, Y_target, compute_hessian=True
+            )
             p = Hinv @ -g
             alpha_index = np.nanargmin(
                 [
-                    self.get_log_like_gradient_and_hessian(X + alpha * p, Y_obs, compute_hessian=False)
+                    self.get_log_like_gradient_and_hessian(X + alpha * p, Y_target, compute_hessian=False)
                     .detach()
                     .cpu()
                     .numpy()
@@ -60,9 +62,9 @@ class MALASampler(object):
                 print("===============================================")
         return X
 
-    def V(self, X, Y_obs):
+    def V(self, X, Y_target):
         Y_pred = 10 ** self.model(X, add_mean=True)
-        r = Y_pred - Y_obs
+        r = Y_pred - Y_target
         X_bar = (X - X_min) / (X_max - X_min)
         L1 = torch.sum(
             np.log(gamma((nu + 1) / 2.0))
@@ -74,9 +76,9 @@ class MALASampler(object):
 
         return -(alpha * L1 + L2)
 
-    def get_log_like_gradient_and_hessian(self, X, Y_obs, eps=1e-2, compute_hessian=False):
+    def get_log_like_gradient_and_hessian(self, X, Y_target, eps=1e-2, compute_hessian=False):
 
-        log_pi = self.V(X, Y_obs)
+        log_pi = self.V(X, Y_target)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
             H = torch.stack([torch.autograd.grad(e, X, retain_graph=True)[0] for e in g])
@@ -97,18 +99,18 @@ class MALASampler(object):
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
-    def MALA_step(self, X, Y_obs, h, local_data=None):
+    def MALA_step(self, X, Y_target, h, local_data=None):
         if local_data is not None:
             pass
         else:
-            local_data = self.get_log_like_gradient_and_hessian(X, Y_obs, compute_hessian=True)
+            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, compute_hessian=True)
 
         log_pi, g, H, Hinv, log_det_Hinv = local_data
 
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
 
-        log_pi_ = self.get_log_like_gradient_and_hessian(X_, Y_obs, compute_hessian=False)
+        log_pi_ = self.get_log_like_gradient_and_hessian(X_, Y_target, compute_hessian=False)
 
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
@@ -118,7 +120,7 @@ class MALASampler(object):
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
             X.data = X_.data
-            local_data = self.get_log_like_gradient_and_hessian(X, Y_obs, compute_hessian=True)
+            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, compute_hessian=True)
             s = 1
         else:
             s = 0
@@ -127,7 +129,7 @@ class MALASampler(object):
     def MALA(
         self,
         X,
-        Y_obs,
+        Y_target,
         n_iters=10001,
         h=0.1,
         h_max=1.0,
@@ -153,7 +155,7 @@ class MALASampler(object):
         acc = acc_target
         print(n_iters)
         for i in range(n_iters):
-            X, local_data, s = self.MALA_step(X, Y_obs, h, local_data=local_data)
+            X, local_data, s = self.MALA_step(X, Y_target, h, local_data=local_data)
             vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
@@ -183,6 +185,7 @@ class PISMDataset(torch.utils.data.Dataset):
         data_dir="path/to/dir",
         samples_file="path/to/file",
         target_file=None,
+        target_var="velsurf_mag",
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
@@ -191,11 +194,28 @@ class PISMDataset(torch.utils.data.Dataset):
         self.data_dir = data_dir
         self.samples_file = samples_file
         self.target_file = target_file
+        self.target_var = target_var
         self.thinning_factor = thinning_factor
         self.epsilon = epsilon
         self.log_y = log_y
         self.normalize_x = normalize_x
         self.load_data()
+        if target_file is not None:
+            self.load_target()
+
+    def load_target(self):
+        epsilon = self.epsilon
+        ds = xr.open_dataset(self.target_file)
+        data = np.nan_to_num(
+            ds.variables[self.target_var].values[:: self.thinning_factor, :: self.thinning_factor], epsilon
+        )
+        grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
+        ds.close()
+
+        Y_target = np.array(data.flatten(), dtype=np.float32)
+        Y_target = torch.from_numpy(Y_target)
+        self.Y_target = Y_target
+        self.grid_resolution = grid_resolution
 
     def load_data(self):
         epsilon = self.epsilon
@@ -253,11 +273,12 @@ class PISMDataset(torch.utils.data.Dataset):
         Y = torch.from_numpy(Y)
         Y[Y < 0] = 0
 
+        X_mean = X.mean(axis=0)
+        X_std = X.std(axis=0)
+        self.X_mean = X_mean
+        self.X_std = X_std
+
         if self.normalize_x:
-            X_mean = X.mean(axis=0)
-            X_std = X.std(axis=0)
-            self.X_mean = X_mean
-            self.X_std = X_std
             X = (X - X_mean) / X_std
 
         self.X = X
@@ -272,6 +293,12 @@ class PISMDataset(torch.utils.data.Dataset):
         normed_area = torch.tensor(np.ones(n_grid_points))
         normed_area /= normed_area.sum()
         self.normed_area = normed_area
+
+    def return_original(self):
+        if self.normalize_x:
+            return self.X * self.X_std + self.X_mean
+        else:
+            return self.X
 
 
 class PISMDataModule(pl.LightningDataModule):
@@ -416,7 +443,7 @@ class GlacierEmulator(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def criterion_ae(self, F_pred, F_obs, omegas, area):
-        instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
+        instance_misfit = torch.sum(torch.abs(F_pred - F_obs) ** 2 * area, axis=1)
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def training_step(self, batch, batch_idx):
@@ -470,9 +497,12 @@ if __name__ == "__main__":
     num_models = hparams_args.num_models
     thinning_factor = hparams_args.thinning_factor
 
+    device = "cpu"
+
     dataset = PISMDataset(
         data_dir="../data/speeds_v2/",
         samples_file="../data/samples/velocity_calibration_samples_100.csv",
+        target_file="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc",
         thinning_factor=thinning_factor,
     )
 
@@ -520,29 +550,14 @@ if __name__ == "__main__":
             monitor="train_loss", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
         )
         logger = TensorBoardLogger("tb_logs_test", name="PISM Speed Emulator")
-        trainer = pl.Trainer(callbacks=[lr_monitor, early_stop_callback], logger=logger)
-        # trainer = pl.Trainer(callbacks=[lr_monitor], logger=logger)
+        # trainer = pl.Trainer(callbacks=[lr_monitor, early_stop_callback], logger=logger)
+        trainer = pl.Trainer(callbacks=[lr_monitor], logger=logger)
         # trainer = pl.Trainer(logger=logger, auto_lr_find="my_value")
         # lr_finder = trainer.tuner.lr_find(e, data_loader)
-        trainer.fit(e, data_loader)
+        # trainer.fit(e, data_loader)
+        # torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
+
         # trainer.test(e, data_loader)
-
-        torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
-
-    o_file = "../data/validation/greenland_vel_mosaic250_v1_g1800m.nc"
-    o_xr = xr.open_dataset(o_file)
-    grid_resolution = np.abs(np.diff(o_xr.variables["x"][0:2]))[0]
-    o_speed = o_xr.variables["velsurf_mag"].values[::thinning_factor, ::thinning_factor]
-    o_speed_sigma = o_xr.variables["velsurf_mag_error"].values[::thinning_factor, ::thinning_factor]
-
-    o_ny, o_nx = o_speed.shape
-    o_xr.close()
-
-    ny, nx = o_speed.shape
-
-    device = "cpu"
-    U_obs = torch.tensor(np.nan_to_num(o_speed.ravel()))
-    U_obs = U_obs.to(torch.float32).to(device)
 
     alpha = 0.01
     from scipy.special import gamma
@@ -568,7 +583,7 @@ if __name__ == "__main__":
     sigma2 = 10 ** 2
 
     rho = 1.0 / (1e4 ** 2)
-    point_area = (grid_resolution * thinning_factor) ** 2
+    point_area = (dataset.grid_resolution * thinning_factor) ** 2
     K = point_area * rho
 
     Tau = K * 1.0 / sigma2 * K
@@ -580,13 +595,18 @@ if __name__ == "__main__":
     alpha_b = 3.0
     beta_b = 3.0
 
-    X_min = X.cpu().numpy().min(axis=0) - 1e-3
-    X_max = X.cpu().numpy().max(axis=0) + 1e-3
+    X_min = dataset.return_original().cpu().numpy().min(axis=0) - 1e-3
+    X_max = dataset.return_original().cpu().numpy().max(axis=0) + 1e-3
 
     X_prior = beta.rvs(alpha_b, beta_b, size=(10000, X.shape[1])) * (X_max - X_min) + X_min
 
+    # This is required for
+    # X_bar = (X - X_min) / (X_max - X_min)
+    # to work
+
     X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
     X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
+
     torch.manual_seed(0)
     np.random.seed(0)
 
@@ -596,16 +616,18 @@ if __name__ == "__main__":
     # nu: float
     # gamma
     # sigma_hat
+    U_target = dataset.Y_target
 
     X_posteriors = []
-    for j, m in enumerate(models):
+    for j, model in enumerate(models):
         X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device)
-        mala = MALASampler(models[0])
-        X_map = mala.find_MAP(X_0, U_obs)
+        mala = MALASampler(model)
+        X_map = mala.find_MAP(X_0, U_target)
         # To reproduce the paper, n_iters should be 10^5
-        X_posterior = mala.MALA(X_map, U_obs, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
+        X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
         X_posteriors.append(X_posterior)
 
+    import pylab as plt
     from matplotlib.ticker import NullFormatter, ScalarFormatter
     from matplotlib.patches import Polygon
     from matplotlib.collections import PatchCollection
@@ -618,7 +640,7 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(nrows=8, ncols=8, figsize=(12, 12))
     X_list = []
 
-    for model_index in range(n_models):
+    for model_index in range(num_models):
         X_list.append(np.load(open("./posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
 
         X_posterior = np.vstack(X_list)
