@@ -15,7 +15,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 from torch.utils.data import DataLoader, TensorDataset
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, ExponentialLR
 import xarray as xr
 import re
 from tqdm import tqdm
@@ -205,10 +205,9 @@ class PISMDataset(torch.utils.data.Dataset):
 
     def load_target(self):
         epsilon = self.epsilon
+        thinning_factor = self.thinning_factor
         ds = xr.open_dataset(self.target_file)
-        data = np.nan_to_num(
-            ds.variables[self.target_var].values[:: self.thinning_factor, :: self.thinning_factor], epsilon
-        )
+        data = np.nan_to_num(ds.variables[self.target_var].values[::thinning_factor, ::thinning_factor], epsilon)
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         ds.close()
 
@@ -248,10 +247,12 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, my, mx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
+        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
         ds0.close()
+        self.nx = nx
+        self.ny = ny
 
-        response = np.zeros((m_samples, my * mx))
+        response = np.zeros((m_samples, ny * nx))
 
         print("  Loading data sets...")
         for idx, m_file in tqdm(enumerate(training_files)):
@@ -436,10 +437,13 @@ class GlacierEmulator(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), self.learning_rate, weight_decay=0.0)
         scheduler = {
-            "scheduler": ReduceLROnPlateau(optimizer),
+            "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
             "reduce_on_plateau": True,
-            "monitor": "test_loss_epoch",
+            "monitor": "loss",
         }
+        # scheduler = {
+        #     "scheduler": ExponentialLR(optimizer, 0.1),
+        # }
         return [optimizer], [scheduler]
 
     def criterion_ae(self, F_pred, F_obs, omegas, area):
@@ -449,28 +453,42 @@ class GlacierEmulator(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
-        train_loss = self.criterion_ae(f_pred, f, o, self.area)
-        test_loss = self.criterion_ae(f_pred, f, o_0, self.area)
-        self.log("train_loss", train_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("test_loss", test_loss, on_step=True, on_epoch=True, prog_bar=True)
+        loss = self.criterion_ae(f_pred, f, o, self.area)
+        # test_loss = self.criterion_ae(f_pred, f, o_0, self.area)
+        self.log("loss", loss, on_step=True, on_epoch=False, prog_bar=True)
+        # self.log("test_loss", test_loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        return {"loss": train_loss, "x": x, "f": f, "omegas_0": o_0}
+        return {"loss": loss, "x": x, "f": f, "omegas": o, "omegas_0": o_0}
 
-    # def training_epoch_end(self, outputs):
-    #     x = []
-    #     f = []
-    #     omegas_0 = []
-    #     for out in outputs:
-    #         x.append(out["x"])
-    #         f.append(out["f"])
-    #         omegas_0.append(out["omegas_0"])
-    #     x = torch.vstack(x)
-    #     f = torch.vstack(f)
-    #     omegas_0 = torch.vstack(omegas_0)
-    #     f_pred = self.trainer.model.eval().forward(x)
-    #     # f_pred = self.forward(x)
-    #     test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
-    #     self.log("epoch_test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
+    def on_train_epoch_end(self, outputs):
+        print(len(outputs))
+        print(len(outputs[0]))
+        print(len(outputs[0][0]))
+        print(len(outputs[0][0][0]))
+        x = []
+        f = []
+        omegas_0 = []
+        omegas = []
+        for k, out in enumerate(outputs[0]):
+            o = out[0]["extra"]
+            x.append(o["x"])
+            f.append(o["f"])
+            omegas.append(o["omegas"])
+            omegas_0.append(o["omegas_0"])
+        x = torch.vstack(x)
+        f = torch.vstack(f)
+        omegas = torch.vstack(omegas)
+        omegas_0 = torch.vstack(omegas_0)
+        f_pred = self.trainer.model.eval().forward(x)
+        train_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+        test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+
+        # f_pred = self.trainer.model.eval().forward(out["x"])
+        # # f_pred = self.forward(x)
+        # train_loss = self.criterion_ae(f_pred, out["f"], out["omegas"], self.area)
+        # test_loss = self.criterion_ae(f_pred, out["f"], out["omegas_0"], self.area)
+        self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         x, f, o, o_0 = batch
@@ -547,15 +565,15 @@ if __name__ == "__main__":
 
         lr_monitor = LearningRateMonitor(logging_interval="step")
         early_stop_callback = EarlyStopping(
-            monitor="train_loss", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
+            monitor="loss", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
         )
         logger = TensorBoardLogger("tb_logs_test", name="PISM Speed Emulator")
         # trainer = pl.Trainer(callbacks=[lr_monitor, early_stop_callback], logger=logger)
         trainer = pl.Trainer(callbacks=[lr_monitor], logger=logger)
         # trainer = pl.Trainer(logger=logger, auto_lr_find="my_value")
         # lr_finder = trainer.tuner.lr_find(e, data_loader)
-        # trainer.fit(e, data_loader)
-        # torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
+        trainer.fit(e, data_loader)
+        torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
 
         # trainer.test(e, data_loader)
 
@@ -595,8 +613,8 @@ if __name__ == "__main__":
     alpha_b = 3.0
     beta_b = 3.0
 
-    X_min = dataset.return_original().cpu().numpy().min(axis=0) - 1e-3
-    X_max = dataset.return_original().cpu().numpy().max(axis=0) + 1e-3
+    X_min = X.cpu().numpy().min(axis=0) - 1e-3
+    X_max = X.cpu().numpy().max(axis=0) + 1e-3
 
     X_prior = beta.rvs(alpha_b, beta_b, size=(10000, X.shape[1])) * (X_max - X_min) + X_min
 
@@ -644,7 +662,7 @@ if __name__ == "__main__":
         X_list.append(np.load(open("./posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
 
         X_posterior = np.vstack(X_list)
-        X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
+        # X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
         C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
         Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
