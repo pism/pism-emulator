@@ -461,10 +461,6 @@ class GlacierEmulator(pl.LightningModule):
         return {"loss": loss, "x": x, "f": f, "omegas": o, "omegas_0": o_0}
 
     def on_train_epoch_end(self, outputs):
-        print(len(outputs))
-        print(len(outputs[0]))
-        print(len(outputs[0][0]))
-        print(len(outputs[0][0][0]))
         x = []
         f = []
         omegas_0 = []
@@ -480,13 +476,16 @@ class GlacierEmulator(pl.LightningModule):
         omegas = torch.vstack(omegas)
         omegas_0 = torch.vstack(omegas_0)
         f_pred = self.trainer.model.eval().forward(x)
+        f_pred_train = self.trainer.model.train().forward(x)
         train_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+        train_loss_train = self.criterion_ae(f_pred_train, f, omegas_0, self.area)
         test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
 
         # f_pred = self.trainer.model.eval().forward(out["x"])
         # # f_pred = self.forward(x)
         # train_loss = self.criterion_ae(f_pred, out["f"], out["omegas"], self.area)
         # test_loss = self.criterion_ae(f_pred, out["f"], out["omegas_0"], self.area)
+        self.log("train_loss_train", train_loss_train, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
