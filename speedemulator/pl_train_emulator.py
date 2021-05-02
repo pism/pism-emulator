@@ -316,18 +316,15 @@ class PISMDataModule(pl.LightningDataModule):
     def setup(self, stage: str = None):
 
         data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
-        training_data, test_data = train_test_split(data, test_size=self.test_size)
-        self.training_data = training_data
-        self.test_data = test_data
+        # training_data, test_data = train_test_split(data, test_size=self.test_size)
+        self.training_data = data
+        self.test_data = data
 
-        train_loader = DataLoader(
-            dataset=training_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
-        )
+        train_loader = DataLoader(dataset=data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
         self.train_loader = train_loader
-        test_loader = DataLoader(
-            dataset=test_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
-        )
+        test_loader = DataLoader(dataset=data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
         self.test_loader = test_loader
+        self.validation_loader = test_loader
 
     def prepare_data(self):
         V_hat, F_bar, F_mean = self.get_eigenglaciers()
@@ -360,22 +357,19 @@ class PISMDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return self.test_loader
 
+    def validation_dataloader(self):
+        return self.validation_loader
+
 
 class GlacierEmulator(pl.LightningModule):
-    def __init__(
-        self,
-        n_parameters,
-        n_eigenglaciers,
-        area,
-        V_hat,
-        F_mean,
-        hparams,
-        n_hidden_1: int = 128,
-        n_hidden_2: int = 128,
-        n_hidden_3: int = 128,
-        n_hidden_4: int = 128,
-    ):
+    def __init__(self, n_parameters, n_eigenglaciers, area, V_hat, F_mean, hparams, *args, **kwargs):
         super().__init__()
+        self.hparams = hparams
+        n_hidden_1 = self.hparams.n_hidden_1
+        n_hidden_2 = self.hparams.n_hidden_2
+        n_hidden_3 = self.hparams.n_hidden_3
+        n_hidden_4 = self.hparams.n_hidden_4
+
         # Inputs to hidden layer linear transformation
         self.l_1 = nn.Linear(n_parameters, n_hidden_1)
         self.norm_1 = nn.LayerNorm(n_hidden_1)
@@ -394,7 +388,6 @@ class GlacierEmulator(pl.LightningModule):
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
         self.area = area
-        self.learning_rate = hparams["learning_rate"]
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -432,18 +425,20 @@ class GlacierEmulator(pl.LightningModule):
         parser = parent_parser.add_argument_group("GlacierEmulator")
         parser.add_argument("--batch_size", type=int, default=128)
         parser.add_argument("--learning_rate", default=0.1)
+        parser.add_argument("--n_hidden_1", type=int, default=128)
+        parser.add_argument("--n_hidden_2", type=int, default=128)
+        parser.add_argument("--n_hidden_3", type=int, default=128)
+        parser.add_argument("--n_hidden_4", type=int, default=128)
+
         return parent_parser
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
         scheduler = {
             "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
             "reduce_on_plateau": True,
-            "monitor": "loss",
+            "monitor": "val_loss_train",
         }
-        # scheduler = {
-        #     "scheduler": ExponentialLR(optimizer, 0.1),
-        # }
         return [optimizer], [scheduler]
 
     def criterion_ae(self, F_pred, F_obs, omegas, area):
@@ -454,46 +449,17 @@ class GlacierEmulator(pl.LightningModule):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
         loss = self.criterion_ae(f_pred, f, o, self.area)
-        # test_loss = self.criterion_ae(f_pred, f, o_0, self.area)
         self.log("loss", loss, on_step=True, on_epoch=False, prog_bar=True)
-        # self.log("test_loss", test_loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        return {"loss": loss, "x": x, "f": f, "omegas": o, "omegas_0": o_0}
+        return loss
 
-    def on_train_epoch_end(self, outputs):
-        x = []
-        f = []
-        omegas_0 = []
-        omegas = []
-        for k, out in enumerate(outputs[0]):
-            o = out[0]["extra"]
-            x.append(o["x"])
-            f.append(o["f"])
-            omegas.append(o["omegas"])
-            omegas_0.append(o["omegas_0"])
-        x = torch.vstack(x)
-        f = torch.vstack(f)
-        omegas = torch.vstack(omegas)
-        omegas_0 = torch.vstack(omegas_0)
-        f_pred = self.trainer.model.eval().forward(x)
-        f_pred_train = self.trainer.model.train().forward(x)
-        train_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
-        train_loss_train = self.criterion_ae(f_pred_train, f, omegas_0, self.area)
-        test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
-
-        # f_pred = self.trainer.model.eval().forward(out["x"])
-        # # f_pred = self.forward(x)
-        # train_loss = self.criterion_ae(f_pred, out["f"], out["omegas"], self.area)
-        # test_loss = self.criterion_ae(f_pred, out["f"], out["omegas_0"], self.area)
-        self.log("train_loss_train", train_loss_train, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
-
-    def test_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
-        loss = self.criterion_ae(f_pred, f, o, self.area)
-        self.log("test_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        train_loss = self.criterion_ae(f_pred, f, o, self.area)
+        test_loss = self.criterion_ae(f_pred, f, o_0, self.area)
+        self.log("val_loss_train", train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val_loss_test", test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
 
 if __name__ == "__main__":
@@ -506,13 +472,13 @@ if __name__ == "__main__":
 
     parser = GlacierEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
-    hparams_args = parser.parse_args()
-    hparams = vars(hparams_args)
+    args = parser.parse_args()
+    # hparams = vars(args)
 
-    batch_size = hparams_args.batch_size
-    emulator_dir = hparams_args.emulator_dir
-    num_models = hparams_args.num_models
-    thinning_factor = hparams_args.thinning_factor
+    batch_size = args.batch_size
+    emulator_dir = args.emulator_dir
+    num_models = args.num_models
+    thinning_factor = args.thinning_factor
 
     device = "cpu"
 
@@ -553,28 +519,17 @@ if __name__ == "__main__":
         V_hat = data_loader.V_hat
         F_mean = data_loader.F_mean
         F_train = data_loader.F_bar
-        e = GlacierEmulator(
-            n_parameters,
-            n_eigenglaciers,
-            normed_area,
-            V_hat,
-            F_mean,
-            hparams,
-        )
+        e = GlacierEmulator(n_parameters, n_eigenglaciers, normed_area, V_hat, F_mean, args)
 
-        lr_monitor = LearningRateMonitor(logging_interval="step")
+        lr_monitor = LearningRateMonitor(logging_interval="epoch")
         early_stop_callback = EarlyStopping(
-            monitor="loss", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
+            monitor="val_loss_train", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
         )
         logger = TensorBoardLogger("tb_logs_test", name="PISM Speed Emulator")
         # trainer = pl.Trainer(callbacks=[lr_monitor, early_stop_callback], logger=logger)
-        trainer = pl.Trainer(callbacks=[lr_monitor], logger=logger)
-        # trainer = pl.Trainer(logger=logger, auto_lr_find="my_value")
-        # lr_finder = trainer.tuner.lr_find(e, data_loader)
-        trainer.fit(e, data_loader)
+        trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor], logger=logger)
+        trainer.fit(e, data_loader.train_loader, data_loader.train_loader)
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
-
-        # trainer.test(e, data_loader)
 
     alpha = 0.01
     from scipy.special import gamma
@@ -590,7 +545,7 @@ if __name__ == "__main__":
             normed_area,
             state_dict["V_hat"],
             state_dict["F_mean"],
-            hparams,
+            args,
         )
         e.load_state_dict(state_dict)
         e.to(device)
