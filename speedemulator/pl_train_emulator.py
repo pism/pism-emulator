@@ -424,7 +424,7 @@ class GlacierEmulator(pl.LightningModule):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("GlacierEmulator")
         parser.add_argument("--batch_size", type=int, default=128)
-        parser.add_argument("--learning_rate", default=0.1)
+        parser.add_argument("--learning_rate", default=0.01)
         parser.add_argument("--n_hidden_1", type=int, default=128)
         parser.add_argument("--n_hidden_2", type=int, default=128)
         parser.add_argument("--n_hidden_3", type=int, default=128)
@@ -434,10 +434,13 @@ class GlacierEmulator(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        # scheduler = {
+        #     "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
+        #     "reduce_on_plateau": True,
+        #     "monitor": "val_loss_train",
+        # }
         scheduler = {
-            "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
-            "reduce_on_plateau": True,
-            "monitor": "val_loss_train",
+            "scheduler": ExponentialLR(optimizer, 1 - 1e-2, verbose=True),
         }
         return [optimizer], [scheduler]
 
@@ -526,8 +529,8 @@ if __name__ == "__main__":
             monitor="val_loss_train", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
         )
         logger = TensorBoardLogger("tb_logs_test", name="PISM Speed Emulator")
-        # trainer = pl.Trainer(callbacks=[lr_monitor, early_stop_callback], logger=logger)
         trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor], logger=logger)
+        # trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor, early_stop_callback], logger=logger)
         trainer.fit(e, data_loader.train_loader, data_loader.train_loader)
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
 
@@ -616,7 +619,7 @@ if __name__ == "__main__":
         X_list.append(np.load(open("./posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
 
         X_posterior = np.vstack(X_list)
-        # X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
+        X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
         C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
         Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
@@ -735,4 +738,4 @@ if __name__ == "__main__":
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.tick_params(axis="both", which="both", length=0)
 
-    # fig.savefig('speed_emulator_posterior.pdf')
+    fig.savefig("speed_emulator_posterior_1000it.pdf")
