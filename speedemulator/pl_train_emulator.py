@@ -211,9 +211,11 @@ class PISMDataset(torch.utils.data.Dataset):
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         ds.close()
 
+        Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
         Y_target = torch.from_numpy(Y_target)
         self.Y_target = Y_target
+        self.Y_target_2d = Y_target_2d
         self.grid_resolution = grid_resolution
 
     def load_data(self):
@@ -315,16 +317,26 @@ class PISMDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str = None):
 
-        data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
-        # training_data, test_data = train_test_split(data, test_size=self.test_size)
-        self.training_data = data
-        self.test_data = data
+        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
+        training_data, validation_data = train_test_split(all_data, test_size=self.test_size)
+        self.training_data = training_data
+        self.test_data = training_data
+        self.validation_data = validation_data
+        self.all_data = all_data
+        all_loader = DataLoader(
+            dataset=all_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
+        )
 
-        train_loader = DataLoader(dataset=data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+        train_loader = DataLoader(
+            dataset=training_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
+        )
+        self.all_loader = all_loader
         self.train_loader = train_loader
-        test_loader = DataLoader(dataset=data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-        self.test_loader = test_loader
-        self.validation_loader = test_loader
+        self.test_loader = train_loader
+        validation_loader = DataLoader(
+            dataset=validation_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers
+        )
+        self.validation_loader = validation_loader
 
     def prepare_data(self):
         V_hat, F_bar, F_mean = self.get_eigenglaciers()
@@ -336,13 +348,13 @@ class PISMDataModule(pl.LightningDataModule):
 
     def get_eigenglaciers(self, cutoff=0.999):
         F = self.F
-        n_grid_points = F.shape[1]
         omegas = self.omegas
+        n_grid_points = F.shape[1]
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
         Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
         U, S, V = torch.svd_lowrank(Z @ F_bar, q=100)
-        lamda = S ** 2 / (n_samples)
+        lamda = S ** 2 / (n_grid_points)
 
         cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
         lamda_truncated = lamda.detach()[:cutoff_index]
@@ -434,11 +446,11 @@ class GlacierEmulator(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
-        # scheduler = {
-        #     "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
-        #     "reduce_on_plateau": True,
-        #     "monitor": "val_loss_train",
-        # }
+        scheduler = {
+            "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
+            "reduce_on_plateau": True,
+            "monitor": "test_loss",
+        }
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 1 - 1e-2, verbose=True),
         }
@@ -463,6 +475,32 @@ class GlacierEmulator(pl.LightningModule):
         test_loss = self.criterion_ae(f_pred, f, o_0, self.area)
         self.log("val_loss_train", train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val_loss_test", test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        return {"x": x, "f": f, "omegas": o, "omegas_0": o_0}
+
+    def validation_epoch_end(self, outputs):
+        x = []
+        f = []
+        omegas_0 = []
+        omegas = []
+        for k, o in enumerate(outputs):
+            x.append(o["x"])
+            f.append(o["f"])
+            omegas.append(o["omegas"])
+            omegas_0.append(o["omegas_0"])
+        x = torch.vstack(x)
+        f = torch.vstack(f)
+        omegas = torch.vstack(omegas)
+        omegas_0 = torch.vstack(omegas_0)
+        f_pred = self.trainer.model.eval().forward(x)
+        train_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+        test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+
+        # f_pred = self.trainer.model.eval().forward(out["x"])
+        # # f_pred = self.forward(x)
+        # train_loss = self.criterion_ae(f_pred, out["f"], out["omegas"], self.area)
+        # test_loss = self.criterion_ae(f_pred, out["f"], out["omegas_0"], self.area)
+        self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
 
 if __name__ == "__main__":
@@ -505,6 +543,8 @@ if __name__ == "__main__":
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
 
+    import pylab as plt
+
     for model_index in range(num_models):
         print(f"Training model {model_index} of {num_models}")
         omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
@@ -526,216 +566,251 @@ if __name__ == "__main__":
 
         lr_monitor = LearningRateMonitor(logging_interval="epoch")
         early_stop_callback = EarlyStopping(
-            monitor="val_loss_train", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
+            monitor="test_loss", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
         )
-        logger = TensorBoardLogger("tb_logs_test", name="PISM Speed Emulator")
+        logger = TensorBoardLogger("tb_logs_early", name="PISM Speed Emulator")
         trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor], logger=logger)
         # trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor, early_stop_callback], logger=logger)
-        trainer.fit(e, data_loader.train_loader, data_loader.train_loader)
+        trainer.fit(e, data_loader.all_loader, data_loader.all_loader)
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
-
-    alpha = 0.01
-    from scipy.special import gamma
-
-    nu = 1.0
-
-    models = []
-    for i in range(num_models):
-        state_dict = torch.load(f"{emulator_dir}/emulator_pl_lr_{i}.h5")
-        e = GlacierEmulator(
-            state_dict["l_1.weight"].shape[1],
-            state_dict["V_hat"].shape[1],
-            normed_area,
-            state_dict["V_hat"],
-            state_dict["F_mean"],
-            args,
-        )
-        e.load_state_dict(state_dict)
-        e.to(device)
         e.eval()
-        models.append(e)
+        fig, axs = plt.subplots(nrows=5, ncols=2, sharex="col", sharey="row", figsize=(10, 40))
+        for k in range(5):
+            idx = np.random.randint(len(data_loader.validation_data))
+            X_val, F_val, _, _ = data_loader.validation_data[idx]
+            X_val_scaled = X_val * dataset.X_std + dataset.X_mean
+            F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
+            corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
+            axs[k, 0].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap="viridis")
+            axs[k, 0].text(110, 25, f"Pearson r={corr:.3f}", c="white")
+            axs[k, 1].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap="viridis")
+            axs[k, 1].text(
+                120,
+                25,
+                "SIAE: {0:.2f}\nSSAN: {1:.2f}\nPPQ : {2:.2f}\nTEFO: {3:.2f}\nPHIM: {4:.2f}\nPHIX: {5:.2f}\nZMIN: {6:.2f}\nZMAX: {7:.2f}".format(
+                    *X_val_scaled
+                ),
+                c="white",
+            )
+        fig.subplots_adjust(wspace=0, hspace=0)
+        fig.savefig(f"speed_val_{model_index}.png")
 
-    sigma2 = 10 ** 2
+    # F_target = dataset.Y_target
 
-    rho = 1.0 / (1e4 ** 2)
-    point_area = (dataset.grid_resolution * thinning_factor) ** 2
-    K = point_area * rho
+    # models = []
+    # for i in range(num_models):
+    #     state_dict = torch.load(f"{emulator_dir}/emulator_pl_lr_{i}.h5")
+    #     e = GlacierEmulator(
+    #         state_dict["l_1.weight"].shape[1],
+    #         state_dict["V_hat"].shape[1],
+    #         normed_area,
+    #         state_dict["V_hat"],
+    #         state_dict["F_mean"],
+    #         args,
+    #     )
+    #     e.load_state_dict(state_dict)
+    #     e.to(device)
+    #     e.eval()
 
-    Tau = K * 1.0 / sigma2 * K
+    #     fig, axs = plt.subplots(nrows=5, ncols=2, sharex="col", sharey="row", figsize=(10, 40))
+    #     for k in range(5):
+    #         idx = np.random.randint(len(data_loader.validation_data))
+    #         X_val, F_val, _, _ = data_loader.validation_data[idx]
+    #         F_pred = e(X_val, add_mean=True).detach().numpy()
+    #         axs[k, 0].imshow(
+    #             10 ** F_val.reshape(dataset.ny, dataset.nx), origin="lower", vmin=0, vmax=3, cmap="viridis"
+    #         )
+    #         axs[k, 1].imshow(F_pred.reshape(dataset.ny, dataset.nx), origin="lower", vmin=0, vmax=3, cmap="viridis")
+    #         fig.subplots_adjust(wspace=0, hspace=0)
+    #     models.append(e)
 
-    sigma_hat = np.sqrt(sigma2 / K ** 2)
+    # X_val = dataset.validation_data
+    # for model in models:
+    #     model(
 
-    from scipy.stats import beta
+    # alpha = 0.01
+    # from scipy.special import gamma
 
-    alpha_b = 3.0
-    beta_b = 3.0
+    # nu = 1.0
 
-    X_min = X.cpu().numpy().min(axis=0) - 1e-3
-    X_max = X.cpu().numpy().max(axis=0) + 1e-3
+    # sigma2 = 10 ** 2
 
-    X_prior = beta.rvs(alpha_b, beta_b, size=(10000, X.shape[1])) * (X_max - X_min) + X_min
+    # rho = 1.0 / (1e4 ** 2)
+    # point_area = (dataset.grid_resolution * thinning_factor) ** 2
+    # K = point_area * rho
 
-    # This is required for
-    # X_bar = (X - X_min) / (X_max - X_min)
-    # to work
+    # Tau = K * 1.0 / sigma2 * K
 
-    X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
-    X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
+    # sigma_hat = np.sqrt(sigma2 / K ** 2)
 
-    torch.manual_seed(0)
-    np.random.seed(0)
+    # from scipy.stats import beta
 
-    # Needs
-    # alpha_b, beta_b: float
-    # alpha: float
-    # nu: float
-    # gamma
-    # sigma_hat
-    U_target = dataset.Y_target
+    # alpha_b = 3.0
+    # beta_b = 3.0
 
-    X_posteriors = []
-    for j, model in enumerate(models):
-        X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device)
-        mala = MALASampler(model)
-        X_map = mala.find_MAP(X_0, U_target)
-        # To reproduce the paper, n_iters should be 10^5
-        X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
-        X_posteriors.append(X_posterior)
+    # X_min = X.cpu().numpy().min(axis=0) - 1e-3
+    # X_max = X.cpu().numpy().max(axis=0) + 1e-3
 
-    import pylab as plt
-    from matplotlib.ticker import NullFormatter, ScalarFormatter
-    from matplotlib.patches import Polygon
-    from matplotlib.collections import PatchCollection
+    # X_prior = beta.rvs(alpha_b, beta_b, size=(10000, X.shape[1])) * (X_max - X_min) + X_min
 
-    # X_posterior = X_posterior*X_s.cpu().numpy() + X_m.cpu().numpy()
-    X_prior = X_prior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
+    # # This is required for
+    # # X_bar = (X - X_min) / (X_max - X_min)
+    # # to work
 
-    X_hat = X_prior
+    # X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
+    # X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
 
-    fig, axs = plt.subplots(nrows=8, ncols=8, figsize=(12, 12))
-    X_list = []
+    # torch.manual_seed(0)
+    # np.random.seed(0)
 
-    for model_index in range(num_models):
-        X_list.append(np.load(open("./posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
+    # # Needs
+    # # alpha_b, beta_b: float
+    # # alpha: float
+    # # nu: float
+    # # gamma
+    # # sigma_hat
+    # U_target = dataset.Y_target
 
-        X_posterior = np.vstack(X_list)
-        X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
+    # X_posteriors = []
+    # for j, model in enumerate(models):
+    #     X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device)
+    #     mala = MALASampler(model)
+    #     X_map = mala.find_MAP(X_0, U_target)
+    #     # To reproduce the paper, n_iters should be 10^5
+    #     X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
+    #     X_posteriors.append(X_posterior)
 
-        C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-        Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
+    # import pylab as plt
+    # from matplotlib.ticker import NullFormatter, ScalarFormatter
+    # from matplotlib.patches import Polygon
+    # from matplotlib.collections import PatchCollection
 
-        color_post_0 = "#00B25F"
-        color_post_1 = "#132DD6"
-        color_prior = "#D81727"
-        color_ensemble = "#BA9B00"
-        color_other = "#20484E0"
+    # # X_posterior = X_posterior*X_s.cpu().numpy() + X_m.cpu().numpy()
+    # X_hat = X_prior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
-    for i in range(8):
-        for j in range(8):
-            if i > j:
+    # color_post_0 = "#00B25F"
+    # color_post_1 = "#132DD6"
+    # color_prior = "#D81727"
+    # color_ensemble = "#BA9B00"
+    # color_other = "#20484E0"
 
-                axs[i, j].scatter(
-                    X_posterior[:, j], X_posterior[:, i], c="k", s=0.5, alpha=0.05, label="Posterior", rasterized=True
-                )
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
-                bins_y = np.linspace(min_val, max_val, 30)
+    # fig, axs = plt.subplots(nrows=8, ncols=8, figsize=(12, 12))
+    # X_list = []
 
-                min_val = min(X_hat[:, j].min(), X_posterior[:, j].min())
-                max_val = max(X_hat[:, j].max(), X_posterior[:, j].max())
-                bins_x = np.linspace(min_val, max_val, 30)
+    # for model_index in range(num_models):
+    #     X_list.append(np.load(open("./posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
 
-                # v = st.gaussian_kde(X_posterior[:,[j,i]].T)
-                # bx = 0.5*(bins_x[1:] + bins_x[:-1])
-                # by = 0.5*(bins_y[1:] + bins_y[:-1])
-                # Bx,By = np.meshgrid(bx,by)
+    #     X_posterior = np.vstack(X_list)
+    #     X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
-                # axs[i,j].contour(10**Bx,10**By,v(np.vstack((Bx.ravel(),By.ravel()))).reshape(Bx.shape),7,alpha=0.7,colors='black')
+    #     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
+    #     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
-                axs[i, j].set_xlim(X_hat[:, j].min(), X_hat[:, j].max())
-                axs[i, j].set_ylim(X_hat[:, i].min(), X_hat[:, i].max())
+    # for i in range(8):
+    #     for j in range(8):
+    #         if i > j:
 
-                # axs[i,j].set_xscale('log')
-                # axs[i,j].set_yscale('log')
+    #             axs[i, j].scatter(
+    #                 X_posterior[:, j], X_posterior[:, i], c="k", s=0.5, alpha=0.05, label="Posterior", rasterized=True
+    #             )
+    #             min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
+    #             max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
+    #             bins_y = np.linspace(min_val, max_val, 30)
 
-            elif i < j:
-                patch_upper = Polygon(
-                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]), facecolor=plt.cm.seismic(Cn_0[i, j])
-                )
-                # patch_lower = Polygon(np.array([[0.,0.],[1.,0.],[1.,1.]]),facecolor=plt.cm.seismic(Cn_1[i,j]))
-                axs[i, j].add_patch(patch_upper)
-                # axs[i,j].add_patch(patch_lower)
-                if C_0[i, j] > -0.5:
-                    color = "black"
-                else:
-                    color = "white"
-                axs[i, j].text(
-                    0.5,
-                    0.5,
-                    "{0:.2f}".format(C_0[i, j]),
-                    fontsize=12,
-                    horizontalalignment="center",
-                    verticalalignment="center",
-                    transform=axs[i, j].transAxes,
-                    color=color,
-                )
-                # if C_1[i,j]>-0.5:
-                #    color = 'black'
-                # else:
-                #    color = 'white'
+    #             min_val = min(X_hat[:, j].min(), X_posterior[:, j].min())
+    #             max_val = max(X_hat[:, j].max(), X_posterior[:, j].max())
+    #             bins_x = np.linspace(min_val, max_val, 30)
 
-                # axs[i,j].text(0.75,0.25,'{0:.2f}'.format(C_1[i,j]),fontsize=12,horizontalalignment='center',verticalalignment='center',transform=axs[i,j].transAxes,color=color)
+    #             # v = st.gaussian_kde(X_posterior[:,[j,i]].T)
+    #             # bx = 0.5*(bins_x[1:] + bins_x[:-1])
+    #             # by = 0.5*(bins_y[1:] + bins_y[:-1])
+    #             # Bx,By = np.meshgrid(bx,by)
 
-            elif i == j:
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
-                bins = np.linspace(min_val, max_val, 30)
-                # X_hat_hist,b = np.histogram(X_hat[:,i],bins,density=True)
-                X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-                b = 0.5 * (b[1:] + b[:-1])
-                lw = 3.0
-                axs[i, j].plot(
-                    b, X_prior_hist, color=color_prior, linewidth=0.5 * lw, label="Prior", linestyle="dashed"
-                )
+    #             # axs[i,j].contour(10**Bx,10**By,v(np.vstack((Bx.ravel(),By.ravel()))).reshape(Bx.shape),7,alpha=0.7,colors='black')
 
-                axs[i, j].plot(
-                    b, X_posterior_hist, color="black", linewidth=lw, linestyle="solid", label="Posterior", alpha=0.7
-                )
+    #             axs[i, j].set_xlim(X_hat[:, j].min(), X_hat[:, j].max())
+    #             axs[i, j].set_ylim(X_hat[:, i].min(), X_hat[:, i].max())
 
-                # for X_ind in X_stack:
-                #    X_hist,_ = np.histogram(X_ind[:,i],bins,density=False)
-                #    X_hist=X_hist/len(X_posterior)
-                #    X_hist=X_hist/(bins[1]-bins[0])
-                #    axs[i,j].plot(10**b,X_hist,'b-',alpha=0.2,lw=0.5)
+    #             # axs[i,j].set_xscale('log')
+    #             # axs[i,j].set_yscale('log')
 
-                if i == 1:
-                    axs[i, j].legend(fontsize=8)
-                axs[i, j].set_xlim(min_val, max_val)
-                # axs[i,j].set_xscale('log')
+    #         elif i < j:
+    #             patch_upper = Polygon(
+    #                 np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]), facecolor=plt.cm.seismic(Cn_0[i, j])
+    #             )
+    #             # patch_lower = Polygon(np.array([[0.,0.],[1.,0.],[1.,1.]]),facecolor=plt.cm.seismic(Cn_1[i,j]))
+    #             axs[i, j].add_patch(patch_upper)
+    #             # axs[i,j].add_patch(patch_lower)
+    #             if C_0[i, j] > -0.5:
+    #                 color = "black"
+    #             else:
+    #                 color = "white"
+    #             axs[i, j].text(
+    #                 0.5,
+    #                 0.5,
+    #                 "{0:.2f}".format(C_0[i, j]),
+    #                 fontsize=12,
+    #                 horizontalalignment="center",
+    #                 verticalalignment="center",
+    #                 transform=axs[i, j].transAxes,
+    #                 color=color,
+    #             )
+    #             # if C_1[i,j]>-0.5:
+    #             #    color = 'black'
+    #             # else:
+    #             #    color = 'white'
 
-            else:
-                axs[i, j].remove()
+    #             # axs[i,j].text(0.75,0.25,'{0:.2f}'.format(C_1[i,j]),fontsize=12,horizontalalignment='center',verticalalignment='center',transform=axs[i,j].transAxes,color=color)
 
-    keys = dataset.X_keys
+    #         elif i == j:
+    #             min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
+    #             max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
+    #             bins = np.linspace(min_val, max_val, 30)
+    #             X_hat_hist, b = np.histogram(X_hat[:, i], bins, density=True)
+    #             # X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
+    #             X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
+    #             b = 0.5 * (b[1:] + b[:-1])
+    #             lw = 3.0
+    #             axs[i, j].plot(b, X_hat_hist, color=color_prior, linewidth=0.5 * lw, label="Prior", linestyle="dashed")
 
-    for i, ax in enumerate(axs[:, 0]):
-        ax.set_ylabel(keys[i])
+    #             axs[i, j].plot(
+    #                 b, X_posterior_hist, color="black", linewidth=lw, linestyle="solid", label="Posterior", alpha=0.7
+    #             )
 
-    for j, ax in enumerate(axs[-1, :]):
-        ax.set_xlabel(keys[j])
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
-        plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
-        if j > 0:
-            ax.tick_params(axis="y", which="both", length=0)
-            ax.yaxis.set_minor_formatter(NullFormatter())
-            ax.yaxis.set_major_formatter(NullFormatter())
+    #             # for X_ind in X_stack:
+    #             #    X_hist,_ = np.histogram(X_ind[:,i],bins,density=False)
+    #             #    X_hist=X_hist/len(X_posterior)
+    #             #    X_hist=X_hist/(bins[1]-bins[0])
+    #             #    axs[i,j].plot(10**b,X_hist,'b-',alpha=0.2,lw=0.5)
 
-    for ax in axs[:-1, 1:].ravel():
-        ax.xaxis.set_major_formatter(NullFormatter())
-        ax.xaxis.set_minor_formatter(NullFormatter())
-        ax.yaxis.set_major_formatter(NullFormatter())
-        ax.yaxis.set_minor_formatter(NullFormatter())
-        ax.tick_params(axis="both", which="both", length=0)
+    #             if i == 1:
+    #                 axs[i, j].legend(fontsize=8)
+    #             axs[i, j].set_xlim(min_val, max_val)
+    #             # axs[i,j].set_xscale('log')
 
-    fig.savefig("speed_emulator_posterior_1000it.pdf")
+    #         else:
+    #             axs[i, j].remove()
+
+    # keys = dataset.X_keys
+
+    # for i, ax in enumerate(axs[:, 0]):
+    #     ax.set_ylabel(keys[i])
+
+    # for j, ax in enumerate(axs[-1, :]):
+    #     ax.set_xlabel(keys[j])
+    #     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+    #     plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
+    #     if j > 0:
+    #         ax.tick_params(axis="y", which="both", length=0)
+    #         ax.yaxis.set_minor_formatter(NullFormatter())
+    #         ax.yaxis.set_major_formatter(NullFormatter())
+
+    # for ax in axs[:-1, 1:].ravel():
+    #     ax.xaxis.set_major_formatter(NullFormatter())
+    #     ax.xaxis.set_minor_formatter(NullFormatter())
+    #     ax.yaxis.set_major_formatter(NullFormatter())
+    #     ax.yaxis.set_minor_formatter(NullFormatter())
+    #     ax.tick_params(axis="both", which="both", length=0)
+
+    # fig.savefig("speed_emulator_posterior_1000it.pdf")
