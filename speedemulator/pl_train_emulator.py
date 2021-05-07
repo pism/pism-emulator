@@ -22,6 +22,126 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 
 
+def get_eigenglaciers(omegas, F, cutoff=0.999):
+    F_mean = (F * omegas).sum(axis=0)
+    F_bar = F - F_mean  # Eq. 28
+    Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
+    U, S, V = torch.svd_lowrank(Z @ F_bar, q=100)
+    lamda = S ** 2 / (n_grid_points)
+
+    cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
+    lamda_truncated = lamda.detach()[:cutoff_index]
+    V = V.detach()[:, :cutoff_index]
+    V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))  # A slight departure from the paper: Vhat is the
+    # eigenvectors scaled by the eigenvalue size.  This
+    # has the effect of allowing the outputs of the neural
+    # network to be O(1).  Otherwise, it doesn't make
+    # any difference.
+    return V_hat, F_bar, F_mean
+
+
+class Emulator(nn.Module):
+    def __init__(self, n_parameters, n_eigenglaciers, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean):
+        super().__init__()
+        # Inputs to hidden layer linear transformation
+        self.l_1 = nn.Linear(n_parameters, n_hidden_1)
+        self.norm_1 = nn.LayerNorm(n_hidden_1)
+        self.dropout_1 = nn.Dropout(p=0.0)
+        self.l_2 = nn.Linear(n_hidden_1, n_hidden_2)
+        self.norm_2 = nn.LayerNorm(n_hidden_2)
+        self.dropout_2 = nn.Dropout(p=0.5)
+        self.l_3 = nn.Linear(n_hidden_2, n_hidden_3)
+        self.norm_3 = nn.LayerNorm(n_hidden_3)
+        self.dropout_3 = nn.Dropout(p=0.5)
+        self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
+        self.norm_4 = nn.LayerNorm(n_hidden_3)
+        self.dropout_4 = nn.Dropout(p=0.5)
+        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
+
+        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
+        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
+
+    def forward(self, x, add_mean=False):
+        # Pass the input tensor through each of our operations
+
+        a_1 = self.l_1(x)
+        a_1 = self.norm_1(a_1)
+        a_1 = self.dropout_1(a_1)
+        z_1 = torch.relu(a_1)
+
+        a_2 = self.l_2(z_1)
+        a_2 = self.norm_2(a_2)
+        a_2 = self.dropout_2(a_2)
+        z_2 = torch.relu(a_2) + z_1
+
+        a_3 = self.l_3(z_2)
+        a_3 = self.norm_3(a_3)
+        a_3 = self.dropout_3(a_3)
+        z_3 = torch.relu(a_3) + z_2
+
+        a_4 = self.l_4(z_3)
+        a_4 = self.norm_3(a_4)
+        a_4 = self.dropout_3(a_4)
+        z_4 = torch.relu(a_4) + z_3
+
+        z_5 = self.l_5(z_4)
+        if add_mean:
+            F_pred = z_5 @ self.V_hat.T + self.F_mean
+        else:
+            F_pred = z_5 @ self.V_hat.T
+
+        return F_pred
+
+
+def criterion_ae(F_pred, F_obs, omegas, area):
+    instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
+    return torch.sum(instance_misfit * omegas.squeeze())
+
+
+def train_surrogate(e, X_train, F_train, omegas, area, batch_size=128, epochs=3000, eta_0=0.01, k=1000.0):
+
+    omegas_0 = torch.ones_like(omegas) / len(omegas)
+    training_data = TensorDataset(X_train, F_train, omegas)
+
+    batch_size = 128
+    train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
+
+    optimizer = torch.optim.Adam(e.parameters(), lr=eta_0, weight_decay=0.0)
+
+    # Loop over the data
+    for epoch in range(epochs):
+        # Loop over each subset of data
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = eta_0 * (10 ** (-epoch / k))
+
+        for x, f, o in train_loader:
+            e.train()
+            # Zero out the optimizer's gradient buffer
+            optimizer.zero_grad()
+
+            f_pred = e(x)
+
+            # Compute the loss
+            loss = criterion_ae(f_pred, f, o, area)
+
+            # Use backpropagation to compute the derivative of the loss with respect to the parameters
+            loss.backward()
+
+            # Use the derivative information to update the parameters
+            optimizer.step()
+
+        e.eval()
+        F_train_pred = e(X_train)
+        # Make a prediction based on the model
+        loss_train = criterion_ae(F_train_pred, F_train, omegas, area)
+        # Make a prediction based on the model
+        loss_test = criterion_ae(F_train_pred, F_train, omegas_0, area)
+
+        # Print the epoch, the training loss, and the test set accuracy.
+        if epoch % 10 == 0:
+            print(epoch, loss_train.item(), loss_test.item())
+
+
 class MALASampler(object):
     def __init__(self, model):
         super().__init__()
@@ -63,6 +183,7 @@ class MALASampler(object):
         return X
 
     def V(self, X, Y_target):
+        # model result is in log space
         Y_pred = 10 ** self.model(X, add_mean=True)
         r = Y_pred - Y_target
         X_bar = (X - X_min) / (X_max - X_min)
@@ -257,6 +378,7 @@ class PISMDataset(torch.utils.data.Dataset):
         response = np.zeros((m_samples, ny * nx))
 
         print("  Loading data sets...")
+        training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
@@ -436,11 +558,11 @@ class GlacierEmulator(pl.LightningModule):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("GlacierEmulator")
         parser.add_argument("--batch_size", type=int, default=128)
-        parser.add_argument("--learning_rate", default=0.01)
         parser.add_argument("--n_hidden_1", type=int, default=128)
         parser.add_argument("--n_hidden_2", type=int, default=128)
         parser.add_argument("--n_hidden_3", type=int, default=128)
         parser.add_argument("--n_hidden_4", type=int, default=128)
+        parser.add_argument("--learning_rate", type=float, default=0.01)
 
         return parent_parser
 
@@ -452,7 +574,7 @@ class GlacierEmulator(pl.LightningModule):
             "monitor": "test_loss",
         }
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 1 - 1e-2, verbose=True),
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
         }
         return [optimizer], [scheduler]
 
@@ -491,14 +613,10 @@ class GlacierEmulator(pl.LightningModule):
         f = torch.vstack(f)
         omegas = torch.vstack(omegas)
         omegas_0 = torch.vstack(omegas_0)
-        f_pred = self.trainer.model.eval().forward(x)
-        train_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+        f_pred = self.forward(x)
+        train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
         test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
 
-        # f_pred = self.trainer.model.eval().forward(out["x"])
-        # # f_pred = self.forward(x)
-        # train_loss = self.criterion_ae(f_pred, out["f"], out["omegas"], self.area)
-        # test_loss = self.criterion_ae(f_pred, out["f"], out["omegas_0"], self.area)
         self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -520,6 +638,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     num_models = args.num_models
     thinning_factor = args.thinning_factor
+    max_epochs = args.max_epochs
 
     device = "cpu"
 
@@ -562,30 +681,61 @@ if __name__ == "__main__":
         V_hat = data_loader.V_hat
         F_mean = data_loader.F_mean
         F_train = data_loader.F_bar
+        n_hidden_1 = 128
+        n_hidden_2 = 128
+        n_hidden_3 = 128
+        n_hidden_4 = 128
+
+        V_hat_doug, F_bar_doug, F_mean_doug = get_eigenglaciers(omegas, F)
+        # Doug's emulator
+        e_d = Emulator(
+            n_parameters, n_eigenglaciers, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat_doug, F_mean_doug
+        )
+
+        train_surrogate(e_d, X, F_bar_doug, omegas, normed_area, epochs=max_epochs)
+        torch.save(e_d.state_dict(), "emulator_ensemble_doug_pl/emulator_{0:03d}.h5".format(model_index))
+
+        # 3000 epochs
         e = GlacierEmulator(n_parameters, n_eigenglaciers, normed_area, V_hat, F_mean, args)
 
         lr_monitor = LearningRateMonitor(logging_interval="epoch")
         early_stop_callback = EarlyStopping(
-            monitor="test_loss", min_delta=0.0, patience=5, verbose=False, mode="min", strict=True
+            monitor="test_loss", min_delta=0.01, patience=5, verbose=False, mode="min", strict=True
         )
         logger = TensorBoardLogger("tb_logs_early", name="PISM Speed Emulator")
         trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor], logger=logger)
-        # trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor, early_stop_callback], logger=logger)
         trainer.fit(e, data_loader.all_loader, data_loader.all_loader)
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
+
+        # Early Stopping
+        e_e = GlacierEmulator(n_parameters, n_eigenglaciers, normed_area, V_hat, F_mean, args)
+        trainer = pl.Trainer.from_argparse_args(args, callbacks=[lr_monitor, early_stop_callback], logger=logger)
+        trainer.fit(e_e, data_loader.all_loader, data_loader.all_loader)
+        torch.save(e_e.state_dict(), f"{emulator_dir}/emulator_pl_early_{model_index}.h5")
+
         e.eval()
-        fig, axs = plt.subplots(nrows=5, ncols=2, sharex="col", sharey="row", figsize=(10, 40))
+        e_d.eval()
+        e_e.eval()
+        fig, axs = plt.subplots(nrows=5, ncols=4, sharex="col", sharey="row", figsize=(16, 40))
         for k in range(5):
-            idx = np.random.randint(len(data_loader.validation_data))
-            X_val, F_val, _, _ = data_loader.validation_data[idx]
+            idx = np.random.randint(len(data_loader.all_data))
+            X_val, F_val, _, _ = data_loader.all_data[idx]
             X_val_scaled = X_val * dataset.X_std + dataset.X_mean
-            F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
             F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
-            corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
+            F_pred_pl = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            F_pred_early = e_e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            F_pred_doug = e_d(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            corr_pl = np.corrcoef(F_val.flatten(), F_pred_pl.flatten())[0, 1]
+            corr_early = np.corrcoef(F_val.flatten(), F_pred_early.flatten())[0, 1]
+            corr_doug = np.corrcoef(F_val.flatten(), F_pred_doug.flatten())[0, 1]
             axs[k, 0].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap="viridis")
-            axs[k, 0].text(110, 25, f"Pearson r={corr:.3f}", c="white")
-            axs[k, 1].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap="viridis")
-            axs[k, 1].text(
+            axs[k, 1].imshow(F_pred_pl, origin="lower", vmin=0, vmax=3, cmap="viridis")
+            axs[k, 2].imshow(F_pred_early, origin="lower", vmin=0, vmax=3, cmap="viridis")
+            axs[k, 3].imshow(F_pred_doug, origin="lower", vmin=0, vmax=3, cmap="viridis")
+            axs[k, 1].text(100, 25, f"Pearson r={corr_pl:.3f}", c="white")
+            axs[k, 2].text(100, 25, f"Pearson r={corr_early:.3f}", c="white")
+            axs[k, 3].text(100, 25, f"Pearson r={corr_doug:.3f}", c="white")
+            axs[k, 0].text(
                 120,
                 25,
                 "SIAE: {0:.2f}\nSSAN: {1:.2f}\nPPQ : {2:.2f}\nTEFO: {3:.2f}\nPHIM: {4:.2f}\nPHIX: {5:.2f}\nZMIN: {6:.2f}\nZMAX: {7:.2f}".format(
@@ -594,7 +744,7 @@ if __name__ == "__main__":
                 c="white",
             )
         fig.subplots_adjust(wspace=0, hspace=0)
-        fig.savefig(f"speed_val_{model_index}.png")
+        fig.savefig(f"pl_speed_val_{model_index}.png")
 
     # F_target = dataset.Y_target
 
