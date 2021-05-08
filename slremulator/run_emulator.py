@@ -30,7 +30,7 @@ import pandas as pd
 import sys
 
 from pismemulator.utils import draw_samples, distributions_as19, prepare_data
-from pismemulator.emulate import emulate_gp, gp_response_mp
+from pismemulator.gpemulator import emulate_gp, gp_response_mp
 
 default_output_directory = "emulator_results"
 

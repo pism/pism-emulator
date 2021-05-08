@@ -21,9 +21,9 @@ import GPy as gp
 import numpy as np
 from numpy.testing import assert_array_almost_equal
 
-from pismemulator.emulate import emulate_gp
-from pismemulator.emulate import emulate_sklearn
-from pismemulator.emulate import generate_kernel
+from pismemulator.gpemulator import emulate_gp
+from pismemulator.gpemulator import emulate_sklearn
+from pismemulator.gpemulator import generate_kernel
 
 
 def test_generate_kernel():

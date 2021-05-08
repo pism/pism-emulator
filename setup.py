@@ -36,9 +36,9 @@ packages = find_packages(".")
 setup(
     name="pismemulator",
     version=version,
-    author="Andy Aschwanden, Rachel S Chen",
+    author="Andy Aschwanden, Douglas C Brinkerhoff, Rachel S Chen",
     author_email="andy.aschwanden@gmail.com",
-    description=("Gaussian process emulators for PISM"),
+    description=("Emulators for PISM"),
     license="GPL 3.0",
     keywords="machine-learning gaussian-processes PISM",
     url="https://github.com/pism/pism-emulator",
