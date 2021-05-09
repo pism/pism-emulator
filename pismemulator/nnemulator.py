@@ -31,6 +31,8 @@ import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader, TensorDataset
 
+from pismemulator.utils import plot_validation
+
 
 class NNEmulator(pl.LightningModule):
     def __init__(self, n_parameters, n_eigenglaciers, area, V_hat, F_mean, hparams, *args, **kwargs):

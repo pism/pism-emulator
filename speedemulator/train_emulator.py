@@ -1,194 +1,107 @@
 #!/bin/env python3
 
+# Copyright (C) 2021 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+from argparse import ArgumentParser
+
 import numpy as np
-import pandas as pd
 import os
-import torch
-import torch.nn as nn
-
-from pismemulator.utils import prepare_data
-
-from torch.utils.data import TensorDataset
-
-
-def get_eigenglaciers(omegas, F, cutoff=0.999):
-    F_mean = (F * omegas).sum(axis=0)
-    F_bar = F - F_mean  # Eq. 28
-    Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-    U, S, V = torch.svd_lowrank(Z @ F_bar, q=100)
-    lamda = S ** 2 / (n_samples)
-
-    cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
-    lamda_truncated = lamda.detach()[:cutoff_index]
-    V = V.detach()[:, :cutoff_index]
-    V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))  # A slight departure from the paper: Vhat is the
-    # eigenvectors scaled by the eigenvalue size.  This
-    # has the effect of allowing the outputs of the neural
-    # network to be O(1).  Otherwise, it doesn't make
-    # any difference.
-    return V_hat, F_bar, F_mean
-
-
-class Emulator(nn.Module):
-    def __init__(self, n_parameters, n_eigenglaciers, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean):
-        super().__init__()
-        # Inputs to hidden layer linear transformation
-        self.l_1 = nn.Linear(n_parameters, n_hidden_1)
-        self.norm_1 = nn.LayerNorm(n_hidden_1)
-        self.dropout_1 = nn.Dropout(p=0.0)
-        self.l_2 = nn.Linear(n_hidden_1, n_hidden_2)
-        self.norm_2 = nn.LayerNorm(n_hidden_2)
-        self.dropout_2 = nn.Dropout(p=0.5)
-        self.l_3 = nn.Linear(n_hidden_2, n_hidden_3)
-        self.norm_3 = nn.LayerNorm(n_hidden_3)
-        self.dropout_3 = nn.Dropout(p=0.5)
-        self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
-        self.norm_4 = nn.LayerNorm(n_hidden_3)
-        self.dropout_4 = nn.Dropout(p=0.5)
-        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
-
-        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
-        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
-
-    def forward(self, x, add_mean=False):
-        # Pass the input tensor through each of our operations
-
-        a_1 = self.l_1(x)
-        a_1 = self.norm_1(a_1)
-        a_1 = self.dropout_1(a_1)
-        z_1 = torch.relu(a_1)
-
-        a_2 = self.l_2(z_1)
-        a_2 = self.norm_2(a_2)
-        a_2 = self.dropout_2(a_2)
-        z_2 = torch.relu(a_2) + z_1
-
-        a_3 = self.l_3(z_2)
-        a_3 = self.norm_3(a_3)
-        a_3 = self.dropout_3(a_3)
-        z_3 = torch.relu(a_3) + z_2
-
-        a_4 = self.l_4(z_3)
-        a_4 = self.norm_3(a_4)
-        a_4 = self.dropout_3(a_4)
-        z_4 = torch.relu(a_4) + z_3
-
-        z_5 = self.l_5(z_4)
-        if add_mean:
-            F_pred = z_5 @ self.V_hat.T + self.F_mean
-        else:
-            F_pred = z_5 @ self.V_hat.T
-
-        return F_pred
-
-
-def criterion_ae(F_pred, F_obs, omegas, area):
-    instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
-    return torch.sum(instance_misfit * omegas.squeeze())
-
-
-def train_surrogate(e, X_train, F_train, omegas, area, batch_size=128, epochs=3000, eta_0=0.01, k=1000.0):
-
-    omegas_0 = torch.ones_like(omegas) / len(omegas)
-    training_data = TensorDataset(X_train, F_train, omegas)
-
-    batch_size = 128
-    train_loader = torch.utils.data.DataLoader(dataset=training_data, batch_size=batch_size, shuffle=True)
-
-    optimizer = torch.optim.Adam(e.parameters(), lr=eta_0, weight_decay=0.0)
-
-    # Loop over the data
-    for epoch in range(epochs):
-        # Loop over each subset of data
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = eta_0 * (10 ** (-epoch / k))
-
-        for x, f, o in train_loader:
-            e.train()
-            # Zero out the optimizer's gradient buffer
-            optimizer.zero_grad()
-
-            f_pred = e(x)
-
-            # Compute the loss
-            loss = criterion_ae(f_pred, f, o, area)
-
-            # Use backpropagation to compute the derivative of the loss with respect to the parameters
-            loss.backward()
-
-            # Use the derivative information to update the parameters
-            optimizer.step()
-
-        e.eval()
-        F_train_pred = e(X_train)
-        # Make a prediction based on the model
-        loss_train = criterion_ae(F_train_pred, F_train, omegas, area)
-        # Make a prediction based on the model
-        loss_test = criterion_ae(F_train_pred, F_train, omegas_0, area)
-
-        # Print the epoch, the training loss, and the test set accuracy.
-        if epoch % 10 == 0:
-            print(epoch, loss_train.item(), loss_test.item())
-
-
-response_file = "log_speeds.csv.gz"
-samples_file = "../data/samples/velocity_calibration_samples_100.csv"
-samples, response = prepare_data(samples_file, response_file)
-
-F = response.values
-X = samples.values
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-X = torch.from_numpy(X)
-F = torch.from_numpy(F)
-F[F < 0] = 0
-
-X = X.to(torch.float32)
-F = F.to(torch.float32)
-
-X = X.to(device)
-F = F.to(device)
-
-X_m = X.mean(axis=0)
-X_s = X.std(axis=0)
-
-X = (X - X_m) / X_s
-
-
-n_parameters = X.shape[1]
-n_samples, n_grid_points = F.shape
-
-normed_area = torch.tensor(np.ones(n_grid_points), device=device)
-normed_area /= normed_area.sum()
-
-torch.manual_seed(0)
-np.random.seed(0)
-
-n_hidden_1 = 128
-n_hidden_2 = 128
-n_hidden_3 = 128
-n_hidden_4 = 128
-
-emulator_dir = "emulator_ensemble"
-
-if not os.path.isdir(emulator_dir):
-    os.makedir(emulator_dir)
-
-n_models = 5
-n_epochs = 3000
 from scipy.stats import dirichlet
 
-for model_index in range(n_models):
-    omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float, device=device).T
+import torch
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 
-    V_hat, F_bar, F_mean = get_eigenglaciers(omegas, F)
-    n_eigenglaciers = V_hat.shape[1]
+from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
+from pismemulator.utils import plot_validation
 
-    e = Emulator(n_parameters, n_eigenglaciers, n_hidden_1, n_hidden_2, n_hidden_3, n_hidden_4, V_hat, F_mean)
 
-    e.to(device)
+if __name__ == "__main__":
+    __spec__ = None
 
-    train_surrogate(e, X, F_bar, omegas, normed_area, epochs=n_epochs)
+    parser = ArgumentParser()
+    parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--thinning_factor", type=int, default=1)
+    parser.add_argument("--tb_logs_dir", default="tb_logs")
 
-    torch.save(e.state_dict(), f"{emulator_dir}/emulator_{0:03d}.h5".format(model_index))
+    parser = NNEmulator.add_model_specific_args(parser)
+    parser = pl.Trainer.add_argparse_args(parser)
+    args = parser.parse_args()
+    # hparams = vars(args)
+
+    batch_size = args.batch_size
+    emulator_dir = args.emulator_dir
+    max_epochs = args.max_epochs
+    num_models = args.num_models
+    tb_logs_dir = args.tb_logs_dir
+    thinning_factor = args.thinning_factor
+
+    dataset = PISMDataset(
+        data_dir="../data/speeds_v2/",
+        samples_file="../data/samples/velocity_calibration_samples_100.csv",
+        target_file="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc",
+        thinning_factor=thinning_factor,
+    )
+
+    X = dataset.X
+    F = dataset.Y
+    n_grid_points = dataset.n_grid_points
+    n_parameters = dataset.n_parameters
+    n_samples = dataset.n_samples
+    normed_area = dataset.normed_area
+
+    torch.manual_seed(0)
+    pl.seed_everything(0)
+    np.random.seed(0)
+
+    if not os.path.isdir(emulator_dir):
+        os.makedirs(emulator_dir)
+
+    for model_index in range(num_models):
+        print(f"Training model {model_index} of {num_models}")
+        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
+        omegas_0 = torch.ones_like(omegas) / len(omegas)
+
+        data_loader = PISMDataModule(
+            X,
+            F,
+            omegas,
+            omegas_0,
+        )
+        data_loader.prepare_data()
+        data_loader.setup(stage="fit")
+        n_eigenglaciers = data_loader.n_eigenglaciers
+        V_hat = data_loader.V_hat
+        F_mean = data_loader.F_mean
+        F_train = data_loader.F_bar
+
+        checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
+        logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
+        lr_monitor = LearningRateMonitor(logging_interval="epoch")
+        e = NNEmulator(n_parameters, n_eigenglaciers, normed_area, V_hat, F_mean, args)
+        trainer = pl.Trainer.from_argparse_args(
+            args, callbacks=[lr_monitor, checkpoint_callback], logger=logger, deterministic=True
+        )
+        trainer.fit(e, data_loader.train_loader, data_loader.validation_loader)
+        trainer.save_checkpoint(f"{emulator_dir}/emulator_{model_index:03d}.ckpt")
+        torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
+
+        plot_validation(e, data_loader, model_index, emulator_dir)

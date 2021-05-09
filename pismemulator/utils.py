@@ -1,4 +1,4 @@
-# Copyright (C) 2019 Rachel Chen, Andy Aschwanden
+# Copyright (C) 2019-21 Andy Aschwanden
 #
 # This file is part of pism-emulator.
 #
@@ -32,6 +32,40 @@ from scipy.stats.distributions import uniform
 from scipy.stats.distributions import randint
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
+
+
+def plot_validation(e, dataloader, model_index, emulator_dir):
+    """
+    Plot target (PISM) and predicted (Emulator) speeds for validation
+    """
+    e.eval()
+    fig, axs = plt.subplots(nrows=2, ncols=4, sharex="col", sharey="row", figsize=(6.2, 5.4))
+    for k in range(4):
+        idx = np.random.randint(len(data_loader.validation_data))
+        X_val, F_val, _, _ = data_loader.validation_data[idx]
+        X_val_scaled = X_val * dataset.X_std + dataset.X_mean
+        F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
+        F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+        corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
+        axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
+        axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
+        axs[1, k].text(100, 10, f"r={corr:.3f}", c="white", size=6)
+        axs[0, k].text(
+            100,
+            10,
+            "SIAE: {0:.2f}\nSSAN: {1:.2f}\nPPQ : {2:.2f}\nTEFO: {3:.2f}\nPHIM: {4:.0f}\nPHIX: {5:.0f}\nZMIN: {6:.0f}\nZMAX: {7:.0f}".format(
+                *X_val_scaled
+            ),
+            c="white",
+            size=6,
+        )
+        axs[0, 0].text(10, 280, "PISM", c="white", size=6)
+        axs[1, 0].text(10, 280, "Emulator", c="white", size=6)
+
+        axs[0, k].set_axis_off()
+        axs[1, k].set_axis_off()
+    fig.subplots_adjust(wspace=0, hspace=0.02)
+    fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
 
 
 def calc_bic(X, Y):
@@ -84,15 +118,15 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
     Stepwise model selection using the Bayesian Information Criterion (BIC)
 
     General function (not project-specific) modeled after R's stepAIC function.
-    
+
     Starts with full least squares model as in backward selection. If interactions=True, performs
     bidirectional stepwise selection. Otherwise only performs backwards selection.
 
     User may supply a list of variable names where the length of the list
-    must equal n=X.shape[1]. Otherwise, a list of phony variables 
+    must equal n=X.shape[1]. Otherwise, a list of phony variables
     ["X1", "X2", ...,"Xn"] is generated.
 
-    Then params_dict is generated from the names list.     
+    Then params_dict is generated from the names list.
 
     Parameters
     ----------
@@ -414,7 +448,7 @@ def rmsd(a, b):
 
 def set_size(w, h, ax=None):
 
-    """ 
+    """
     w, h: width, height in inches
     """
 
@@ -443,7 +477,7 @@ def gelman_rubin(p, q):
     ----------
     p, q : ndarray
            Arrays containing the 2 traces of a stochastic parameter. That is, an array of dimension m x 2, where m is the number of traces, n the number of samples.
-      
+
     Returns
     -------
     Rhat : float
