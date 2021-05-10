@@ -4,20 +4,27 @@ from argparse import ArgumentParser
 
 import numpy as np
 import os
+from scipy.special import gamma
+from scipy.stats import beta
+
 import torch
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import LearningRateMonitor
-from pytorch_lightning.loggers import TensorBoardLogger
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
 
+import pandas as pd
+import pylab as plt
+import seaborn as sns
+
 
 class MALASampler(object):
-    def __init__(self, model):
+    def __init__(self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01):
         super().__init__()
         self.model = model.eval()
+        self.alpha = alpha
+        self.alpha_b = alpha_b
+        self.beta_b = beta_b
 
-    def find_MAP(self, X, Y_target, n_iters=50, print_interval=10):
+    def find_MAP(self, X, Y_target, X_min, X_max, n_iters=50, print_interval=10):
         print("***********************************************")
         print("***********************************************")
         print("Finding MAP point")
@@ -28,12 +35,14 @@ class MALASampler(object):
         # Find MAP point
         for i in range(n_iters):
             log_pi, g, H, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
-                X, Y_target, compute_hessian=True
+                X, Y_target, X_min, X_max, compute_hessian=True
             )
             p = Hinv @ -g
             alpha_index = np.nanargmin(
                 [
-                    self.get_log_like_gradient_and_hessian(X + alpha * p, Y_target, compute_hessian=False)
+                    self.get_log_like_gradient_and_hessian(
+                        X + alpha * p, Y_target, X_min, X_max, compute_hessian=False
+                    )
                     .detach()
                     .cpu()
                     .numpy()
@@ -45,31 +54,31 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print(
-                    "iter: {0:d}, ln(P): {1:6.1f}, curr. m: {2:4.4f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f},{8:4.2f},{9:4.2f}".format(
+                    "iter: {0:d}, log(P): {1:6.1f}, curr. log(m): {2:4.4f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f},{8:4.2f},{9:4.2f}".format(
                         i, log_pi, *X.data.cpu().numpy()
                     )
                 )
                 print("===============================================")
         return X
 
-    def V(self, X, Y_target):
+    def V(self, X, Y_target, X_bar):
         # model result is in log space
         Y_pred = 10 ** self.model(X, add_mean=True)
         r = Y_pred - Y_target
-        X_bar = (X - X_min) / (X_max - X_min)
         L1 = torch.sum(
             np.log(gamma((nu + 1) / 2.0))
             - np.log(gamma(nu / 2.0))
             - np.log(np.sqrt(np.pi * nu) * sigma_hat)
             - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
         )
-        L2 = torch.sum((alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar))
+        L2 = torch.sum((self.alpha_b - 1) * torch.log(X_bar) + (self.beta_b - 1) * torch.log(1 - X_bar))
 
-        return -(alpha * L1 + L2)
+        return -(self.alpha * L1 + L2)
 
-    def get_log_like_gradient_and_hessian(self, X, Y_target, eps=1e-2, compute_hessian=False):
+    def get_log_like_gradient_and_hessian(self, X, Y_target, X_min, X_max, eps=1e-2, compute_hessian=False):
 
-        log_pi = self.V(X, Y_target)
+        X_bar = (X - X_min) / (X_max - X_min)
+        log_pi = self.V(X, Y_target, X_bar)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
             H = torch.stack([torch.autograd.grad(e, X, retain_graph=True)[0] for e in g])
@@ -90,18 +99,18 @@ class MALASampler(object):
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
-    def MALA_step(self, X, Y_target, h, local_data=None):
+    def MALA_step(self, X, Y_target, X_min, X_max, h, local_data=None):
         if local_data is not None:
             pass
         else:
-            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, compute_hessian=True)
+            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, X_min, X_max, compute_hessian=True)
 
         log_pi, g, H, Hinv, log_det_Hinv = local_data
 
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
 
-        log_pi_ = self.get_log_like_gradient_and_hessian(X_, Y_target, compute_hessian=False)
+        log_pi_ = self.get_log_like_gradient_and_hessian(X_, Y_target, X_min, X_max, compute_hessian=False)
 
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
@@ -111,7 +120,7 @@ class MALASampler(object):
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
             X.data = X_.data
-            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, compute_hessian=True)
+            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, X_min, X_max, compute_hessian=True)
             s = 1
         else:
             s = 0
@@ -146,7 +155,7 @@ class MALASampler(object):
         acc = acc_target
         print(n_iters)
         for i in range(n_iters):
-            X, local_data, s = self.MALA_step(X, Y_target, h, local_data=local_data)
+            X, local_data, s = self.MALA_step(X, Y_target, X_min, X_max, h, local_data=local_data)
             vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
@@ -176,17 +185,16 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--num_posterior_samples", type=int, default=10000)
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
-    parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
 
-    batch_size = args.batch_size
     emulator_dir = args.emulator_dir
     num_models = args.num_models
+    n_posterior_samples = args.num_posterior_samples
     thinning_factor = args.thinning_factor
-    max_epochs = args.max_epochs
 
     device = "cpu"
 
@@ -205,13 +213,12 @@ if __name__ == "__main__":
     normed_area = dataset.normed_area
 
     torch.manual_seed(0)
-    pl.seed_everything(0)
     np.random.seed(0)
 
     models = []
 
     for model_index in range(num_models):
-        state_dict = torch.load(f"{emulator_dir}/emulator_pl_lr_{model_index}.h5")
+        state_dict = torch.load(f"{emulator_dir}/emulator_{model_index:03d}.h5")
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],
             state_dict["V_hat"].shape[1],
@@ -221,45 +228,32 @@ if __name__ == "__main__":
             args,
         )
         e.load_state_dict(state_dict)
-        e.eval()
         models.append(e)
 
-    import pylab as plt
-
-    alpha = 0.01
-    from scipy.special import gamma
+    # alpha = 0.01
 
     nu = 1.0
 
-    sigma2 = 10 ** 2
-
+    sigma = 10
     rho = 1.0 / (1e4 ** 2)
     point_area = (dataset.grid_resolution * thinning_factor) ** 2
     K = point_area * rho
-
-    Tau = K * 1.0 / sigma2 * K
-
-    sigma_hat = np.sqrt(sigma2 / K ** 2)
-
-    from scipy.stats import beta
-
-    alpha_b = 3.0
-    beta_b = 3.0
+    sigma_hat = np.sqrt(sigma ** 2 / K ** 2)
 
     X_min = X.cpu().numpy().min(axis=0) - 1e-3
     X_max = X.cpu().numpy().max(axis=0) + 1e-3
-
-    X_prior = beta.rvs(alpha_b, beta_b, size=(10000, X.shape[1])) * (X_max - X_min) + X_min
-
+    # Eq 52
+    # this is 2.0 in the paper
+    alpha_b = 3.0
+    beta_b = 3.0
+    X_prior = beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters)) * (X_max - X_min) + X_min
+    X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device)
     # This is required for
     # X_bar = (X - X_min) / (X_max - X_min)
     # to work
 
     X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
     X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
-
-    torch.manual_seed(0)
-    np.random.seed(0)
 
     # Needs
     # alpha_b, beta_b: float
@@ -271,17 +265,14 @@ if __name__ == "__main__":
 
     X_posteriors = []
     for j, model in enumerate(models):
-        X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device)
         mala = MALASampler(model)
-        X_map = mala.find_MAP(X_0, U_target)
+        X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
         # To reproduce the paper, n_iters should be 10^5
         X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
         X_posteriors.append(X_posterior)
 
-    import pylab as plt
-    from matplotlib.ticker import NullFormatter, ScalarFormatter
+    from matplotlib.ticker import NullFormatter
     from matplotlib.patches import Polygon
-    from matplotlib.collections import PatchCollection
 
     # X_posterior = X_posterior*X_s.cpu().numpy() + X_m.cpu().numpy()
     X_hat = X_prior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
@@ -435,13 +426,13 @@ if __name__ == "__main__":
             xy=(0.5, 0.5),
             xycoords=ax.transAxes,
             color="white" if lightness < 0.7 else "black",
-            size=26,
+            size=6,
             ha="center",
             va="center",
         )
 
     g = sns.PairGrid(PP, hue="Type", diag_sharey=False)
-    g.map_lower(sns.scatterplot, cmap=sns.color_palette("rocket_r", as_cmap=True))
+    g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
     g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
-    g.map_diag(sns.kdeplot, lw=3, cmap=sns.color_palette("rocket_r", as_cmap=True))
+    g.map_diag(sns.kdeplot, lw=1)
     g.savefig(f"{emulator_dir}/seaborn_test.pdf")

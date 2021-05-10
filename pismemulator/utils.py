@@ -34,11 +34,12 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
 
-def plot_validation(e, dataloader, model_index, emulator_dir):
+def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     """
     Plot target (PISM) and predicted (Emulator) speeds for validation
     """
     e.eval()
+    cmap = "viridis"
     fig, axs = plt.subplots(nrows=2, ncols=4, sharex="col", sharey="row", figsize=(6.2, 5.4))
     for k in range(4):
         idx = np.random.randint(len(data_loader.validation_data))

@@ -40,7 +40,6 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--thinning_factor", type=int, default=1)
-    parser.add_argument("--tb_logs_dir", default="tb_logs")
 
     parser = NNEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
@@ -51,8 +50,8 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     max_epochs = args.max_epochs
     num_models = args.num_models
-    tb_logs_dir = args.tb_logs_dir
     thinning_factor = args.thinning_factor
+    tb_logs_dir = f"{emulator_dir}/tb_logs"
 
     dataset = PISMDataset(
         data_dir="../data/speeds_v2/",
@@ -104,4 +103,4 @@ if __name__ == "__main__":
         trainer.save_checkpoint(f"{emulator_dir}/emulator_{model_index:03d}.ckpt")
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
-        plot_validation(e, data_loader, model_index, emulator_dir)
+        plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
