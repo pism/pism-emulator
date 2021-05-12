@@ -44,7 +44,7 @@ if __name__ == "__main__":
     parser = NNEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
-    # hparams = vars(args)
+    hparams = vars(args)
 
     batch_size = args.batch_size
     emulator_dir = args.emulator_dir
@@ -95,7 +95,7 @@ if __name__ == "__main__":
         checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
         lr_monitor = LearningRateMonitor(logging_interval="epoch")
-        e = NNEmulator(n_parameters, n_eigenglaciers, normed_area, V_hat, F_mean, args)
+        e = NNEmulator(n_parameters, n_eigenglaciers, normed_area, V_hat, F_mean, hparams)
         trainer = pl.Trainer.from_argparse_args(
             args, callbacks=[lr_monitor, checkpoint_callback], logger=logger, deterministic=True
         )
