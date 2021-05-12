@@ -108,7 +108,7 @@ calibration_start = 2010
 calibration_end = 2020
 
 # Greenland only though this could easily be extended to Antarctica
-domain = {"GIS": "../data/validation/greenland_mass_200204_202008.txt"}
+domain = {"GIS": "../data/validation/greenland_mass_200204_202102.txt"}
 
 for d, data in domain.items():
     print(f"Analyzing {d}")
