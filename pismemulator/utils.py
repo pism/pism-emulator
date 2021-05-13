@@ -54,9 +54,7 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
         axs[0, k].text(
             100,
             10,
-            "SIAE: {0:.2f}\nSSAN: {1:.2f}\nPPQ : {2:.2f}\nTEFO: {3:.2f}\nPHIM: {4:.0f}\nPHIX: {5:.0f}\nZMIN: {6:.0f}\nZMAX: {7:.0f}".format(
-                *X_val_scaled
-            ),
+            " ".join([f"{i}: {j}\n" for i,j in zip(dataset.X_keys, X_val_scaled)]),
             c="white",
             size=6,
         )

@@ -37,8 +37,11 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
+    parser.add_argument("--data_dir", default="../data/speeds_v2")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
@@ -47,16 +50,19 @@ if __name__ == "__main__":
     hparams = vars(args)
 
     batch_size = args.batch_size
+    data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     max_epochs = args.max_epochs
     num_models = args.num_models
+    samples_file = args.samples_file
+    target_file = args.target_file
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
 
     dataset = PISMDataset(
-        data_dir="../data/speeds_v2/",
-        samples_file="../data/samples/velocity_calibration_samples_100.csv",
-        target_file="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc",
+        data_dir=data_dir,
+        samples_file=samples_file,
+        target_file=target_file,
         thinning_factor=thinning_factor,
     )
 
@@ -65,8 +71,7 @@ if __name__ == "__main__":
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
-    normed_area = dataset.normed_area
-
+    
     torch.manual_seed(0)
     pl.seed_everything(0)
     np.random.seed(0)
@@ -95,7 +100,7 @@ if __name__ == "__main__":
         checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
         lr_monitor = LearningRateMonitor(logging_interval="epoch")
-        e = NNEmulator(n_parameters, n_eigenglaciers, normed_area, V_hat, F_mean, hparams)
+        e = NNEmulator(n_parameters, n_eigenglaciers, V_hat, F_mean, hparams)
         trainer = pl.Trainer.from_argparse_args(
             args, callbacks=[lr_monitor, checkpoint_callback], logger=logger, deterministic=True
         )

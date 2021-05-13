@@ -35,7 +35,7 @@ from pismemulator.utils import plot_validation
 
 
 class NNEmulator(pl.LightningModule):
-    def __init__(self, n_parameters, n_eigenglaciers, area, V_hat, F_mean, hparams, *args, **kwargs):
+    def __init__(self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs):
         super().__init__()
         #print(hparams)
         #self.hparams = hparams
@@ -62,7 +62,6 @@ class NNEmulator(pl.LightningModule):
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
-        self.area = area
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -114,14 +113,14 @@ class NNEmulator(pl.LightningModule):
         }
         return [optimizer], [scheduler]
 
-    def criterion_ae(self, F_pred, F_obs, omegas, area):
-        instance_misfit = torch.sum(torch.abs(F_pred - F_obs) ** 2 * area, axis=1)
+    def criterion_ae(self, F_pred, F_obs, omegas):
+        instance_misfit = torch.sum(torch.abs(F_pred - F_obs) ** 2, axis=1)
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def training_step(self, batch, batch_idx):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
-        loss = self.criterion_ae(f_pred, f, o, self.area)
+        loss = self.criterion_ae(f_pred, f, o)
 
         return loss
 
@@ -144,8 +143,8 @@ class NNEmulator(pl.LightningModule):
         omegas = torch.vstack(omegas)
         omegas_0 = torch.vstack(omegas_0)
         f_pred = self.forward(x)
-        train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
-        test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+        train_loss = self.criterion_ae(f_pred, f, omegas)
+        test_loss = self.criterion_ae(f_pred, f, omegas_0)
 
         self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -266,10 +265,6 @@ class PISMDataset(torch.utils.data.Dataset):
         self.n_samples = n_samples
         self.n_grid_points = n_grid_points
 
-        normed_area = torch.tensor(np.ones(n_grid_points))
-        normed_area /= normed_area.sum()
-        self.normed_area = normed_area
-
     def return_original(self):
         if self.normalize_x:
             return self.X * self.X_std + self.X_mean
@@ -326,7 +321,7 @@ class PISMDataModule(pl.LightningDataModule):
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
         Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-        U, S, V = torch.svd_lowrank(Z @ F_bar, q=100)
+        U, S, V = torch.svd_lowrank(Z @ F_bar, q=40)
         lamda = S ** 2 / (n_grid_points)
 
         cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
