@@ -17,12 +17,13 @@ import seaborn as sns
 
 
 class MALASampler(object):
-    def __init__(self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01):
+    def __init__(self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01, emulator_dir="./emulator"):
         super().__init__()
         self.model = model.eval()
         self.alpha = alpha
         self.alpha_b = alpha_b
         self.beta_b = beta_b
+        self.emulator_dir = emulator_dir
 
     def find_MAP(self, X, Y_target, X_min, X_max, n_iters=50, print_interval=10):
         print("***********************************************")
@@ -54,9 +55,8 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print(
-                    "iter: {0:d}, log(P): {1:6.1f}, curr. log(m): {2:4.4f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f},{8:4.2f},{9:4.2f}".format(
-                        i, log_pi, *X.data.cpu().numpy()
-                    )
+                    f"iter: {i:d}, log(P): {log_pi:.1f}"
+                    " ".join([f"{i}: {j:.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())])
                 )
                 print("===============================================")
         return X
@@ -136,7 +136,6 @@ class MALASampler(object):
         acc_target=0.25,
         k=0.01,
         beta=0.99,
-        posterior_dir="./posterior_samples/",
         model_index=0,
         save_interval=1000,
         print_interval=50,
@@ -147,6 +146,7 @@ class MALASampler(object):
         print("***********************************************")
         print("***********************************************")
 
+        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
 
@@ -269,7 +269,7 @@ if __name__ == "__main__":
 
     X_posteriors = []
     for j, model in enumerate(models):
-        mala = MALASampler(model)
+        mala = MALASampler(model, emulator_dir=emulator_dir)
         X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
         # To reproduce the paper, n_iters should be 10^5
         X_posterior = mala.MALA(X_map, U_target, n_iters=100000, model_index=j, save_interval=1000, print_interval=100)
