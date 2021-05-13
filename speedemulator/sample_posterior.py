@@ -162,11 +162,7 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print("sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(i, acc, local_data[0].item()))
-                print(
-                    "curr. m: {0:4.4f},{1:4.2f},{2:4.2f},{3:4.2f},{4:4.2f},{5:4.2f},{6:4.2f},{7:4.2f}".format(
-                        *X.data.cpu().numpy()
-                    )
-                )
+                print(" ".join([f"{i}: {j:.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
                 print("===============================================")
 
             if i % save_interval == 0:
