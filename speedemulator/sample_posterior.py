@@ -269,7 +269,7 @@ if __name__ == "__main__":
         mala = MALASampler(model, emulator_dir=emulator_dir)
         X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
         # To reproduce the paper, n_iters should be 10^5
-        X_posterior = mala.MALA(X_map, U_target, n_iters=100000, model_index=j, save_interval=1000, print_interval=100)
+        X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
         X_posteriors.append(X_posterior)
 
     from matplotlib.ticker import NullFormatter
@@ -284,7 +284,7 @@ if __name__ == "__main__":
     color_ensemble = "#BA9B00"
     color_other = "#20484E0"
 
-    fig, axs = plt.subplots(nrows=8, ncols=8, figsize=(12, 12))
+    fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(12, 12))
     X_list = []
 
     for model_index in range(num_models):
@@ -298,8 +298,8 @@ if __name__ == "__main__":
         C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
         Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
-    for i in range(8):
-        for j in range(8):
+    for i in range(n_parameters):
+        for j in range(n_parameters):
             if i > j:
 
                 axs[i, j].scatter(
