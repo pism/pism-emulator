@@ -216,7 +216,6 @@ if __name__ == "__main__":
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
-    normed_area = dataset.normed_area
 
     torch.manual_seed(0)
     np.random.seed(0)
@@ -228,7 +227,6 @@ if __name__ == "__main__":
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],
             state_dict["V_hat"].shape[1],
-            normed_area,
             state_dict["V_hat"],
             state_dict["F_mean"],
             args,
