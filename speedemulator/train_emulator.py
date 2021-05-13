@@ -68,10 +68,11 @@ if __name__ == "__main__":
 
     X = dataset.X
     F = dataset.Y
+    area = dataset.normed_area.repeat(dataset.n_samples, 1)
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
-    
+
     torch.manual_seed(0)
     pl.seed_everything(0)
     np.random.seed(0)
@@ -85,12 +86,7 @@ if __name__ == "__main__":
         omegas = omegas.type_as(X)
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        data_loader = PISMDataModule(
-            X,
-            F,
-            omegas,
-            omegas_0,
-        )
+        data_loader = PISMDataModule(X, F, omegas, omegas_0, area)
         data_loader.prepare_data()
         data_loader.setup(stage="fit")
         n_eigenglaciers = data_loader.n_eigenglaciers

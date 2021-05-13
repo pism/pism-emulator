@@ -56,7 +56,7 @@ class MALASampler(object):
                 print("===============================================")
                 print(
                     f"iter: {i:d}, log(P): {log_pi:.1f}"
-                    " ".join([f"{i}: {j:.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())])
+                    " ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())])
                 )
                 print("===============================================")
         return X
@@ -162,7 +162,7 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print("sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(i, acc, local_data[0].item()))
-                print(" ".join([f"{i}: {j:.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
+                print(" ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
                 print("===============================================")
 
             if i % save_interval == 0:
@@ -180,6 +180,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../data/speeds_v2")
+    parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--num_posterior_samples", type=int, default=10000)
@@ -191,14 +192,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     data_dir = args.data_dir
+    device = args.device
     emulator_dir = args.emulator_dir
     num_models = args.num_models
     n_posterior_samples = args.num_posterior_samples
     samples_file = args.samples_file
     target_file = args.target_file
     thinning_factor = args.thinning_factor
-
-    device = "cpu"
 
     dataset = PISMDataset(
         data_dir=data_dir,
@@ -228,6 +228,7 @@ if __name__ == "__main__":
             args,
         )
         e.load_state_dict(state_dict)
+        e.to(device)
         models.append(e)
 
     # alpha = 0.01
@@ -287,7 +288,9 @@ if __name__ == "__main__":
     X_list = []
 
     for model_index in range(num_models):
-        X_list.append(np.load(open("./posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb")))
+        X_list.append(
+            np.load(open(f"{emulator_dir}/posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb"))
+        )
 
         X_posterior = np.vstack(X_list)
         X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()

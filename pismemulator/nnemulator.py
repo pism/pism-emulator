@@ -111,38 +111,41 @@ class NNEmulator(pl.LightningModule):
         }
         return [optimizer], [scheduler]
 
-    def criterion_ae(self, F_pred, F_obs, omegas):
-        instance_misfit = torch.sum(torch.abs(F_pred - F_obs) ** 2, axis=1)
+    def criterion_ae(self, F_pred, F_obs, omegas, area):
+        instance_misfit = torch.sum(torch.abs(F_pred - F_obs) ** 2 * area, axis=1)
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def training_step(self, batch, batch_idx):
-        x, f, o, o_0 = batch
+        x, f, o, o_0, area = batch
         f_pred = self.forward(x)
-        loss = self.criterion_ae(f_pred, f, o)
+        loss = self.criterion_ae(f_pred, f, o, area)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, f, o, o_0 = batch
-        return {"x": x, "f": f, "omegas": o, "omegas_0": o_0}
+        x, f, o, o_0, area = batch
+        return {"x": x, "f": f, "omegas": o, "omegas_0": o_0, "area": area}
 
     def validation_epoch_end(self, outputs):
         x = []
         f = []
         omegas_0 = []
         omegas = []
+        area = []
         for k, o in enumerate(outputs):
             x.append(o["x"])
             f.append(o["f"])
             omegas.append(o["omegas"])
             omegas_0.append(o["omegas_0"])
+            area.append(o["area"])
         x = torch.vstack(x)
         f = torch.vstack(f)
         omegas = torch.vstack(omegas)
         omegas_0 = torch.vstack(omegas_0)
+        area = torch.vstack(area)
         f_pred = self.forward(x)
-        train_loss = self.criterion_ae(f_pred, f, omegas)
-        test_loss = self.criterion_ae(f_pred, f, omegas_0)
+        train_loss = self.criterion_ae(f_pred, f, omegas, area)
+        test_loss = self.criterion_ae(f_pred, f, omegas_0, area)
 
         self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -263,6 +266,10 @@ class PISMDataset(torch.utils.data.Dataset):
         self.n_samples = n_samples
         self.n_grid_points = n_grid_points
 
+        normed_area = torch.tensor(np.ones(n_grid_points))
+        normed_area /= normed_area.sum()
+        self.normed_area = normed_area
+
     def return_original(self):
         if self.normalize_x:
             return self.X * self.X_std + self.X_mean
@@ -271,19 +278,23 @@ class PISMDataset(torch.utils.data.Dataset):
 
 
 class PISMDataModule(pl.LightningDataModule):
-    def __init__(self, X, F, omegas, omegas_0, batch_size: int = 128, test_size: float = 0.1, num_workers: int = 0):
+    def __init__(
+        self, X, F, omegas, omegas_0, area, batch_size: int = 128, test_size: float = 0.1, num_workers: int = 0
+    ):
         super().__init__()
         self.X = X
         self.F = F
         self.omegas = omegas
         self.omegas_0 = omegas_0
+        self.area = area
         self.batch_size = batch_size
         self.test_size = test_size
         self.num_workers = num_workers
 
     def setup(self, stage: str = None):
 
-        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
+        print(self.X.shape, self.F_bar.shape, self.omegas.shape, self.area.shape)
+        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0, self.area)
         training_data, validation_data = train_test_split(all_data, test_size=self.test_size)
         self.training_data = training_data
         self.test_data = training_data
