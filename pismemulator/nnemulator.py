@@ -117,6 +117,7 @@ class NNEmulator(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, f, o, o_0, area = batch
+        area = torch.mean(area, axis=0)
         f_pred = self.forward(x)
         loss = self.criterion_ae(f_pred, f, o, area)
 
@@ -143,6 +144,7 @@ class NNEmulator(pl.LightningModule):
         omegas = torch.vstack(omegas)
         omegas_0 = torch.vstack(omegas_0)
         area = torch.vstack(area)
+        area = torch.mean(area, axis=0)
         f_pred = self.forward(x)
         train_loss = self.criterion_ae(f_pred, f, omegas, area)
         test_loss = self.criterion_ae(f_pred, f, omegas_0, area)
