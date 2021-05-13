@@ -183,25 +183,31 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
+    parser.add_argument("--data_dir", default="../data/speeds_v2")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--num_posterior_samples", type=int, default=10000)
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
 
+    data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     num_models = args.num_models
     n_posterior_samples = args.num_posterior_samples
+    samples_file = args.samples_file
+    target_file = args.target_file
     thinning_factor = args.thinning_factor
 
     device = "cpu"
 
     dataset = PISMDataset(
-        data_dir="../data/speeds_v2/",
-        samples_file="../data/samples/velocity_calibration_samples_100.csv",
-        target_file="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc",
+        data_dir=data_dir,
+        samples_file=samples_file,
+        target_file=target_file,
         thinning_factor=thinning_factor,
     )
 
@@ -268,7 +274,7 @@ if __name__ == "__main__":
         mala = MALASampler(model)
         X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
         # To reproduce the paper, n_iters should be 10^5
-        X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
+        X_posterior = mala.MALA(X_map, U_target, n_iters=100000, model_index=j, save_interval=1000, print_interval=100)
         X_posteriors.append(X_posterior)
 
     from matplotlib.ticker import NullFormatter
