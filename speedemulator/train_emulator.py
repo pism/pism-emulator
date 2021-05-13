@@ -81,7 +81,8 @@ if __name__ == "__main__":
 
     for model_index in range(num_models):
         print(f"Training model {model_index} of {num_models}")
-        omegas = torch.tensor(dirichlet.rvs(np.ones(n_samples)), dtype=torch.float).T
+        omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
+        omegas = omegas.type_as(X)
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
         data_loader = PISMDataModule(

@@ -37,8 +37,6 @@ from pismemulator.utils import plot_validation
 class NNEmulator(pl.LightningModule):
     def __init__(self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs):
         super().__init__()
-        #print(hparams)
-        #self.hparams = hparams
         self.save_hyperparameters(hparams)
         n_hidden_1 = self.hparams.n_hidden_1
         n_hidden_2 = self.hparams.n_hidden_2
