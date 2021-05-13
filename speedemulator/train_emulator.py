@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
+    parser.add_argument("--test_size", type=float, default=0.1)
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
@@ -56,6 +57,7 @@ if __name__ == "__main__":
     num_models = args.num_models
     samples_file = args.samples_file
     target_file = args.target_file
+    test_size = args.test_size
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
 
@@ -86,7 +88,7 @@ if __name__ == "__main__":
         omegas = omegas.type_as(X)
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        data_loader = PISMDataModule(X, F, omegas, omegas_0, area)
+        data_loader = PISMDataModule(X, F, omegas, omegas_0, area, test_size=test_size)
         data_loader.prepare_data()
         data_loader.setup(stage="fit")
         n_eigenglaciers = data_loader.n_eigenglaciers
