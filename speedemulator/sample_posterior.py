@@ -55,7 +55,8 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print(
-                    f"iter: {i:d}, log(P): {log_pi:.1f}"
+                    f"iter: {i:d}, log(P): {log_pi:.1f}")
+                print(
                     " ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())])
                 )
                 print("===============================================")

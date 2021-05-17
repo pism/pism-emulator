@@ -103,7 +103,7 @@ if __name__ == "__main__":
         trainer = pl.Trainer.from_argparse_args(
             args, callbacks=[lr_monitor, checkpoint_callback], logger=logger, deterministic=True
         )
-        trainer.fit(e, data_loader.train_loader, data_loader.validation_loader)
+        trainer.fit(e, data_loader.all_loader, data_loader.all_loader)
         trainer.save_checkpoint(f"{emulator_dir}/emulator_{model_index:03d}.ckpt")
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
