@@ -163,6 +163,7 @@ class PISMDataset(torch.utils.data.Dataset):
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
+        threshold=5,
         epsilon=1e-10,
     ):
         self.data_dir = data_dir
@@ -243,9 +244,11 @@ class PISMDataset(torch.utils.data.Dataset):
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
+        
+        p = response.max(axis=1) < self.threshold
 
-        X = np.array(samples, dtype=np.float32)
-        Y = np.array(response, dtype=np.float32)
+        X = np.array(samples[p].values, dtype=np.float32)
+        Y = np.array(response[p].values, dtype=np.float32)
 
         X = torch.from_numpy(X)
         Y = torch.from_numpy(Y)
@@ -295,21 +298,23 @@ class PISMDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str = None):
 
-        print(self.X.shape, self.F_bar.shape, self.omegas.shape, self.area.shape)
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0, self.area)
         training_data, validation_data = train_test_split(all_data, test_size=self.test_size)
         self.training_data = training_data
         self.test_data = training_data
         self.validation_data = validation_data
         self.all_data = all_data
-        all_loader = DataLoader(
+        train_all_loader = DataLoader(
             dataset=all_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
         )
-
+        val_all_loader = DataLoader(
+            dataset=all_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers
+        )
         train_loader = DataLoader(
             dataset=training_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
         )
-        self.all_loader = all_loader
+        self.train_all_loader = train_all_loader
+        self.val_all_loader = val_all_loader
         self.train_loader = train_loader
         self.test_loader = train_loader
         validation_loader = DataLoader(

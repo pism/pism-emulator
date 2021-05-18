@@ -40,7 +40,7 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     """
     e.eval()
     cmap = "viridis"
-    fig, axs = plt.subplots(nrows=2, ncols=4, sharex="col", sharey="row", figsize=(6.2, 5.4))
+    fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8))
     for k in range(4):
         idx = np.random.randint(len(data_loader.validation_data))
         X_val, F_val, _, _, _ = data_loader.validation_data[idx]
@@ -50,19 +50,23 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
         corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
         axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
         axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        axs[1, k].text(100, 10, f"r={corr:.3f}", c="white", size=6)
+        axs[2, k].imshow(10**(F_pred-F_val), origin="lower", vmin=-10, vmax=10, cmap="coolwarm")
+        axs[1, k].text(5, 10, f"r={corr:.3f}", c="white", size=6)
         axs[0, k].text(
-            100,
-            10,
-            " ".join([f"{i}: {j}\n" for i, j in zip(dataset.X_keys, X_val_scaled)]),
+            5,
+            5,
+            " ".join([f"{i}: {j:.3f}\n" for i, j in zip(dataset.X_keys, X_val_scaled)]),
             c="white",
             size=6,
         )
-        axs[0, 0].text(10, 280, "PISM", c="white", size=6)
-        axs[1, 0].text(10, 280, "Emulator", c="white", size=6)
+        rmse = np.sqrt(mean_squared_error(10**F_pred, 10**F_val))
+        axs[2, k].text(10, 280, f"RMSE: {rmse:.1f}", c="k", size=6)
 
         axs[0, k].set_axis_off()
         axs[1, k].set_axis_off()
+        axs[2, k].set_axis_off()
+        axs[0, 0].text(5, 280, "PISM", c="white", size=6)
+        axs[1, 0].text(5, 280, "Emulator", c="white", size=6)
     fig.subplots_adjust(wspace=0, hspace=0.02)
     fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
 

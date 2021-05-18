@@ -88,7 +88,7 @@ if __name__ == "__main__":
         omegas = omegas.type_as(X)
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        data_loader = PISMDataModule(X, F, omegas, omegas_0, area, test_size=test_size)
+        data_loader = PISMDataModule(X, F, omegas, omegas_0, area, test_size=test_size, num_workers=0)
         data_loader.prepare_data()
         data_loader.setup(stage="fit")
         n_eigenglaciers = data_loader.n_eigenglaciers
@@ -103,7 +103,7 @@ if __name__ == "__main__":
         trainer = pl.Trainer.from_argparse_args(
             args, callbacks=[lr_monitor, checkpoint_callback], logger=logger, deterministic=True
         )
-        trainer.fit(e, data_loader.all_loader, data_loader.all_loader)
+        trainer.fit(e, data_loader.train_all_loader, data_loader.val_all_loader)
         trainer.save_checkpoint(f"{emulator_dir}/emulator_{model_index:03d}.ckpt")
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
