@@ -35,7 +35,9 @@ from pismemulator.utils import plot_validation
 
 
 class NNEmulator(pl.LightningModule):
-    def __init__(self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs):
+    def __init__(
+        self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs
+    ):
         super().__init__()
         self.save_hyperparameters(hparams)
         n_hidden_1 = self.hparams.n_hidden_1
@@ -105,7 +107,9 @@ class NNEmulator(pl.LightningModule):
         return parent_parser
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
         }
@@ -171,6 +175,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.target_file = target_file
         self.target_var = target_var
         self.thinning_factor = thinning_factor
+        self.threshold = threshold
         self.epsilon = epsilon
         self.log_y = log_y
         self.normalize_x = normalize_x
@@ -182,7 +187,10 @@ class PISMDataset(torch.utils.data.Dataset):
         epsilon = self.epsilon
         thinning_factor = self.thinning_factor
         ds = xr.open_dataset(self.target_file)
-        data = np.nan_to_num(ds.variables[self.target_var].values[::thinning_factor, ::thinning_factor], epsilon)
+        data = np.nan_to_num(
+            ds.variables[self.target_var].values[::thinning_factor, ::thinning_factor],
+            epsilon,
+        )
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         ds.close()
 
@@ -199,9 +207,9 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-            by=identifier_name
-        )
+        samples = pd.read_csv(
+            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+        ).sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -224,7 +232,11 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
+        _, ny, nx = (
+            ds0.variables["velsurf_mag"]
+            .values[:, ::thinning_factor, ::thinning_factor]
+            .shape
+        )
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -236,7 +248,10 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(), epsilon
+                ds.variables["velsurf_mag"]
+                .values[:, ::thinning_factor, ::thinning_factor]
+                .flatten(),
+                epsilon,
             )
             response[idx, :] = data
             ds.close()
@@ -244,11 +259,11 @@ class PISMDataset(torch.utils.data.Dataset):
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
-        
+
         p = response.max(axis=1) < self.threshold
 
-        X = np.array(samples[p].values, dtype=np.float32)
-        Y = np.array(response[p].values, dtype=np.float32)
+        X = np.array(samples[p], dtype=np.float32)
+        Y = np.array(response[p], dtype=np.float32)
 
         X = torch.from_numpy(X)
         Y = torch.from_numpy(Y)
@@ -284,7 +299,15 @@ class PISMDataset(torch.utils.data.Dataset):
 
 class PISMDataModule(pl.LightningDataModule):
     def __init__(
-        self, X, F, omegas, omegas_0, area, batch_size: int = 128, test_size: float = 0.1, num_workers: int = 0
+        self,
+        X,
+        F,
+        omegas,
+        omegas_0,
+        area,
+        batch_size: int = 128,
+        test_size: float = 0.1,
+        num_workers: int = 0,
     ):
         super().__init__()
         self.X = X
@@ -298,29 +321,43 @@ class PISMDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str = None):
 
-        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0, self.area)
-        training_data, validation_data = train_test_split(all_data, test_size=self.test_size)
+        all_data = TensorDataset(
+            self.X, self.F_bar, self.omegas, self.omegas_0, self.area
+        )
+        training_data, val_data = train_test_split(all_data, test_size=self.test_size)
         self.training_data = training_data
         self.test_data = training_data
-        self.validation_data = validation_data
+        self.val_data = val_data
         self.all_data = all_data
         train_all_loader = DataLoader(
-            dataset=all_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
+            dataset=all_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
         )
         val_all_loader = DataLoader(
-            dataset=all_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers
+            dataset=all_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
         )
         train_loader = DataLoader(
-            dataset=training_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers
+            dataset=training_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
         )
         self.train_all_loader = train_all_loader
         self.val_all_loader = val_all_loader
         self.train_loader = train_loader
         self.test_loader = train_loader
-        validation_loader = DataLoader(
-            dataset=validation_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers
+        val_loader = DataLoader(
+            dataset=val_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
         )
-        self.validation_loader = validation_loader
+        self.val_loader = val_loader
 
     def prepare_data(self):
         V_hat, F_bar, F_mean = self.get_eigenglaciers()
