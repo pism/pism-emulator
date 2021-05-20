@@ -110,7 +110,10 @@ class NNEmulator(pl.LightningModule):
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
         }
         scheduler = {
-            "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
+            "scheduler": ReduceLROnPlateau(optimizer),
+            "reduce_on_plateau": True,
+            "monitor": "test_loss",
+            "verbose": True,
         }
         return [optimizer], [scheduler]
 
