@@ -28,16 +28,14 @@ import xarray as xr
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 
 from pismemulator.utils import plot_validation
 
 
 class NNEmulator(pl.LightningModule):
-    def __init__(
-        self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs
-    ):
+    def __init__(self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs):
         super().__init__()
         self.save_hyperparameters(hparams)
         n_hidden_1 = self.hparams.n_hidden_1
@@ -107,11 +105,12 @@ class NNEmulator(pl.LightningModule):
         return parent_parser
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
-        )
+        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+        }
+        scheduler = {
+            "scheduler": ReduceLROnPlateau(optimizer, verbose=True),
         }
         return [optimizer], [scheduler]
 
@@ -207,9 +206,9 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(
-            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-        ).sort_values(by=identifier_name)
+        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+            by=identifier_name
+        )
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -232,11 +231,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = (
-            ds0.variables["velsurf_mag"]
-            .values[:, ::thinning_factor, ::thinning_factor]
-            .shape
-        )
+        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -248,9 +243,7 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"]
-                .values[:, ::thinning_factor, ::thinning_factor]
-                .flatten(),
+                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
                 epsilon,
             )
             response[idx, :] = data
@@ -321,9 +314,7 @@ class PISMDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str = None):
 
-        all_data = TensorDataset(
-            self.X, self.F_bar, self.omegas, self.omegas_0, self.area
-        )
+        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0, self.area)
         training_data, val_data = train_test_split(all_data, test_size=self.test_size)
         self.training_data = training_data
         self.test_data = training_data
