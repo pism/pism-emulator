@@ -99,7 +99,7 @@ if __name__ == "__main__":
         F_mean = data_loader.F_mean
         F_train = data_loader.F_bar
 
-        early_stop_callback = EarlyStopping(monitor="test_loss", min_delta=0.00, patience=3, verbose=False, mode="max")
+        early_stop_callback = EarlyStopping(monitor="test_loss", min_delta=0.00, patience=5, verbose=False, mode="max")
         checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
         # profiler = PyTorchProfiler(emulator_dir)
@@ -107,7 +107,7 @@ if __name__ == "__main__":
         e = NNEmulator(n_parameters, n_eigenglaciers, V_hat, F_mean, hparams)
         trainer = pl.Trainer.from_argparse_args(
             args,
-            callbacks=[lr_monitor, checkpoint_callback],
+            callbacks=[lr_monitor, checkpoint_callback, early_stop_callback],
             logger=logger,
             deterministic=True,
         )
