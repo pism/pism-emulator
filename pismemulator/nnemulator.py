@@ -35,7 +35,9 @@ from pismemulator.utils import plot_validation
 
 
 class NNEmulator(pl.LightningModule):
-    def __init__(self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs):
+    def __init__(
+        self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs
+    ):
         super().__init__()
         self.save_hyperparameters(hparams)
         n_hidden_1 = self.hparams.n_hidden_1
@@ -105,7 +107,9 @@ class NNEmulator(pl.LightningModule):
         return parent_parser
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
         }
@@ -131,25 +135,36 @@ class NNEmulator(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, f, o, o_0, area = batch
-        return {"x": x, "f": f, "omegas": o, "omegas_0": o_0, "area": area}
+        return {
+            "x": x,
+            "f": f,
+            "omegas": o,
+            "omegas_0": o_0,
+            "area": area,
+        }
 
     def validation_epoch_end(self, outputs):
-        x = []
-        f = []
-        omegas_0 = []
-        omegas = []
-        area = []
-        for k, o in enumerate(outputs):
-            x.append(o["x"])
-            f.append(o["f"])
-            omegas.append(o["omegas"])
-            omegas_0.append(o["omegas_0"])
-            area.append(o["area"])
-        x = torch.vstack(x)
-        f = torch.vstack(f)
-        omegas = torch.vstack(omegas)
-        omegas_0 = torch.vstack(omegas_0)
-        area = torch.vstack(area)
+        x = torch.stack([x["x"] for x in outputs])
+        f = torch.stack([x["f"] for x in outputs])
+        omegas = torch.stack([x["omegas"] for x in outputs])
+        omegas_0 = torch.stack([x["omegas_0"] for x in outputs])
+        area = torch.stack([x["area"] for x in outputs])
+        # x = []
+        # f = []
+        # omegas_0 = []
+        # omegas = []
+        # area = []
+        # for k, o in enumerate(outputs):
+        #     x.append(o["x"])
+        #     f.append(o["f"])
+        #     omegas.append(o["omegas"])
+        #     omegas_0.append(o["omegas_0"])
+        #     area.append(o["area"])
+        # x = torch.vstack(x)
+        # f = torch.vstack(f)
+        # omegas = torch.vstack(omegas)
+        # omegas_0 = torch.vstack(omegas_0)
+        # area = torch.vstack(area)
         area = torch.mean(area, axis=0)
         f_pred = self.forward(x)
         train_loss = self.criterion_ae(f_pred, f, omegas, area)
@@ -209,9 +224,9 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-            by=identifier_name
-        )
+        samples = pd.read_csv(
+            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+        ).sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -234,7 +249,11 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
+        _, ny, nx = (
+            ds0.variables["velsurf_mag"]
+            .values[:, ::thinning_factor, ::thinning_factor]
+            .shape
+        )
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -246,7 +265,9 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
+                ds.variables["velsurf_mag"]
+                .values[:, ::thinning_factor, ::thinning_factor]
+                .flatten(),
                 epsilon,
             )
             response[idx, :] = data
@@ -317,7 +338,9 @@ class PISMDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str = None):
 
-        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0, self.area)
+        all_data = TensorDataset(
+            self.X, self.F_bar, self.omegas, self.omegas_0, self.area
+        )
         training_data, val_data = train_test_split(all_data, test_size=self.test_size)
         self.training_data = training_data
         self.test_data = training_data

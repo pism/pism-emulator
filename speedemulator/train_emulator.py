@@ -26,7 +26,11 @@ from scipy.stats import dirichlet
 
 import torch
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint, EarlyStopping
+from pytorch_lightning.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    EarlyStopping,
+)
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.profiler import PyTorchProfiler
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
@@ -40,7 +44,9 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../data/speeds_v2")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument(
+        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
+    )
     parser.add_argument(
         "--target_file",
         default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc",
@@ -91,7 +97,9 @@ if __name__ == "__main__":
         omegas = omegas.type_as(X)
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        data_loader = PISMDataModule(X, F, omegas, omegas_0, area, test_size=test_size, num_workers=0)
+        data_loader = PISMDataModule(
+            X, F, omegas, omegas_0, area, test_size=test_size, num_workers=0
+        )
         data_loader.prepare_data()
         data_loader.setup(stage="fit")
         n_eigenglaciers = data_loader.n_eigenglaciers
@@ -99,8 +107,12 @@ if __name__ == "__main__":
         F_mean = data_loader.F_mean
         F_train = data_loader.F_bar
 
-        early_stop_callback = EarlyStopping(monitor="test_loss", min_delta=0.00, patience=5, verbose=False, mode="max")
-        checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
+        early_stop_callback = EarlyStopping(
+            monitor="test_loss", min_delta=0.00, patience=5, verbose=False, mode="max"
+        )
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
+        )
         logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
         # profiler = PyTorchProfiler(emulator_dir)
         lr_monitor = LearningRateMonitor(logging_interval="epoch")
