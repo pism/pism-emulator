@@ -54,11 +54,8 @@ class MALASampler(object):
             X.data = mu.data
             if i % print_interval == 0:
                 print("===============================================")
-                print(
-                    f"iter: {i:d}, log(P): {log_pi:.1f}")
-                print(
-                    " ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())])
-                )
+                print(f"iter: {i:d}, log(P): {log_pi:.1f}")
+                print(" ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
                 print("===============================================")
         return X
 
@@ -184,13 +181,14 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--num_posterior_samples", type=int, default=10000)
+    parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
+    hparams = vars(args)
 
     data_dir = args.data_dir
     device = args.device
@@ -226,7 +224,8 @@ if __name__ == "__main__":
             state_dict["V_hat"].shape[1],
             state_dict["V_hat"],
             state_dict["F_mean"],
-            args,
+            dataset.normed_area,
+            hparams,
         )
         e.load_state_dict(state_dict)
         e.to(device)
