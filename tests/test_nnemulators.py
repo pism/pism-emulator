@@ -18,9 +18,19 @@
 
 
 import numpy as np
-from numpy.testing import assert_equal, assert_array_almost_equal
+from numpy.testing import assert_equal, assert_almost_equal, assert_array_almost_equal
+import torch
+from pismemulator.nnemulator import absolute_error, PISMDataset
 
-from pismemulator.nnemulator import PISMDataset
+
+def test_absolute_error():
+
+    x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
+    y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
+    o = torch.tensor([0.25, 0.25, 0.3, 0.2])
+    a = torch.tensor([0.25, 0.25])
+    ae = absolute_error(x, y, o, a)
+    assert_almost_equal(ae, 0.4000, decimal=4)
 
 
 def test_dataset():

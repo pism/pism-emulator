@@ -151,8 +151,6 @@ class NNEmulator(pl.LightningModule):
         f_pred = self.forward(x)
         # loss = self.criterion_ae(f_pred, f, o, self.area)
         ae_loss = absolute_error(f_pred, f, o, self.area)
-        # self.loss(f_pred, f, o, self.area)
-        # self.log("ae_loss", self.loss, on_step=True, on_epoch=False)
 
         return ae_loss
 
@@ -194,7 +192,7 @@ class PISMDataset(torch.utils.data.Dataset):
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
-        threshold=5,
+        threshold=100e3,
         epsilon=1e-10,
     ):
         self.data_dir = data_dir
@@ -283,15 +281,14 @@ class PISMDataset(torch.utils.data.Dataset):
             response[idx, :] = data
             ds.close()
 
+        p = response.max(axis=1) < self.threshold
+
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
 
-        p = response.max(axis=1) < self.threshold
-
         X = np.array(samples[p], dtype=np.float32)
         Y = np.array(response[p], dtype=np.float32)
-
         X = torch.from_numpy(X)
         Y = torch.from_numpy(Y)
         Y[Y < 0] = 0
@@ -437,7 +434,8 @@ def absolute_error(
     Args:
         preds: estimated labels
         target: ground truth labels
-        omegas
+        omegas: weights
+        area: area of each cell
     Return:
         Tensor with absolute error
     Example:
