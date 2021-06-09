@@ -127,9 +127,7 @@ class NNEmulator(pl.LightningModule):
         return parent_parser
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
-        )
+        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
         }
@@ -178,9 +176,7 @@ class NNEmulator(pl.LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
-        self.log(
-            "val_test_ae", self.val_test_ae, on_step=False, on_epoch=True, prog_bar=True
-        )
+        self.log("val_test_ae", self.val_test_ae, on_step=False, on_epoch=True, prog_bar=True)
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -233,9 +229,9 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(
-            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-        ).sort_values(by=identifier_name)
+        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+            by=identifier_name
+        )
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -258,11 +254,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = (
-            ds0.variables["velsurf_mag"]
-            .values[:, ::thinning_factor, ::thinning_factor]
-            .shape
-        )
+        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -274,9 +266,7 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"]
-                .values[:, ::thinning_factor, ::thinning_factor]
-                .flatten(),
+                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
                 epsilon,
             )
             response[idx, :] = data
@@ -428,15 +418,14 @@ def _absolute_error_compute(sum_absolute_error: Tensor, omegas: Tensor) -> Tenso
     return torch.sum(sum_absolute_error * omegas.squeeze())
 
 
-def absolute_error(
-    preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
-) -> Tensor:
+def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor) -> Tensor:
     """
     Computes squared absolute error
     Args:
         preds: estimated labels
         target: ground truth labels
-        omegas
+        omegas: weights
+        area: area of each cell
     Return:
         Tensor with absolute error
     Example:
@@ -456,9 +445,7 @@ class AbsoluteError(Metric):
         # call `self.add_state`for every internal state that is needed for the metrics computations
         # dist_reduce_fx indicates the function that should be used to reduce
         # state from multiple processes
-        super().__init__(
-            compute_on_step=compute_on_step, dist_sync_on_step=dist_sync_on_step
-        )
+        super().__init__(compute_on_step=compute_on_step, dist_sync_on_step=dist_sync_on_step)
 
         self.add_state("sum_abs_error", default=[], dist_reduce_fx="cat")
 
