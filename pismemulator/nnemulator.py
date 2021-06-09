@@ -149,9 +149,10 @@ class NNEmulator(pl.LightningModule):
         x, f, o = batch
         # area = torch.mean(area, axis=0)
         f_pred = self.forward(x)
-        loss = self.criterion_ae(f_pred, f, o, self.area)
+        # loss = self.criterion_ae(f_pred, f, o, self.area)
         ae_loss = absolute_error(f_pred, f, o, self.area)
-        self.log("ae_loss", self.loss, on_step=True, on_epoch=False)
+        # self.loss(f_pred, f, o, self.area)
+        # self.log("ae_loss", self.loss, on_step=True, on_epoch=False)
 
         return ae_loss
 
