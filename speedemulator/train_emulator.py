@@ -44,6 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../data/speeds_v2")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
@@ -64,6 +65,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     max_epochs = args.max_epochs
     num_models = args.num_models
+    num_workers = args.num_workers
     samples_file = args.samples_file
     target_file = args.target_file
     test_size = args.test_size
@@ -79,7 +81,7 @@ if __name__ == "__main__":
 
     X = dataset.X
     F = dataset.Y
-    area = dataset.normed_area.repeat(dataset.n_samples, 1)
+    area = dataset.normed_area
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
@@ -97,7 +99,9 @@ if __name__ == "__main__":
         omegas = omegas.type_as(X)
         omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        data_loader = PISMDataModule(X, F, omegas, test_size=test_size, num_workers=4)
+        data_loader = PISMDataModule(
+            X, F, omegas, omegas_0, test_size=test_size, num_workers=num_workers
+        )
         data_loader.prepare_data()
         data_loader.setup(stage="fit")
         n_eigenglaciers = data_loader.n_eigenglaciers
@@ -119,8 +123,7 @@ if __name__ == "__main__":
             n_eigenglaciers,
             V_hat,
             F_mean,
-            omegas_0,
-            dataset.normed_area,
+            area,
             hparams,
         )
         trainer = pl.Trainer.from_argparse_args(

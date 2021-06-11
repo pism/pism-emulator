@@ -29,7 +29,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from torchmetrics.utilities.checks import _check_same_shape
-from torchmetrics import Metric
+from torchmetrics import Metric, MeanAbsoluteError
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
@@ -45,7 +45,6 @@ class NNEmulator(pl.LightningModule):
         n_eigenglaciers,
         V_hat,
         F_mean,
-        omegas_0,
         area,
         hparams,
         *args,
@@ -76,12 +75,12 @@ class NNEmulator(pl.LightningModule):
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
 
-        self.register_buffer("omegas_0", omegas_0)
         self.register_buffer("area", area)
 
         self.loss = AbsoluteError()
-        self.val_train_ae = AbsoluteError()
+        self.val_train_ae = AbsoluteError(compute_on_step=False)
         self.val_test_ae = AbsoluteError()
+        self.mae = MeanAbsoluteError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -146,40 +145,70 @@ class NNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def training_step(self, batch, batch_idx):
-        x, f, o = batch
-        # area = torch.mean(area, axis=0)
+        x, f, o, _ = batch
         f_pred = self.forward(x)
-        # loss = self.criterion_ae(f_pred, f, o, self.area)
         ae_loss = absolute_error(f_pred, f, o, self.area)
+        self.loss(f_pred, f, o, self.area)
+        self.log("metric", self.loss, on_step=True, on_epoch=False, prog_bar=True)
 
         return ae_loss
 
     def validation_step(self, batch, batch_idx):
-        x, f, o = batch
-        return {"x": x, "f": f, "o": o}
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+        self.log(
+            "val_train_loss_step",
+            self.val_train_ae(f_pred, f, o, self.area),
+            on_step=True,
+            on_epoch=False,
+        )
+        self.log(
+            "val_test_loss_step",
+            self.val_train_ae(f_pred, f, o_0, self.area),
+            on_step=True,
+            on_epoch=False,
+        )
+        self.log("mae_step", self.mae(f_pred, f), on_step=True, on_epoch=False)
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
-        x = torch.vstack([x["x"] for x in outputs])
-        f = torch.vstack([x["f"] for x in outputs])
-        omegas = torch.vstack([x["o"] for x in outputs])
-        f_pred = self.forward(x)
-        train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
-        test_loss = self.criterion_ae(f_pred, f, self.omegas_0, self.area)
-        self.val_train_ae(f_pred, f, omegas, self.area)
-        self.val_test_ae(f_pred, f, self.omegas_0, self.area)
-
-        self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(
-            "val_train_ae",
-            self.val_train_ae,
+            "val_train_loss",
+            self.val_train_ae.compute(),
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
         self.log(
-            "val_test_ae", self.val_test_ae, on_step=False, on_epoch=True, prog_bar=True
+            "val_test_loss",
+            self.val_test_ae.compute(),
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
         )
+        self.log(
+            "mae_epoch", self.mae.compute(), on_step=False, on_epoch=True, prog_bar=True
+        )
+        # x = torch.vstack([x["x"] for x in outputs])
+        # f = torch.vstack([x["f"] for x in outputs])
+        # omegas = torch.vstack([x["o"] for x in outputs])
+        # omegas_0 = torch.vstack([x["o_0"] for x in outputs])
+        # f_pred = self.forward(x)
+        # train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
+        # test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+        # self.val_train_ae(f_pred, f, omegas, self.area)
+        # self.val_test_ae(f_pred, f, self.omegas_0, self.area)
+
+        # self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        # self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        # self.log(
+        #    "val_train_ae",
+        #    self.val_train_ae,
+        #    on_step=False,
+        #    on_epoch=True,
+        #    prog_bar=True,
+        # )
+        # self.log("val_test_ae", self.val_test_ae, on_step=False, on_epoch=True, prog_bar=True)
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -327,6 +356,7 @@ class PISMDataModule(pl.LightningDataModule):
         X,
         F,
         omegas,
+        omegas_0,
         batch_size: int = 128,
         test_size: float = 0.1,
         num_workers: int = 0,
@@ -335,13 +365,14 @@ class PISMDataModule(pl.LightningDataModule):
         self.X = X
         self.F = F
         self.omegas = omegas
+        self.omegas_0 = omegas_0
         self.batch_size = batch_size
         self.test_size = test_size
         self.num_workers = num_workers
 
     def setup(self, stage: str = None):
 
-        all_data = TensorDataset(self.X, self.F_bar, self.omegas)
+        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         training_data, val_data = train_test_split(all_data, test_size=self.test_size)
         self.training_data = training_data
         self.test_data = training_data
@@ -415,15 +446,18 @@ class PISMDataModule(pl.LightningDataModule):
         return self.validation_loader
 
 
-def _absolute_error_update(preds: Tensor, target: Tensor, area: Tensor) -> Tensor:
+def _absolute_error_update(
+    preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
+) -> Tensor:
     _check_same_shape(preds, target)
     diff = torch.abs(preds - target)
-    sum_absolute_error = torch.sum(diff * diff * area, axis=1)
-    return sum_absolute_error
+    sum_abs_error = torch.sum(diff * diff * area, axis=1)
+    absolute_error = torch.sum(sum_abs_error * omegas.squeeze())
+    return absolute_error
 
 
-def _absolute_error_compute(sum_absolute_error: Tensor, omegas: Tensor) -> Tensor:
-    return torch.sum(sum_absolute_error * omegas.squeeze())
+def _absolute_error_compute(absolute_error) -> Tensor:
+    return absolute_error
 
 
 def absolute_error(
@@ -446,8 +480,8 @@ def absolute_error(
         >>> absolute_error(x, y, o, a)
         tensor(0.4000)
     """
-    sum_abs_error = _absolute_error_update(preds, target, area)
-    return _absolute_error_compute(sum_abs_error, omegas)
+    sum_abs_error = _absolute_error_update(preds, target, omegas, area)
+    return _absolute_error_compute(sum_abs_error)
 
 
 class AbsoluteError(Metric):
@@ -459,7 +493,7 @@ class AbsoluteError(Metric):
             compute_on_step=compute_on_step, dist_sync_on_step=dist_sync_on_step
         )
 
-        self.add_state("sum_abs_error", default=[], dist_reduce_fx="cat")
+        self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
 
     def update(self, preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor):
         """
@@ -467,18 +501,17 @@ class AbsoluteError(Metric):
         Args:
             preds: Predictions from model
             target: Ground truth values
+            omegas: Weights
+            area: Area of each cell
         """
-        self.omegas = omegas
-        sum_abs_error = _absolute_error_update(preds, target, area)
-        self.sum_abs_error.append(sum_abs_error)
+        sum_abs_error = _absolute_error_update(preds, target, omegas, area)
+        self.sum_abs_error += sum_abs_error
 
     def compute(self):
         """
         Computes absolute error over state.
         """
-        omegas = dim_zero_cat(self.omegas)
-        sum_abs_error = dim_zero_cat(self.sum_abs_error)
-        return _absolute_error_compute(sum_abs_error, omegas)
+        return _absolute_error_compute(self.sum_abs_error)
 
     @property
     def is_differentiable(self):

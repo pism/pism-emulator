@@ -45,7 +45,12 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     )
     for k in range(4):
         idx = np.random.randint(len(data_loader.val_data))
-        X_val, F_val, _, _ = data_loader.val_data[idx]
+        (
+            X_val,
+            F_val,
+            _,
+            _,
+        ) = data_loader.val_data[idx]
         X_val_scaled = X_val * dataset.X_std + dataset.X_mean
         F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
         F_pred = (
