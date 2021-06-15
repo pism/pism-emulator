@@ -33,7 +33,6 @@ from torchmetrics import Metric, MeanAbsoluteError
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
-from torchmetrics.utilities.data import dim_zero_cat
 
 from pismemulator.utils import plot_validation
 
@@ -77,9 +76,8 @@ class NNEmulator(pl.LightningModule):
 
         self.register_buffer("area", area)
 
-        self.loss = AbsoluteError(compute_on_step=False)
-        self.val_train_ae = AbsoluteError()
-        self.val_test_ae = AbsoluteError()
+        self.train_ae = AbsoluteError()
+        self.test_ae = AbsoluteError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -124,6 +122,10 @@ class NNEmulator(pl.LightningModule):
 
         return parent_parser
 
+    def criterion_ae(F_pred, F_obs, omegas, area):
+        instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
+        return torch.sum(instance_misfit * omegas.squeeze())
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
         scheduler = {
@@ -134,41 +136,45 @@ class NNEmulator(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, f, o, _ = batch
         f_pred = self.forward(x)
-        self.loss(f_pred, f, o, self.area)
+        loss = absolute_error(f_pred, f, o, self.area)
 
-        return self.log("loss", self.loss, on_step=True, on_epoch=False)
-
-    def training_epoch_end(self, outputs):
-        self.log("training_loss", self.loss.compute(), on_step=False, on_epoch=True, prog_bar=True)
+        return loss
 
     def validation_step(self, batch, batch_idx):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
-        self.log(
-            "val_train_loss_step",
-            self.val_train_ae(f_pred, f, o, self.area),
-            on_step=True,
-            on_epoch=False,
-        )
-        self.log(
-            "val_test_loss_step",
-            self.val_test_ae(f_pred, f, o_0, self.area),
-            on_step=True,
-            on_epoch=False,
-        )
+        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
+        x = torch.stack([x["x"] for x in outputs])
+        f = torch.stack([x["f"] for x in outputs])
+        omegas = torch.stack([x["omegas"] for x in outputs])
+        omegas_0 = torch.stack([x["omegas_0"] for x in outputs])
+
+        f_pred = self.forward(x)
+
+        cae_train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
+        cae_test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+
         self.log(
-            "val_train_loss",
-            self.val_train_ae.compute(),
+            "train_loss",
+            self.val_train_ae,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
         self.log(
-            "val_test_loss",
-            self.val_test_ae.compute(),
+            "test_loss",
+            self.val_test_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "cae_test_loss",
+            cae_test_loss,
             on_step=False,
             on_epoch=True,
             prog_bar=True,

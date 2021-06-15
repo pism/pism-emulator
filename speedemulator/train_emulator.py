@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
