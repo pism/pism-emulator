@@ -9,7 +9,7 @@ from scipy.stats import beta
 
 import torch
 
-from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
+from pismemulator.nnemulator import NNEmulator, PISMDataset
 
 import pandas as pd
 import pylab as plt

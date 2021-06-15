@@ -29,12 +29,10 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from torchmetrics.utilities.checks import _check_same_shape
-from torchmetrics import Metric, MeanAbsoluteError
+from torchmetrics import Metric
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
-
-from pismemulator.utils import plot_validation
 
 
 class NNEmulator(pl.LightningModule):

@@ -32,7 +32,6 @@ from pytorch_lightning.callbacks import (
     EarlyStopping,
 )
 from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.profiler import PyTorchProfiler
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
 from pismemulator.utils import plot_validation
 
@@ -108,7 +107,6 @@ if __name__ == "__main__":
         early_stop_callback = EarlyStopping(monitor="test_loss", min_delta=0.00, patience=5, verbose=False, mode="max")
         checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
-        # profiler = PyTorchProfiler(emulator_dir)
         lr_monitor = LearningRateMonitor(logging_interval="epoch")
         e = NNEmulator(
             n_parameters,
@@ -118,9 +116,10 @@ if __name__ == "__main__":
             area,
             hparams,
         )
+        callbacks = [lr_monitor, checkpoint_callback]
         trainer = pl.Trainer.from_argparse_args(
             args,
-            callbacks=[lr_monitor, checkpoint_callback],
+            callbacks=callbacks,
             logger=logger,
             deterministic=True,
             num_sanity_val_steps=0,

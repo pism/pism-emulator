@@ -26,12 +26,10 @@ from pyDOE import lhs
 import pylab as plt
 from SALib.sample import saltelli
 import scipy
-from scipy.stats.distributions import truncnorm
-from scipy.stats.distributions import gamma
-from scipy.stats.distributions import uniform
-from scipy.stats.distributions import randint
+from scipy.stats.distributions import truncnorm, gamma, uniform, randint
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
+import sys
 
 
 def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
@@ -40,9 +38,7 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     """
     e.eval()
     cmap = "viridis"
-    fig, axs = plt.subplots(
-        nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8)
-    )
+    fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8))
     for k in range(4):
         idx = np.random.randint(len(data_loader.val_data))
         (
@@ -53,15 +49,11 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
         ) = data_loader.val_data[idx]
         X_val_scaled = X_val * dataset.X_std + dataset.X_mean
         F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
-        F_pred = (
-            e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
-        )
+        F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
         corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
         c1 = axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
         axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        c2 = axs[2, k].imshow(
-            F_pred - F_val, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm"
-        )
+        c2 = axs[2, k].imshow(F_pred - F_val, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm")
         axs[1, k].text(5, 5, f"r={corr:.3f}", c="white", size=6)
         axs[0, k].text(
             5,
@@ -82,13 +74,9 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     axs[0, 0].text(5, 290, "PISM", c="white", size=6, weight="bold")
     axs[1, 0].text(5, 290, "Emulator", c="white", size=6, weight="bold")
     cb_ax = fig.add_axes([0.905, 0.525, 0.025, 0.15])
-    cbar1 = plt.colorbar(
-        c1, cax=cb_ax, shrink=1, label="log speed (m/yr)", orientation="vertical"
-    )
+    plt.colorbar(c1, cax=cb_ax, shrink=1, label="log speed (m/yr)", orientation="vertical")
     cb_ax2 = fig.add_axes([0.905, 0.15, 0.025, 0.15])
-    cbar2 = plt.colorbar(
-        c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical"
-    )
+    plt.colorbar(c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical")
     fig.subplots_adjust(wspace=0, hspace=0.02)
     fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
 
@@ -173,7 +161,7 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
         names = varnames
 
     assert n == len(names)
-    ## Need assertion error here
+    # Need assertion error here
 
     params_dict = {k: v for v, k in enumerate(names)}
     params_to_check = list(names)
@@ -204,9 +192,7 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                 if len(subnames) != 2:
                     sys.exit("Interaction unexpected")
                 # Temporary X that contains the interaction term
-                tempX = np.column_stack(
-                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
-                )
+                tempX = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
                 # BIC for baseline model + interaction term
                 lm_bic = calc_bic(tempX, Y)
             else:
@@ -221,17 +207,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
         min_key = min(bic_dict.keys(), key=(lambda k: bic_dict[k]))
         min_bic = bic_dict[min_key]
         if "*" in min_key:
-            print(
-                "  Minimum BIC = {:2.2f} when adding {} to model".format(
-                    min_bic, min_key
-                )
-            )
+            print("  Minimum BIC = {:2.2f} when adding {} to model".format(min_bic, min_key))
         else:
-            print(
-                "  Minimum BIC = {:2.2f} when removing {} from model".format(
-                    min_bic, min_key
-                )
-            )
+            print("  Minimum BIC = {:2.2f} when removing {} from model".format(min_bic, min_key))
 
         # Compare lowest BIC to baseline model BIC
         if min_bic < whole_lm_bic:
@@ -254,9 +232,7 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                         print("  Removed {} from model-eligible variables".format(s))
 
                 # Update X and BIC to reflect new baseline model
-                X = np.column_stack(
-                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
-                )
+                X = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
                 whole_lm_bic = calc_bic(X, Y)
 
             else:
@@ -328,16 +304,16 @@ def prepare_data(
     print("\nPreparing sample {} and response {}".format(samples_file, response_file))
 
     # Load Samples file as Pandas DataFrame
-    samples = pd.read_csv(
-        samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-    ).sort_values(by=identifier_name)
+    samples = pd.read_csv(samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+        by=identifier_name
+    )
     samples.index = samples[identifier_name]
     samples.index.name = None
 
     # Load Response file as Pandas DataFrame
-    response = pd.read_csv(
-        response_file, delimiter=",", squeeze=True, skipinitialspace=True
-    ).sort_values(by=identifier_name)
+    response = pd.read_csv(response_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+        by=identifier_name
+    )
     response.index = response[identifier_name]
     response.index.name = None
 
@@ -432,7 +408,7 @@ def kl_divergence(p, q):
 
     From https://en.wikipedia.org/wiki/Kullback–Leibler_divergence:
 
-    In the context of machine learning, {\displaystyle D_{\text{KL}}(P\parallel Q)} is often called the information gain achieved if Q is used instead of P. By analogy with information theory, it is also called the relative entropy of P with respect to Q. In the context of coding theory, {\displaystyle D_{\text{KL}}(P\parallel Q)} can be constructed by measuring the expected number of extra bits required to code samples from P using a code optimized for Q rather than the code optimized for.
+    In the context of machine learning, {isplaystyle D_{\text{KL}}(P\parallel Q)} is often called the information gain achieved if Q is used instead of P. By analogy with information theory, it is also called the relative entropy of P with respect to Q. In the context of coding theory, {\displaystyle D_{\text{KL}}(P\parallel Q)} can be constructed by measuring the expected number of extra bits required to code samples from P using a code optimized for Q rather than the code optimized for.
 
     Expressed in the language of Bayesian inference, {\displaystyle D_{\text{KL}}(P\parallel Q)} is a measure of the information gained when one revises one's beliefs from the prior probability distribution Q to the posterior probability distribution P. In other words, it is the amount of information lost when Q is used to approximate P. In applications, P typically represents the "true" distribution of data, observations, or a precisely calculated theoretical distribution, while Q typically represents a theory, model, description, or approximation of P. In order to find a distribution Q that is closest to P, we can minimize KL divergence and compute an information projection.
 

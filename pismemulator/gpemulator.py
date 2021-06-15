@@ -142,7 +142,7 @@ def emulate_sklearn(samples, response, X_new, method="lasso", alphas=np.linspace
     else:
         print(
             "Method {} not supported, supported methods are {}".format(
-                method, ", ".join([m for m in supported_method])
+                method, ", ".join([m for m in supported_methods])
             )
         )
 
