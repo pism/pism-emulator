@@ -122,7 +122,7 @@ class NNEmulator(pl.LightningModule):
 
         return parent_parser
 
-    def criterion_ae(F_pred, F_obs, omegas, area):
+    def criterion_ae(self, F_pred, F_obs, omegas, area):
         instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
         return torch.sum(instance_misfit * omegas.squeeze())
 
@@ -130,6 +130,12 @@ class NNEmulator(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+        }
+        scheduler = {
+            "scheduler": ReduceLROnPlateau(optimizer),
+            "reduce_on_plateau": True,
+            "monitor": "test_loss",
+            "verbose": True,
         }
         return [optimizer], [scheduler]
 
@@ -143,42 +149,57 @@ class NNEmulator(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
+
         self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
         self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
+
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
-        x = torch.stack([x["x"] for x in outputs])
-        f = torch.stack([x["f"] for x in outputs])
-        omegas = torch.stack([x["omegas"] for x in outputs])
-        omegas_0 = torch.stack([x["omegas_0"] for x in outputs])
+        # x = torch.stack([x["x"] for x in outputs])
+        # f = torch.stack([x["f"] for x in outputs])
+        # omegas = torch.stack([x["o"] for x in outputs])
+        # omegas_0 = torch.stack([x["o_0"] for x in outputs])
+        # x = []
+        # f = []
+        # omegas_0 = []
+        # omegas = []
+        # for k, o in enumerate(outputs):
+        #     x.append(o["x"])
+        #     f.append(o["f"])
+        #     omegas.append(o["o"])
+        #     omegas_0.append(o["o_0"])
+        # x = torch.vstack(x)
+        # f = torch.vstack(f)
+        # omegas = torch.vstack(omegas)
+        # omegas_0 = torch.vstack(omegas_0)
 
-        f_pred = self.forward(x)
+        # f_pred = self.forward(x)
 
-        cae_train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
-        cae_test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
+        # cae_train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
+        # cae_test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
 
         self.log(
             "train_loss",
-            self.val_train_ae,
+            self.train_ae,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
         self.log(
             "test_loss",
-            self.val_test_ae,
+            self.test_ae,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
-        self.log(
-            "cae_test_loss",
-            cae_test_loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-        )
+        # self.log(
+        #     "cae_test_loss",
+        #     cae_test_loss,
+        #     on_step=False,
+        #     on_epoch=True,
+        #     prog_bar=True,
+        # )
 
 
 class PISMDataset(torch.utils.data.Dataset):
