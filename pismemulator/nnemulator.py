@@ -127,12 +127,11 @@ class NNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
-        )
-        scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
-        }
+        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        # This is an approximation to Doug's version:
+        # scheduler = {
+        #     "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+        # }
         scheduler = {
             "scheduler": ReduceLROnPlateau(optimizer),
             "reduce_on_plateau": True,
@@ -225,9 +224,9 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(
-            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-        ).sort_values(by=identifier_name)
+        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+            by=identifier_name
+        )
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -250,11 +249,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = (
-            ds0.variables["velsurf_mag"]
-            .values[:, ::thinning_factor, ::thinning_factor]
-            .shape
-        )
+        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -266,9 +261,7 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"]
-                .values[:, ::thinning_factor, ::thinning_factor]
-                .flatten(),
+                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
                 epsilon,
             )
             response[idx, :] = data
