@@ -25,7 +25,6 @@ import pandas as pd
 from pyDOE import lhs
 import pylab as plt
 from SALib.sample import saltelli
-import scipy
 from scipy.stats.distributions import truncnorm, gamma, uniform, randint
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
@@ -38,7 +37,9 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     """
     e.eval()
     cmap = "viridis"
-    fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8))
+    fig, axs = plt.subplots(
+        nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8)
+    )
     for k in range(4):
         idx = np.random.randint(len(data_loader.val_data))
         (
@@ -49,34 +50,73 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
         ) = data_loader.val_data[idx]
         X_val_scaled = X_val * dataset.X_std + dataset.X_mean
         F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
-        F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+        F_pred = (
+            e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+        )
         corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
         c1 = axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
         axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        c2 = axs[2, k].imshow(F_pred - F_val, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm")
-        axs[1, k].text(5, 5, f"r={corr:.3f}", c="white", size=6)
+        c2 = axs[2, k].imshow(
+            F_pred - F_val, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm"
+        )
+        axs[1, k].text(
+            0.01,
+            0.01,
+            f"r={corr:.3f}",
+            c="white",
+            size=6,
+            transform=axs[1, k].transAxes,
+        )
         axs[0, k].text(
-            5,
-            5,
+            0.01,
+            0.01,
             "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_scaled)]),
             c="white",
             size=6,
+            transform=axs[0, k].transAxes,
         )
         mask = 10 ** F_val <= 1
         F_p = np.ma.array(data=10 ** F_pred, mask=mask)
         F_v = np.ma.array(data=10 ** F_val, mask=mask)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
-        axs[2, k].text(5, 5, f"RMSE: {rmse:.0f} m/yr", c="k", size=6)
+        axs[2, k].text(
+            0.01,
+            0.01,
+            f"RMSE: {rmse:.0f} m/yr",
+            c="k",
+            size=6,
+            transform=axs[2, k].transAxes,
+        )
 
         axs[0, k].set_axis_off()
         axs[1, k].set_axis_off()
         axs[2, k].set_axis_off()
-    axs[0, 0].text(5, 290, "PISM", c="white", size=6, weight="bold")
-    axs[1, 0].text(5, 290, "Emulator", c="white", size=6, weight="bold")
+    axs[0, 0].text(
+        0.01,
+        0.95,
+        "PISM",
+        c="white",
+        size=6,
+        weight="bold",
+        transform=axs[0, 0].transAxes,
+    )
+    axs[1, 0].text(
+        0.01,
+        0.95,
+        "Emulator",
+        c="white",
+        size=6,
+        weight="bold",
+        transform=axs[1, 0].transAxes,
+    )
     cb_ax = fig.add_axes([0.905, 0.525, 0.025, 0.15])
-    plt.colorbar(c1, cax=cb_ax, shrink=1, label="log speed (m/yr)", orientation="vertical")
+    plt.colorbar(
+        c1, cax=cb_ax, shrink=1, label="log speed (m/yr)", orientation="vertical"
+    )
     cb_ax2 = fig.add_axes([0.905, 0.15, 0.025, 0.15])
-    plt.colorbar(c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical")
+    plt.colorbar(
+        c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical"
+    )
     fig.subplots_adjust(wspace=0, hspace=0.02)
     fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
 
@@ -192,7 +232,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                 if len(subnames) != 2:
                     sys.exit("Interaction unexpected")
                 # Temporary X that contains the interaction term
-                tempX = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
+                tempX = np.column_stack(
+                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
+                )
                 # BIC for baseline model + interaction term
                 lm_bic = calc_bic(tempX, Y)
             else:
@@ -207,9 +249,17 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
         min_key = min(bic_dict.keys(), key=(lambda k: bic_dict[k]))
         min_bic = bic_dict[min_key]
         if "*" in min_key:
-            print("  Minimum BIC = {:2.2f} when adding {} to model".format(min_bic, min_key))
+            print(
+                "  Minimum BIC = {:2.2f} when adding {} to model".format(
+                    min_bic, min_key
+                )
+            )
         else:
-            print("  Minimum BIC = {:2.2f} when removing {} from model".format(min_bic, min_key))
+            print(
+                "  Minimum BIC = {:2.2f} when removing {} from model".format(
+                    min_bic, min_key
+                )
+            )
 
         # Compare lowest BIC to baseline model BIC
         if min_bic < whole_lm_bic:
@@ -232,7 +282,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                         print("  Removed {} from model-eligible variables".format(s))
 
                 # Update X and BIC to reflect new baseline model
-                X = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
+                X = np.column_stack(
+                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
+                )
                 whole_lm_bic = calc_bic(X, Y)
 
             else:
@@ -304,16 +356,16 @@ def prepare_data(
     print("\nPreparing sample {} and response {}".format(samples_file, response_file))
 
     # Load Samples file as Pandas DataFrame
-    samples = pd.read_csv(samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-        by=identifier_name
-    )
+    samples = pd.read_csv(
+        samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+    ).sort_values(by=identifier_name)
     samples.index = samples[identifier_name]
     samples.index.name = None
 
     # Load Response file as Pandas DataFrame
-    response = pd.read_csv(response_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-        by=identifier_name
-    )
+    response = pd.read_csv(
+        response_file, delimiter=",", squeeze=True, skipinitialspace=True
+    ).sort_values(by=identifier_name)
     response.index = response[identifier_name]
     response.index.name = None
 

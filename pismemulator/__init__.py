@@ -1,3 +1,3 @@
 name = "pismemulator"
 
-__all__ = ["gpemulator", "nnemulator", "utils"]
+__all__ = ["gpemulator", "metrics", "nnemulator", "utils"]

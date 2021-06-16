@@ -34,6 +34,8 @@ import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 
+from pismemulator.metrics import AbsoluteError, absolute_error
+
 
 class NNEmulator(pl.LightningModule):
     def __init__(
@@ -125,7 +127,9 @@ class NNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
         }
@@ -154,28 +158,6 @@ class NNEmulator(pl.LightningModule):
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
-        # x = torch.stack([x["x"] for x in outputs])
-        # f = torch.stack([x["f"] for x in outputs])
-        # omegas = torch.stack([x["o"] for x in outputs])
-        # omegas_0 = torch.stack([x["o_0"] for x in outputs])
-        # x = []
-        # f = []
-        # omegas_0 = []
-        # omegas = []
-        # for k, o in enumerate(outputs):
-        #     x.append(o["x"])
-        #     f.append(o["f"])
-        #     omegas.append(o["o"])
-        #     omegas_0.append(o["o_0"])
-        # x = torch.vstack(x)
-        # f = torch.vstack(f)
-        # omegas = torch.vstack(omegas)
-        # omegas_0 = torch.vstack(omegas_0)
-
-        # f_pred = self.forward(x)
-
-        # cae_train_loss = self.criterion_ae(f_pred, f, omegas, self.area)
-        # cae_test_loss = self.criterion_ae(f_pred, f, omegas_0, self.area)
 
         self.log(
             "train_loss",
@@ -191,13 +173,6 @@ class NNEmulator(pl.LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
-        # self.log(
-        #     "cae_test_loss",
-        #     cae_test_loss,
-        #     on_step=False,
-        #     on_epoch=True,
-        #     prog_bar=True,
-        # )
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -250,9 +225,9 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-            by=identifier_name
-        )
+        samples = pd.read_csv(
+            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+        ).sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -275,7 +250,11 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
+        _, ny, nx = (
+            ds0.variables["velsurf_mag"]
+            .values[:, ::thinning_factor, ::thinning_factor]
+            .shape
+        )
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -287,7 +266,9 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
+                ds.variables["velsurf_mag"]
+                .values[:, ::thinning_factor, ::thinning_factor]
+                .flatten(),
                 epsilon,
             )
             response[idx, :] = data
@@ -427,69 +408,3 @@ class PISMDataModule(pl.LightningDataModule):
 
     def validation_dataloader(self):
         return self.validation_loader
-
-
-def _absolute_error_update(preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor) -> Tensor:
-    _check_same_shape(preds, target)
-    diff = torch.abs(preds - target)
-    sum_abs_error = torch.sum(diff * diff * area, axis=1)
-    absolute_error = torch.sum(sum_abs_error * omegas.squeeze())
-    return absolute_error
-
-
-def _absolute_error_compute(absolute_error) -> Tensor:
-    return absolute_error
-
-
-def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor) -> Tensor:
-    """
-    Computes squared absolute error
-    Args:
-        preds: estimated labels
-        target: ground truth labels
-        omegas: weights
-        area: area of each cell
-    Return:
-        Tensor with absolute error
-    Example:
-        >>> x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-        >>> y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-        >>> o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-        >>> a = torch.tensor([0.25, 0.25])
-        >>> absolute_error(x, y, o, a)
-        tensor(0.4000)
-    """
-    sum_abs_error = _absolute_error_update(preds, target, omegas, area)
-    return _absolute_error_compute(sum_abs_error)
-
-
-class AbsoluteError(Metric):
-    def __init__(self, compute_on_step: bool = True, dist_sync_on_step=False):
-        # call `self.add_state`for every internal state that is needed for the metrics computations
-        # dist_reduce_fx indicates the function that should be used to reduce
-        # state from multiple processes
-        super().__init__(compute_on_step=compute_on_step, dist_sync_on_step=dist_sync_on_step)
-
-        self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
-
-    def update(self, preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor):
-        """
-        Update state with predictions and targets, and area.
-        Args:
-            preds: Predictions from model
-            target: Ground truth values
-            omegas: Weights
-            area: Area of each cell
-        """
-        sum_abs_error = _absolute_error_update(preds, target, omegas, area)
-        self.sum_abs_error += sum_abs_error
-
-    def compute(self):
-        """
-        Computes absolute error over state.
-        """
-        return _absolute_error_compute(self.sum_abs_error)
-
-    @property
-    def is_differentiable(self):
-        return True
