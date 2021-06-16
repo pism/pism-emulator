@@ -30,6 +30,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 import sys
 
+np.random.seed(0)
+
 
 def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     """
