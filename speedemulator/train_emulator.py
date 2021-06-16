@@ -40,6 +40,7 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
+    parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
@@ -49,7 +50,7 @@ if __name__ == "__main__":
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
     )
-    parser.add_argument("--test_size", type=float, default=0.1)
+    parser.add_argument("--test_size", type=float, default=1)
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
@@ -58,6 +59,7 @@ if __name__ == "__main__":
     hparams = vars(args)
 
     batch_size = args.batch_size
+    checkpoint = args.checkpoint
     data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     max_epochs = args.max_epochs
@@ -68,6 +70,8 @@ if __name__ == "__main__":
     test_size = args.test_size
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
+
+    callbacks = []
 
     dataset = PISMDataset(
         data_dir=data_dir,
@@ -104,9 +108,12 @@ if __name__ == "__main__":
         F_mean = data_loader.F_mean
         F_train = data_loader.F_bar
 
-        checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
+        if checkpoint:
+            checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
+            callbacks.append(checkpoint_callback)
         logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
         lr_monitor = LearningRateMonitor(logging_interval="epoch")
+        callbacks.append(lr_monitor)
         e = NNEmulator(
             n_parameters,
             n_eigenglaciers,
@@ -115,11 +122,15 @@ if __name__ == "__main__":
             area,
             hparams,
         )
-        callbacks = [lr_monitor, checkpoint_callback]
-        trainer = pl.Trainer.from_argparse_args(
-            args, callbacks=callbacks, logger=logger, deterministic=True, num_sanity_val_steps=0, auto_lr_find=True
-        )
-        trainer.fit(e, data_loader.train_all_loader, data_loader.val_all_loader)
+        trainer = pl.Trainer.from_argparse_args(args, callbacks=callbacks, logger=logger, deterministic=True)
+        if test_size == 1.0:
+            train_loader = data_loader.train_all_loader
+            val_loader = data_loader.val_all_loader
+        else:
+            train_loader = data_loader.train_loader
+            val_loader = data_loader.val_loader
+
+        trainer.fit(e, train_loader, val_loader)
         trainer.save_checkpoint(f"{emulator_dir}/emulator_{model_index:03d}.ckpt")
         torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
