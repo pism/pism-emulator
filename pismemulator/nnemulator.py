@@ -127,9 +127,7 @@ class NNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
-        )
+        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
         # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
@@ -221,9 +219,9 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(
-            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-        ).sort_values(by=identifier_name)
+        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+            by=identifier_name
+        )
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -246,11 +244,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = (
-            ds0.variables["velsurf_mag"]
-            .values[:, ::thinning_factor, ::thinning_factor]
-            .shape
-        )
+        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -262,9 +256,7 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"]
-                .values[:, ::thinning_factor, ::thinning_factor]
-                .flatten(),
+                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
                 epsilon,
             )
             response[idx, :] = data
@@ -333,13 +325,15 @@ class PISMDataModule(pl.LightningDataModule):
     def setup(self, stage: str = None):
 
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
-        training_data, val_data = train_test_split(
-            all_data, train_size=self.train_size, random_state=0
-        )
+        self.all_data = all_data
+
+        training_data, val_data = train_test_split(all_data, train_size=self.train_size, random_state=0)
         self.training_data = training_data
         self.test_data = training_data
+
+        print(len(training_data))
+
         self.val_data = val_data
-        self.all_data = all_data
         train_all_loader = DataLoader(
             dataset=all_data,
             batch_size=self.batch_size,
@@ -347,6 +341,7 @@ class PISMDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
         )
+        self.train_all_loader = train_all_loader
         val_all_loader = DataLoader(
             dataset=all_data,
             batch_size=self.batch_size,
@@ -354,6 +349,7 @@ class PISMDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
         )
+        self.val_all_loader = val_all_loader
         train_loader = DataLoader(
             dataset=training_data,
             batch_size=self.batch_size,
@@ -361,8 +357,6 @@ class PISMDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
         )
-        self.train_all_loader = train_all_loader
-        self.val_all_loader = val_all_loader
         self.train_loader = train_loader
         self.test_loader = train_loader
         val_loader = DataLoader(
@@ -401,8 +395,5 @@ class PISMDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return self.train_loader
 
-    def test_dataloader(self):
-        return self.test_loader
-
     def validation_dataloader(self):
-        return self.validation_loader
+        return self.val_loader
