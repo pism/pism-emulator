@@ -43,7 +43,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     max_epochs = args.max_epochs
-    num_models = args.num_models
+    model_index = args.model_index
     num_workers = args.num_workers
     samples_file = args.samples_file
     target_file = args.target_file
@@ -96,59 +96,55 @@ if __name__ == "__main__":
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
 
-    for model_index in range(num_models):
-        print(f"Training model {model_index} of {num_models}")
-        omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
-        omegas = omegas.type_as(X)
-        omegas_0 = torch.ones_like(omegas) / len(omegas)
+    print(f"Training model {model_index}")
+    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
+    omegas = omegas.type_as(X)
+    omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-        if train_size == 1.0:
-            data_loader = PISMDataModule(
-                X, F, omegas, omegas_0, num_workers=num_workers
-            )
-        else:
-            data_loader = PISMDataModule(
-                X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers
-            )
-
-        data_loader.prepare_data()
-        data_loader.setup(stage="fit")
-        n_eigenglaciers = data_loader.n_eigenglaciers
-        V_hat = data_loader.V_hat
-        F_mean = data_loader.F_mean
-        F_train = data_loader.F_bar
-
-        if checkpoint:
-            checkpoint_callback = ModelCheckpoint(
-                dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
-            )
-            callbacks.append(checkpoint_callback)
-        logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
-
-        e = NNEmulator(
-            n_parameters,
-            n_eigenglaciers,
-            V_hat,
-            F_mean,
-            area,
-            hparams,
+    if train_size == 1.0:
+        data_loader = PISMDataModule(X, F, omegas, omegas_0, num_workers=num_workers)
+    else:
+        data_loader = PISMDataModule(
+            X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers
         )
-        trainer = pl.Trainer.from_argparse_args(
-            args,
-            callbacks=callbacks,
-            logger=logger,
-            deterministic=True,
-            num_sanity_val_steps=0,
+
+    data_loader.prepare_data()
+    data_loader.setup(stage="fit")
+    n_eigenglaciers = data_loader.n_eigenglaciers
+    V_hat = data_loader.V_hat
+    F_mean = data_loader.F_mean
+    F_train = data_loader.F_bar
+
+    if checkpoint:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
         )
-        if train_size == 1.0:
-            train_loader = data_loader.train_all_loader
-            val_loader = data_loader.val_all_loader
-        else:
-            train_loader = data_loader.train_loader
-            val_loader = data_loader.val_loader
+        callbacks.append(checkpoint_callback)
+    logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
 
-        trainer.fit(e, train_loader, val_loader)
-        # trainer.save_checkpoint(f"{emulator_dir}/emulator_{model_index:03d}.ckpt")
-        torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
+    e = NNEmulator(
+        n_parameters,
+        n_eigenglaciers,
+        V_hat,
+        F_mean,
+        area,
+        hparams,
+    )
+    trainer = pl.Trainer.from_argparse_args(
+        args,
+        callbacks=callbacks,
+        logger=logger,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    if train_size == 1.0:
+        train_loader = data_loader.train_all_loader
+        val_loader = data_loader.val_all_loader
+    else:
+        train_loader = data_loader.train_loader
+        val_loader = data_loader.val_loader
 
-        plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
+    trainer.fit(e, train_loader, val_loader)
+    torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
+
+    plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
