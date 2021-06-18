@@ -2,8 +2,10 @@
 
 from argparse import ArgumentParser
 
+from glob import glob
 import numpy as np
 import os
+from os.path import join
 from scipy.special import gamma
 from scipy.stats import beta
 
@@ -17,6 +19,10 @@ import seaborn as sns
 
 
 class MALASampler(object):
+    """
+    MALA Sampler
+    """
+
     def __init__(self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01, emulator_dir="./emulator"):
         super().__init__()
         self.model = model.eval()
@@ -54,8 +60,8 @@ class MALASampler(object):
             X.data = mu.data
             if i % print_interval == 0:
                 print("===============================================")
-                print(f"iter: {i:d}, log(P): {log_pi:.1f}")
-                print(" ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
+                print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
+                print("".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
                 print("===============================================")
         return X
 
@@ -149,12 +155,12 @@ class MALASampler(object):
             os.makedirs(posterior_dir)
 
         local_data = None
-        vars = []
+        m_vars = []
         acc = acc_target
         print(n_iters)
         for i in range(n_iters):
             X, local_data, s = self.MALA_step(X, Y_target, X_min, X_max, h, local_data=local_data)
-            vars.append(X.detach())
+            m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
             if i % print_interval == 0:
@@ -167,9 +173,9 @@ class MALASampler(object):
                 print("///////////////////////////////////////////////")
                 print("Saving samples for model {0:03d}".format(model_index))
                 print("///////////////////////////////////////////////")
-                X_posterior = torch.stack(vars).cpu().numpy()
+                X_posterior = torch.stack(m_vars).cpu().numpy()
                 np.save(open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"), X_posterior)
-        X_posterior = torch.stack(vars).cpu().numpy()
+        X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
 
@@ -214,11 +220,12 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     np.random.seed(0)
-
+    emulator_files = glob(join(emulator_dir, "*.h5"))
+    print(emulator_files)
     models = []
 
-    for model_index in range(num_models):
-        state_dict = torch.load(f"{emulator_dir}/emulator_{model_index:03d}.h5")
+    for emulator_file in emulator_files:
+        state_dict = torch.load(emulator_file)
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],
             state_dict["V_hat"].shape[1],
