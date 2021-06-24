@@ -187,7 +187,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../data/speeds_v2")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--model_index", type=str, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     data_dir = args.data_dir
     device = args.device
     emulator_dir = args.emulator_dir
-    num_models = args.num_models
+    model_index = args.model_index
     n_posterior_samples = args.num_posterior_samples
     samples_file = args.samples_file
     target_file = args.target_file
@@ -221,23 +221,19 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     np.random.seed(0)
-    emulator_files = glob(join(emulator_dir, "*.h5"))
-    print(emulator_files)
-    models = []
+    emulator_file = join(emulator_dir, f"emulator_{model_index}.h5")
 
-    for emulator_file in emulator_files:
-        state_dict = torch.load(emulator_file)
-        e = NNEmulator(
-            state_dict["l_1.weight"].shape[1],
-            state_dict["V_hat"].shape[1],
-            state_dict["V_hat"],
-            state_dict["F_mean"],
-            dataset.normed_area,
-            hparams,
-        )
-        e.load_state_dict(state_dict)
-        e.to(device)
-        models.append(e)
+    state_dict = torch.load(emulator_file)
+    e = NNEmulator(
+        state_dict["l_1.weight"].shape[1],
+        state_dict["V_hat"].shape[1],
+        state_dict["V_hat"],
+        state_dict["F_mean"],
+        dataset.normed_area,
+        hparams,
+    )
+    e.load_state_dict(state_dict)
+    e.to(device)
 
     # alpha = 0.01
 
@@ -272,178 +268,9 @@ if __name__ == "__main__":
     # sigma_hat
     U_target = dataset.Y_target
 
-    X_posteriors = []
-    for j, model in enumerate(models):
-        mala = MALASampler(model, emulator_dir=emulator_dir)
-        X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
-        # To reproduce the paper, n_iters should be 10^5
-        X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
-        X_posteriors.append(X_posterior)
-
-    from matplotlib.ticker import NullFormatter
-    from matplotlib.patches import Polygon
-
-    # X_posterior = X_posterior*X_s.cpu().numpy() + X_m.cpu().numpy()
-    X_hat = X_prior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
-
-    color_post_0 = "#00B25F"
-    color_post_1 = "#132DD6"
-    color_prior = "#D81727"
-    color_ensemble = "#BA9B00"
-    color_other = "#20484E0"
-
-    fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(12, 12))
-    X_list = []
-
-    for model_index in range(num_models):
-        X_list.append(
-            np.load(open(f"{emulator_dir}/posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb"))
-        )
-
-        X_posterior = np.vstack(X_list)
-        X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
-
-        C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-        Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
-
-    for i in range(n_parameters):
-        for j in range(n_parameters):
-            if i > j:
-
-                axs[i, j].scatter(
-                    X_posterior[:, j], X_posterior[:, i], c="k", s=0.5, alpha=0.05, label="Posterior", rasterized=True
-                )
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
-                bins_y = np.linspace(min_val, max_val, 30)
-
-                min_val = min(X_hat[:, j].min(), X_posterior[:, j].min())
-                max_val = max(X_hat[:, j].max(), X_posterior[:, j].max())
-                bins_x = np.linspace(min_val, max_val, 30)
-
-                # v = st.gaussian_kde(X_posterior[:,[j,i]].T)
-                # bx = 0.5*(bins_x[1:] + bins_x[:-1])
-                # by = 0.5*(bins_y[1:] + bins_y[:-1])
-                # Bx,By = np.meshgrid(bx,by)
-
-                # axs[i,j].contour(10**Bx,10**By,v(np.vstack((Bx.ravel(),By.ravel()))).reshape(Bx.shape),7,alpha=0.7,colors='black')
-
-                axs[i, j].set_xlim(X_hat[:, j].min(), X_hat[:, j].max())
-                axs[i, j].set_ylim(X_hat[:, i].min(), X_hat[:, i].max())
-
-                # axs[i,j].set_xscale('log')
-                # axs[i,j].set_yscale('log')
-
-            elif i < j:
-                patch_upper = Polygon(
-                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]), facecolor=plt.cm.seismic(Cn_0[i, j])
-                )
-                # patch_lower = Polygon(np.array([[0.,0.],[1.,0.],[1.,1.]]),facecolor=plt.cm.seismic(Cn_1[i,j]))
-                axs[i, j].add_patch(patch_upper)
-                # axs[i,j].add_patch(patch_lower)
-                if C_0[i, j] > -0.5:
-                    color = "black"
-                else:
-                    color = "white"
-                axs[i, j].text(
-                    0.5,
-                    0.5,
-                    "{0:.2f}".format(C_0[i, j]),
-                    fontsize=12,
-                    horizontalalignment="center",
-                    verticalalignment="center",
-                    transform=axs[i, j].transAxes,
-                    color=color,
-                )
-                # if C_1[i,j]>-0.5:
-                #    color = 'black'
-                # else:
-                #    color = 'white'
-
-                # axs[i,j].text(0.75,0.25,'{0:.2f}'.format(C_1[i,j]),fontsize=12,horizontalalignment='center',verticalalignment='center',transform=axs[i,j].transAxes,color=color)
-
-            elif i == j:
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
-                bins = np.linspace(min_val, max_val, 30)
-                X_hat_hist, b = np.histogram(X_hat[:, i], bins, density=True)
-                # X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-                b = 0.5 * (b[1:] + b[:-1])
-                lw = 3.0
-                axs[i, j].plot(b, X_hat_hist, color=color_prior, linewidth=0.5 * lw, label="Prior", linestyle="dashed")
-
-                axs[i, j].plot(
-                    b, X_posterior_hist, color="black", linewidth=lw, linestyle="solid", label="Posterior", alpha=0.7
-                )
-
-                # for X_ind in X_stack:
-                #    X_hist,_ = np.histogram(X_ind[:,i],bins,density=False)
-                #    X_hist=X_hist/len(X_posterior)
-                #    X_hist=X_hist/(bins[1]-bins[0])
-                #    axs[i,j].plot(10**b,X_hist,'b-',alpha=0.2,lw=0.5)
-
-                if i == 1:
-                    axs[i, j].legend(fontsize=8)
-                axs[i, j].set_xlim(min_val, max_val)
-                # axs[i,j].set_xscale('log')
-
-            else:
-                axs[i, j].remove()
-
-    keys = dataset.X_keys
-
-    for i, ax in enumerate(axs[:, 0]):
-        ax.set_ylabel(keys[i])
-
-    for j, ax in enumerate(axs[-1, :]):
-        ax.set_xlabel(keys[j])
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
-        plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
-        if j > 0:
-            ax.tick_params(axis="y", which="both", length=0)
-            ax.yaxis.set_minor_formatter(NullFormatter())
-            ax.yaxis.set_major_formatter(NullFormatter())
-
-    for ax in axs[:-1, 1:].ravel():
-        ax.xaxis.set_major_formatter(NullFormatter())
-        ax.xaxis.set_minor_formatter(NullFormatter())
-        ax.yaxis.set_major_formatter(NullFormatter())
-        ax.yaxis.set_minor_formatter(NullFormatter())
-        ax.tick_params(axis="both", which="both", length=0)
-
-    fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
-
-    Prior = pd.DataFrame(data=X_hat, columns=dataset.X_keys).sample(frac=0.1)
-    Prior["Type"] = "Pior"
-    Posterior = pd.DataFrame(data=X_posterior, columns=dataset.X_keys).sample(frac=0.1)
-    Posterior["Type"] = "Posterior"
-    PP = pd.concat([Prior, Posterior])
-
-    from scipy.stats import pearsonr
-
-    def corrfunc(x, y, **kwds):
-        cmap = kwds["cmap"]
-        norm = kwds["norm"]
-        ax = plt.gca()
-        ax.tick_params(bottom=False, top=False, left=False, right=False)
-        sns.despine(ax=ax, bottom=True, top=True, left=True, right=True)
-        r, _ = pearsonr(x, y)
-        facecolor = cmap(norm(r))
-        ax.set_facecolor(facecolor)
-        lightness = (max(facecolor[:3]) + min(facecolor[:3])) / 2
-        ax.annotate(
-            f"r={r:.2f}",
-            xy=(0.5, 0.5),
-            xycoords=ax.transAxes,
-            color="white" if lightness < 0.7 else "black",
-            size=6,
-            ha="center",
-            va="center",
-        )
-
-    g = sns.PairGrid(PP, hue="Type", diag_sharey=False)
-    g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
-    g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
-    g.map_diag(sns.kdeplot, lw=1)
-    g.savefig(f"{emulator_dir}/seaborn_test.pdf")
+    mala = MALASampler(e, emulator_dir=emulator_dir)
+    X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
+    # To reproduce the paper, n_iters should be 10^5
+    X_posterior = mala.MALA(
+        X_map, U_target, n_iters=n_posterior_samples, model_index=j, save_interval=1000, print_interval=100
+    )
