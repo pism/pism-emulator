@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     pl.seed_everything(0)
-    np.random.seed(0)
+    np.random.seed(model_index)
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
