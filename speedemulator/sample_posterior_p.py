@@ -272,5 +272,10 @@ if __name__ == "__main__":
     X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
     # To reproduce the paper, n_iters should be 10^5
     X_posterior = mala.MALA(
-        X_map, U_target, n_iters=n_posterior_samples, model_index=int(model_index), save_interval=1000, print_interval=100
+        X_map,
+        U_target,
+        n_iters=n_posterior_samples,
+        model_index=int(model_index),
+        save_interval=1000,
+        print_interval=100,
     )

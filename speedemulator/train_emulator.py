@@ -45,9 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
-    )
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
@@ -100,13 +98,12 @@ if __name__ == "__main__":
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
+    print(omegas)
 
     if train_size == 1.0:
         data_loader = PISMDataModule(X, F, omegas, omegas_0, num_workers=num_workers)
     else:
-        data_loader = PISMDataModule(
-            X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers
-        )
+        data_loader = PISMDataModule(X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers)
 
     data_loader.prepare_data()
     data_loader.setup(stage="fit")
@@ -116,9 +113,7 @@ if __name__ == "__main__":
     F_train = data_loader.F_bar
 
     if checkpoint:
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
-        )
+        checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         callbacks.append(checkpoint_callback)
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
 

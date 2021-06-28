@@ -181,6 +181,7 @@ class PISMDataset(torch.utils.data.Dataset):
         log_y=True,
         threshold=100e3,
         epsilon=1e-10,
+        return_numpy=False,
     ):
         self.data_dir = data_dir
         self.samples_file = samples_file
@@ -191,12 +192,14 @@ class PISMDataset(torch.utils.data.Dataset):
         self.epsilon = epsilon
         self.log_y = log_y
         self.normalize_x = normalize_x
+        self.return_numpy = return_numpy
         self.load_data()
         if target_file is not None:
             self.load_target()
 
     def load_target(self):
         epsilon = self.epsilon
+        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         ds = xr.open_dataset(self.target_file)
         data = np.nan_to_num(
@@ -208,14 +211,17 @@ class PISMDataset(torch.utils.data.Dataset):
 
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
-        Y_target = torch.from_numpy(Y_target)
+        if not return_numpy:
+            Y_target = torch.from_numpy(Y_target)
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d
         self.grid_resolution = grid_resolution
 
     def load_data(self):
         epsilon = self.epsilon
+        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
+
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
@@ -270,8 +276,9 @@ class PISMDataset(torch.utils.data.Dataset):
 
         X = np.array(samples[p], dtype=np.float32)
         Y = np.array(response[p], dtype=np.float32)
-        X = torch.from_numpy(X)
-        Y = torch.from_numpy(Y)
+        if not return_numpy:
+            X = torch.from_numpy(X)
+            Y = torch.from_numpy(Y)
         Y[Y < 0] = 0
 
         X_mean = X.mean(axis=0)
@@ -291,7 +298,9 @@ class PISMDataset(torch.utils.data.Dataset):
         self.n_samples = n_samples
         self.n_grid_points = n_grid_points
 
-        normed_area = torch.tensor(np.ones(n_grid_points))
+        normed_area = np.ones(n_grid_points)
+        if not return_numpy:
+            normed_area = torch.tensor(normed_area)
         normed_area /= normed_area.sum()
         self.normed_area = normed_area
 
@@ -330,8 +339,6 @@ class PISMDataModule(pl.LightningDataModule):
         training_data, val_data = train_test_split(all_data, train_size=self.train_size, random_state=0)
         self.training_data = training_data
         self.test_data = training_data
-
-        print(len(training_data))
 
         self.val_data = val_data
         train_all_loader = DataLoader(

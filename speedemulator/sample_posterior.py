@@ -221,11 +221,10 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     np.random.seed(0)
-    emulator_files = glob(join(emulator_dir, "*.h5"))
-    print(emulator_files)
     models = []
 
-    for emulator_file in emulator_files:
+    for model_index in range(num_models):
+        emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
         state_dict = torch.load(emulator_file)
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],
@@ -238,8 +237,6 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
         e.to(device)
         models.append(e)
-
-    # alpha = 0.01
 
     nu = 1.0
 
@@ -277,7 +274,9 @@ if __name__ == "__main__":
         mala = MALASampler(model, emulator_dir=emulator_dir)
         X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
         # To reproduce the paper, n_iters should be 10^5
-        X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
+        X_posterior = mala.MALA(
+            X_map, U_target, n_iters=n_posterior_samples, model_index=j, save_interval=1000, print_interval=100
+        )
         X_posteriors.append(X_posterior)
 
     from matplotlib.ticker import NullFormatter
@@ -297,14 +296,16 @@ if __name__ == "__main__":
 
     for model_index in range(num_models):
         X_list.append(
-            np.load(open(f"{emulator_dir}/posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb"))
+            np.load(
+                open(f"{emulator_dir}/posterior_samples/X_posterior_model_test_{0:03d}.npy".format(model_index), "rb")
+            )
         )
 
-        X_posterior = np.vstack(X_list)
-        X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
+    X_posterior = np.vstack(X_list)
+    X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
-        C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-        Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
+    C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
+    Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
     for i in range(n_parameters):
         for j in range(n_parameters):
@@ -413,37 +414,3 @@ if __name__ == "__main__":
         ax.tick_params(axis="both", which="both", length=0)
 
     fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
-
-    Prior = pd.DataFrame(data=X_hat, columns=dataset.X_keys).sample(frac=0.1)
-    Prior["Type"] = "Pior"
-    Posterior = pd.DataFrame(data=X_posterior, columns=dataset.X_keys).sample(frac=0.1)
-    Posterior["Type"] = "Posterior"
-    PP = pd.concat([Prior, Posterior])
-
-    from scipy.stats import pearsonr
-
-    def corrfunc(x, y, **kwds):
-        cmap = kwds["cmap"]
-        norm = kwds["norm"]
-        ax = plt.gca()
-        ax.tick_params(bottom=False, top=False, left=False, right=False)
-        sns.despine(ax=ax, bottom=True, top=True, left=True, right=True)
-        r, _ = pearsonr(x, y)
-        facecolor = cmap(norm(r))
-        ax.set_facecolor(facecolor)
-        lightness = (max(facecolor[:3]) + min(facecolor[:3])) / 2
-        ax.annotate(
-            f"r={r:.2f}",
-            xy=(0.5, 0.5),
-            xycoords=ax.transAxes,
-            color="white" if lightness < 0.7 else "black",
-            size=6,
-            ha="center",
-            va="center",
-        )
-
-    g = sns.PairGrid(PP, hue="Type", diag_sharey=False)
-    g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
-    g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
-    g.map_diag(sns.kdeplot, lw=1)
-    g.savefig(f"{emulator_dir}/seaborn_test.pdf")
