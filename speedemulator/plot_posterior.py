@@ -9,13 +9,10 @@ from os.path import join
 from scipy.special import gamma
 from scipy.stats import beta
 
-import torch
 
 import pandas as pd
 import pylab as plt
-import seaborn as sns
 
-from pismemulator.nnemulator import PISMDataset
 
 fontsize = 6
 lw = 0.65
@@ -52,37 +49,23 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--data_dir", default="../data/speeds_v2")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
-    parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
-    parser.add_argument("--thinning_factor", type=int, default=1)
 
     args = parser.parse_args()
 
-    data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     num_models = args.num_models
-    n_posterior_samples = args.num_posterior_samples
     samples_file = args.samples_file
-    target_file = args.target_file
-    thinning_factor = args.thinning_factor
 
-    dataset = PISMDataset(
-        data_dir=data_dir,
-        samples_file=samples_file,
-        target_file=target_file,
-        thinning_factor=thinning_factor,
-        return_numpy=True,
-    )
+    samples = pd.read_csv(samples_file).drop(columns=["id"])
+    X = samples.values
+    X_mean = X.mean(axis=0)
+    X_std = X.std(axis=0)
+    X_keys = samples.keys()
 
-    X = dataset.X
-    F = dataset.Y
-    n_grid_points = dataset.n_grid_points
-    n_parameters = dataset.n_parameters
-    n_samples = dataset.n_samples
+    n_parameters = X.shape[1]
 
     from matplotlib.ticker import NullFormatter
     from matplotlib.patches import Polygon
@@ -92,13 +75,11 @@ if __name__ == "__main__":
     # Eq 52
     # this is 2.0 in the paper
 
-    from matplotlib.ticker import NullFormatter
-    from matplotlib.patches import Polygon
-
     alpha_b = 3.0
     beta_b = 3.0
     X_prior = beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters)) * (X_max - X_min) + X_min
-    X_hat = X_prior * dataset.X_std + dataset.X_mean
+    X_hat = X_prior * X_std + X_mean
+    X_hat = X_prior
 
     color_post_0 = "#00B25F"
     color_post_1 = "#132DD6"
@@ -115,7 +96,10 @@ if __name__ == "__main__":
         X_list.append(X_p)
 
     X_posterior = np.vstack(X_list)
-    X_posterior = X_posterior * dataset.X_std + dataset.X_mean
+    X_posterior = X_posterior * X_std + X_mean
+
+    df = pd.DataFrame(data=X_posterior, columns=X_keys)
+    df.to_csv(f"{emulator_dir}/X_posterior.csv.gz")
 
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
@@ -167,7 +151,7 @@ if __name__ == "__main__":
                 b = 0.5 * (b[1:] + b[:-1])
                 lw = 1
                 for X_model_posterior in X_list:
-                    X_model_posterior = X_model_posterior * dataset.X_std[i] + dataset.X_mean[i]
+                    X_model_posterior = X_model_posterior * X_std[i] + X_mean[i]
                     X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
                     axs[i, j].plot(b, X_model_posterior_hist, color="0.5", linewidth=0.2, linestyle="solid", alpha=0.5)
 
@@ -188,7 +172,7 @@ if __name__ == "__main__":
             else:
                 axs[i, j].remove()
 
-    keys = dataset.X_keys
+    keys = X_keys
 
     for i, ax in enumerate(axs[:, 0]):
         ax.set_ylabel(keys[i])
