@@ -22,16 +22,11 @@ from argparse import ArgumentParser
 
 import numpy as np
 import os
+from os.path import join
 from scipy.stats import dirichlet
-
 import torch
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (
-    LearningRateMonitor,
-    ModelCheckpoint,
-    EarlyStopping,
-)
-from pytorch_lightning.loggers import TensorBoardLogger
+
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
 from pismemulator.utils import plot_validation
 
@@ -43,7 +38,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--model_index", type=int, default=0)
+    parser.add_argument("--model_index", type=str, default=0)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
@@ -91,12 +86,12 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     pl.seed_everything(0)
-    np.random.seed(model_index)
+    np.random.seed(int(model_index))
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
 
-    print(f"Training model {model_index}")
+    print(f"Evaluating model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
@@ -115,36 +110,17 @@ if __name__ == "__main__":
     F_mean = data_loader.F_mean
     F_train = data_loader.F_bar
 
-    if checkpoint:
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
-        )
-        callbacks.append(checkpoint_callback)
-    logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
+    emulator_file = join(emulator_dir, f"emulator_{model_index}.h5")
 
+    state_dict = torch.load(emulator_file)
     e = NNEmulator(
-        n_parameters,
-        n_eigenglaciers,
-        V_hat,
-        F_mean,
-        area,
+        state_dict["l_1.weight"].shape[1],
+        state_dict["V_hat"].shape[1],
+        state_dict["V_hat"],
+        state_dict["F_mean"],
+        dataset.normed_area,
         hparams,
     )
-    trainer = pl.Trainer.from_argparse_args(
-        args,
-        callbacks=callbacks,
-        logger=logger,
-        deterministic=True,
-        num_sanity_val_steps=0,
-    )
-    if train_size == 1.0:
-        train_loader = data_loader.train_all_loader
-        val_loader = data_loader.val_all_loader
-    else:
-        train_loader = data_loader.train_loader
-        val_loader = data_loader.val_loader
-
-    trainer.fit(e, train_loader, val_loader)
-    torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
+    e.load_state_dict(state_dict)
 
     plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
