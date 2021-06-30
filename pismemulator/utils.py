@@ -55,6 +55,10 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
         F_pred = (
             e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
         )
+        mask = 10 ** F_val <= 1
+        F_p = np.ma.array(data=10 ** F_pred, mask=mask)
+        F_v = np.ma.array(data=10 ** F_val, mask=mask)
+        rmse = np.sqrt(mean_squared_error(F_p, F_v))
         corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
         c1 = axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
         axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
@@ -77,10 +81,7 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
             size=6,
             transform=axs[0, k].transAxes,
         )
-        mask = 10 ** F_val <= 1
-        F_p = np.ma.array(data=10 ** F_pred, mask=mask)
-        F_v = np.ma.array(data=10 ** F_val, mask=mask)
-        rmse = np.sqrt(mean_squared_error(F_p, F_v))
+
         axs[2, k].text(
             0.01,
             0.01,
@@ -120,7 +121,9 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
         c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical"
     )
     fig.subplots_adjust(wspace=0, hspace=0.02)
-    fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
+    fig.savefig(
+        f"{emulator_dir}/speed_emulator_val_{model_index}_test.pdf", bbox_inches="tight"
+    )
 
 
 def calc_bic(X, Y):
