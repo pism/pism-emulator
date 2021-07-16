@@ -50,13 +50,16 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--num_models", type=int, default=50)
+    parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
 
     args = parser.parse_args()
 
     emulator_dir = args.emulator_dir
-    num_models = args.num_models
+    n_models = args.num_models
+    n_posterior_samples = args.num_posterior_samples
+
     samples_file = args.samples_file
 
     samples = pd.read_csv(samples_file).drop(columns=["id"])
@@ -89,7 +92,7 @@ if __name__ == "__main__":
 
     X_list = []
 
-    for model_index in range(num_models):
+    for model_index in range(n_models):
         m_file = f"{emulator_dir}/posterior_samples/X_posterior_model_{model_index:03}.npy"
         print(f"Loading {m_file}")
         X_p = np.load(open(m_file, "rb"))
