@@ -25,7 +25,6 @@ import os
 from os.path import join
 from scipy.stats import dirichlet
 import torch
-import pytorch_lightning as pl
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
 from pismemulator.utils import plot_validation
@@ -35,14 +34,10 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--model_index", type=str, default=0)
-    parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
-    )
+    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
@@ -51,24 +46,17 @@ if __name__ == "__main__":
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
-    parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
     hparams = vars(args)
 
-    batch_size = args.batch_size
-    checkpoint = args.checkpoint
     data_dir = args.data_dir
     emulator_dir = args.emulator_dir
-    max_epochs = args.max_epochs
-    model_index = args.model_index
-    num_workers = args.num_workers
+    num_models = args.num_models
     samples_file = args.samples_file
     target_file = args.target_file
     train_size = args.train_size
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
-
-    callbacks = []
 
     dataset = PISMDataset(
         data_dir=data_dir,
@@ -84,24 +72,17 @@ if __name__ == "__main__":
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
 
-    torch.manual_seed(0)
-    pl.seed_everything(0)
-    np.random.seed(int(model_index))
-
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
 
-    print(f"Evaluating model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
     if train_size == 1.0:
-        data_loader = PISMDataModule(X, F, omegas, omegas_0, num_workers=num_workers)
+        data_loader = PISMDataModule(X, F, omegas, omegas_0)
     else:
-        data_loader = PISMDataModule(
-            X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers
-        )
+        data_loader = PISMDataModule(X, F, omegas, omegas_0)
 
     data_loader.prepare_data()
     data_loader.setup(stage="fit")
@@ -110,17 +91,17 @@ if __name__ == "__main__":
     F_mean = data_loader.F_mean
     F_train = data_loader.F_bar
 
-    emulator_file = join(emulator_dir, f"emulator_{model_index}.h5")
-
-    state_dict = torch.load(emulator_file)
-    e = NNEmulator(
-        state_dict["l_1.weight"].shape[1],
-        state_dict["V_hat"].shape[1],
-        state_dict["V_hat"],
-        state_dict["F_mean"],
-        dataset.normed_area,
-        hparams,
-    )
-    e.load_state_dict(state_dict)
-
-    plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
+    models = []
+    for model_index in range(num_models):
+        emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
+        state_dict = torch.load(emulator_file)
+        e = NNEmulator(
+            state_dict["l_1.weight"].shape[1],
+            state_dict["V_hat"].shape[1],
+            state_dict["V_hat"],
+            state_dict["F_mean"],
+            dataset.normed_area,
+            hparams,
+        )
+        e.load_state_dict(state_dict)
+        models.append(e)
