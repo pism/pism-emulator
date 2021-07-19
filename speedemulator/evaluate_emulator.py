@@ -26,6 +26,8 @@ from os.path import join
 from scipy.stats import dirichlet
 import torch
 
+from sklearn.metrics import mean_squared_error
+
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
 from pismemulator.utils import plot_validation
 
@@ -92,6 +94,10 @@ if __name__ == "__main__":
     F_train = data_loader.F_bar
 
     models = []
+    corrs = []
+    rmses = []
+    F_ps = []
+    F_vs = []
     for model_index in range(num_models):
         emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
         state_dict = torch.load(emulator_file)
@@ -104,4 +110,27 @@ if __name__ == "__main__":
             hparams,
         )
         e.load_state_dict(state_dict)
+        for idx in range(len(data_loader.val_data)):
+            (
+                X_val,
+                F_val,
+                _,
+                _,
+            ) = data_loader.val_data[idx]
+            X_val_scaled = X_val * dataset.X_std + dataset.X_mean
+            F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
+            F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            mask = 10 ** F_val <= 1
+            F_p = np.ma.array(data=10 ** F_pred, mask=mask)
+            F_v = np.ma.array(data=10 ** F_val, mask=mask)
+            rmse = np.sqrt(mean_squared_error(F_p, F_v))
+            corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
+            rmses.append(rmse)
+            corrs.append(corr)
+            F_ps.append(F_p.flatten())
+            F_vs.append(F_v.flatten())
         models.append(e)
+
+        # Flatten predicted and validation speeds
+        S_p = np.array(F_ps).flatten()
+        S_v = np.array(F_vs).flatten()

@@ -207,7 +207,7 @@ imbie_sigma_color = "#a1d99b"
 
 gt2cmSLE = 1.0 / 362.5 / 10.0
 
-rcp_list = ["26", "45", "85"]
+rcp_list = [26, 45, 85]
 rcp_col_dict = {"CTRL": "k", 85: "#990002", 45: "#5492CD", 26: "#003466"}
 rcp_shade_col_dict = {"CTRL": "k", "85": "#F4A582", "45": "#92C5DE", "26": "#4393C3"}
 rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
@@ -296,14 +296,26 @@ if __name__ == "__main__":
     #     median = m_df.groupby(by=["Year"]).quantile(0.50)["SLE (cm)"].values[0]
     #     plt.axvline(median, color=rcp_col_dict[rcp], linestyle="--")
 
-    as19_2100["ENS"] = "LES"
-    as19_mc_2100["ENS"] = "MC"
+    as19_2100["Ensemble"] = "AS19"
+    as19_mc_2100["Ensemble"] = "Calibrated"
     as19_all = pd.concat([as19_2100, as19_mc_2100])
     # Draw a nested violinplot and split the violins for easier comparison
     fig = plt.figure()
     ax = fig.add_subplot(111)
     sns.violinplot(
-        data=as19_all, y="RCP", x="SLE (cm)", hue="ENS", split=True, inner="quart", linewidth=1, orient="h", ax=ax
+        data=as19_all,
+        y="RCP",
+        x="SLE (cm)",
+        order=rcp_list,
+        hue="Ensemble",
+        hue_order=["Calibrated", "AS19"],
+        split=True,
+        cut=0.0,
+        inner="quart",
+        palette=["0.6", "0.8"],
+        linewidth=1,
+        orient="h",
+        ax=ax,
     )
     set_size(5, 2.5)
     fig.savefig("sle_pdf.pdf", bbox_inches="tight")
