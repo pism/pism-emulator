@@ -39,7 +39,9 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
+    parser.add_argument(
+        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
+    )
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
@@ -93,12 +95,13 @@ if __name__ == "__main__":
     F_mean = data_loader.F_mean
     F_train = data_loader.F_bar
 
-    models = []
     corrs = []
     rmses = []
     F_ps = []
     F_vs = []
+    rel_diff = []
     for model_index in range(num_models):
+        print(f"Loading emulator {model_index}")
         emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
         state_dict = torch.load(emulator_file)
         e = NNEmulator(
@@ -119,18 +122,19 @@ if __name__ == "__main__":
             ) = data_loader.val_data[idx]
             X_val_scaled = X_val * dataset.X_std + dataset.X_mean
             F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
-            F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            F_pred = (
+                e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            )
             mask = 10 ** F_val <= 1
             F_p = np.ma.array(data=10 ** F_pred, mask=mask)
             F_v = np.ma.array(data=10 ** F_val, mask=mask)
             rmse = np.sqrt(mean_squared_error(F_p, F_v))
             corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
-            rmses.append(rmse)
-            corrs.append(corr)
-            F_ps.append(F_p.flatten())
-            F_vs.append(F_v.flatten())
-        models.append(e)
+            # rmses.append(rmse)
+            # corrs.append(corr)
 
-        # Flatten predicted and validation speeds
-        S_p = np.array(F_ps).flatten()
-        S_v = np.array(F_vs).flatten()
+            # Flatten predicted and validation speeds
+            r = (F_p - F_v) / F_v
+            rel_diff.append(r)
+
+    S_rd = np.array(rel_diff).flatten()
