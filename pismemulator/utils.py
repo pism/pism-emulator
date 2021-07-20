@@ -60,9 +60,10 @@ def load_imbie(proj_start=2008):
         ]
     ].rename(
         columns={
-            "Rate of mass balance anomaly (Gt/yr)": "Rate of surface mass balance anomaly (Gt/yr)",
-            "Rate of mass balance anomaly uncertainty (Gt/yr)": "Rate of surface mass balance anomaly uncertainty (Gt/yr)",
-            "Rate of ice dyanamics anomaly uncertainty (Gt/yr)": "Rate of ice dynamics anomaly uncertainty (Gt/yr)",
+            "Rate of mass balance anomaly (Gt/yr)": "SMB (Gt/yr)",
+            "Rate of ice dynamics anomaly (Gt/yr)": "D (Gt/yr)",
+            "Rate of mass balance anomaly uncertainty (Gt/yr)": "SMB uncertainty (Gt/yr)",
+            "Rate of ice dyanamics anomaly uncertainty (Gt/yr)": "D uncertainty (Gt/yr)",
         }
     )
 
@@ -76,8 +77,8 @@ def load_imbie(proj_start=2008):
     s = imbie[(imbie["Year"] >= 1980) & (imbie["Year"] < 1990)]
     mass_mean = s["Cumulative ice sheet mass change (Gt)"].mean() / (1990 - 1980)
     smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
-    imbie[f"Rate of surface mass balance anomaly (Gt/yr)"] += 2 * 1964 / 10
-    imbie[f"Rate of ice dynamics anomaly (Gt/yr)"] -= 2 * 1964 / 10
+    imbie[f"SMB (Gt/yr)"] += 2 * 1964 / 10
+    imbie[f"D (Gt/yr)"] -= 2 * 1964 / 10
 
     return imbie
 
