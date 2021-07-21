@@ -88,10 +88,10 @@ def plot_historical(out_filename, df, df_ctrl, imbie):
         as19_median.index,
         as19_low,
         as19_high,
-        color="0.4",
-        alpha=0.5,
+        color="0.6",
+        alpha=1.0,
         linewidth=0.0,
-        zorder=10,
+        zorder=-11,
         label="AS19 90% c.i.",
     )
 
@@ -99,19 +99,17 @@ def plot_historical(out_filename, df, df_ctrl, imbie):
         as19_median.index,
         as19_low,
         as19_high,
-        color="0.",
-        alpha=0.5,
+        color="0.4",
+        alpha=1.0,
         linewidth=0.0,
-        zorder=10,
+        zorder=-10,
         label="AS19 90% c.i.",
     )
 
     imbie_fill = ax.fill_between(
         imbie["Year"],
-        imbie["Cumulative ice sheet mass change (Gt)"]
-        - 1 * imbie["Cumulative ice sheet mass change uncertainty (Gt)"],
-        imbie["Cumulative ice sheet mass change (Gt)"]
-        + 1 * imbie["Cumulative ice sheet mass change uncertainty (Gt)"],
+        imbie["Mass (Gt)"] - 1 * imbie["Mass uncertainty (Gt)"],
+        imbie["Mass (Gt)"] + 1 * imbie["Mass uncertainty (Gt)"],
         color=imbie_sigma_color,
         alpha=0.5,
         linewidth=0,
@@ -119,7 +117,7 @@ def plot_historical(out_filename, df, df_ctrl, imbie):
     imbie_fill.set_zorder(5)
     imbie_line = ax.plot(
         imbie["Year"],
-        imbie["Cumulative ice sheet mass change (Gt)"],
+        imbie["Mass (Gt)"],
         "-",
         color=imbie_signal_color,
         linewidth=imbie_signal_lw,
@@ -138,7 +136,7 @@ def plot_historical(out_filename, df, df_ctrl, imbie):
         as19_ctrl_median,
         color="k",
         linewidth=0.6,
-        linestyle="dotted",
+        linestyle="dashed",
         label="Median(CTRL)",
     )
 
@@ -213,10 +211,8 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
 
     imbie_fill = ax.fill_between(
         imbie["Year"],
-        imbie["Cumulative ice sheet mass change (Gt)"]
-        - 1 * imbie["Cumulative ice sheet mass change uncertainty (Gt)"],
-        imbie["Cumulative ice sheet mass change (Gt)"]
-        + 1 * imbie["Cumulative ice sheet mass change uncertainty (Gt)"],
+        imbie["Mass (Gt)"] - 1 * imbie["Mass uncertainty (Gt)"],
+        imbie["Mass (Gt)"] + 1 * imbie["Mass uncertainty (Gt)"],
         color=imbie_sigma_color,
         alpha=0.5,
         linewidth=0,
@@ -225,7 +221,7 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
 
     imbie_line = ax.plot(
         imbie["Year"],
-        imbie["Cumulative ice sheet mass change (Gt)"],
+        imbie["Mass (Gt)"],
         "-",
         color=imbie_signal_color,
         linewidth=imbie_signal_lw,
@@ -251,7 +247,7 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
         as19_ctrl_median,
         color="k",
         linewidth=0.6,
-        linestyle="dotted",
+        linestyle="dashed",
         label="Median(AS19 CTRL)",
     )
 
@@ -277,7 +273,7 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
     fig.savefig(out_filename, bbox_inches="tight")
 
 
-def plot_partioning(out_filename, df, df_ctrl, imbie):
+def plot_partioning(out_filename, df, df_calib, df_ctrl, imbie):
 
     fig, axs = plt.subplots(2, 1, sharex="col", figsize=[4.75, 3.5])
     fig.subplots_adjust(hspace=0.1, wspace=0.25)
@@ -288,18 +284,34 @@ def plot_partioning(out_filename, df, df_ctrl, imbie):
         as19_std = g.std()
         as19_low = g.quantile(0.05)
         as19_high = g.quantile(0.95)
-
         as19_ctrl_median = df_ctrl.groupby(by="Year")[f"{v} (Gt/yr)"].quantile(0.50)
 
         as19_ci = axs[k].fill_between(
             as19_median.index,
             as19_low,
             as19_high,
+            color="0.6",
+            alpha=0.5,
+            linewidth=0.0,
+            zorder=-11,
+            label="AS19 90% c.i.",
+        )
+
+        g = df_calib.groupby(by="Year")[f"{v} (Gt/yr)"]
+        as19_median = g.quantile(0.50)
+        as19_std = g.std()
+        as19_low = g.quantile(0.05)
+        as19_high = g.quantile(0.95)
+
+        as19_calib_ci = axs[k].fill_between(
+            as19_median.index,
+            as19_low,
+            as19_high,
             color="0.4",
             alpha=0.5,
             linewidth=0.0,
-            zorder=10,
-            label="AS19 90% c.i.",
+            zorder=-10,
+            label="Calibrated 90% c.i.",
         )
 
         axs[k].fill_between(
@@ -331,14 +343,16 @@ def plot_partioning(out_filename, df, df_ctrl, imbie):
             as19_ctrl_median,
             color="k",
             linewidth=0.6,
-            linestyle="dotted",
+            linestyle="dashed",
             label="Median(CTRL)",
         )
         axs[k].set_ylabel(f"{v} (Gt/yr)")
 
     imbie_line = mlines.Line2D([], [], color=imbie_signal_color, linewidth=imbie_signal_lw, label="IMBIE")
 
-    legend = axs[1].legend(handles=[imbie_line, l_es_median[0], l_ctrl_median[0], as19_ci], loc="lower right", ncol=2)
+    legend = axs[1].legend(
+        handles=[imbie_line, l_es_median[0], l_ctrl_median[0], as19_ci, as19_calib_ci], loc="lower left", ncol=2
+    )
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
 
@@ -359,7 +373,7 @@ def plot_sle_pdfs(out_filename, df):
         data=df,
         y="RCP",
         x="SLE (cm)",
-        order=rcp_list,
+        order=rcps,
         hue="Ensemble",
         hue_order=["Calibrated", "AS19"],
         split=True,
@@ -370,6 +384,7 @@ def plot_sle_pdfs(out_filename, df):
         orient="h",
         ax=ax,
     )
+    plt.title("SLE PDF at 2100")
     set_size(5, 2.5)
     fig.savefig(out_filename, bbox_inches="tight")
 
@@ -393,7 +408,7 @@ imbie_sigma_color = "#a1d99b"
 
 gt2cmSLE = 1.0 / 362.5 / 10.0
 
-rcp_list = [26, 45, 85]
+rcps = [26, 45, 85]
 rcp_col_dict = {85: "#990002", 45: "#5492CD", 26: "#003466"}
 rcp_shade_col_dict = {85: "#F4A582", 45: "#92C5DE", 26: "#4393C3"}
 rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
@@ -412,6 +427,9 @@ if __name__ == "__main__":
     as19_calib = load_df(
         "../data/as19/aschwanden_et_al_2019_mc_2008_norm.csv.gz", "../data/samples/lhs_plus_mc_samples.csv"
     )
+
+    as19_time = (as19["Year"] >= calibration_start) & (as19["Year"] <= calibration_end)
+    as19_period = as19[as19_time]
     as19_calib_time = (as19_calib["Year"] >= calibration_start) & (as19_calib["Year"] <= calibration_end)
     as19_calib_period = as19_calib[as19_calib_time]
 
@@ -419,8 +437,7 @@ if __name__ == "__main__":
     imbie_calib_time = (imbie["Year"] >= calibration_start) & (imbie["Year"] <= calibration_end)
     imbie_calib_period = imbie[imbie_calib_time]
 
-    plot_partioning("historical_partioning_as19.pdf", as19, as19_ctrl, imbie)
-    plot_partioning("historical_partitioning_calib.pdf", as19_calib, as19_ctrl, imbie)
+    plot_partioning("historical_partioning_as19.pdf", as19, as19_calib, as19_ctrl, imbie)
     plot_historical("historical_as19.pdf", as19, as19_ctrl, imbie)
     plot_historical_with_calib("historical_calib.pdf", as19, as19_calib, as19_ctrl, imbie)
 
@@ -438,13 +455,70 @@ if __name__ == "__main__":
 
     plot_sle_pdfs("sle_pdf_2100.pdf", as19_all_2100)
 
-    ## Andy's start on Bayesian calibration, here just with SMB
-    imbie_mean = imbie_calib_period.mean()["SMB (Gt/yr)"]
-    imbie_std = imbie_calib_period.std()["SMB (Gt/yr)"]
-
     from scipy.stats import norm
 
-    imbie_gauss_dist = norm.pdf(imbie_mean, imbie_std)
+    imbie_mean = imbie_calib_period.mean()
+    imbie_std = imbie_calib_period.std()
 
-    as19_calib_period_mean = as19_calib_period.groupby(by="Experiment").mean()["SMB (Gt/yr)"]
-    as19_calib_period_std = as19_calib_period.groupby(by="Experiment").std()["SMB (Gt/yr)"]
+    as19_period_mean = as19_period.groupby(by=["RCP", "Experiment"]).mean().reset_index()
+    as19_calib_period_mean = as19_calib_period.groupby(by=["RCP", "Experiment"]).mean().reset_index()
+
+    fig, axs = plt.subplots(3, 3, sharex="col", sharey="row", figsize=[6.2, 5])
+    fig.subplots_adjust(hspace=0.05, wspace=0.05)
+    for k, v in enumerate(["Mass (Gt)", "SMB (Gt/yr)", "D (Gt/yr)"]):
+        imbie_gauss_dist = norm(imbie_mean[v], imbie_std[v])
+
+        for l, rcp in enumerate(rcps):
+            v_as19_period_mean = as19_period_mean[as19_period_mean["RCP"] == rcp][v]
+            v_as19_calib_period_mean = as19_calib_period_mean[as19_calib_period_mean["RCP"] == rcp][v]
+            weights_as19 = imbie_gauss_dist.pdf(v_as19_period_mean) / imbie_gauss_dist.pdf(v_as19_period_mean).sum()
+            weights_calibrated = (
+                imbie_gauss_dist.pdf(v_as19_calib_period_mean) / imbie_gauss_dist.pdf(v_as19_calib_period_mean).sum()
+            )
+            l_we = sns.kdeplot(
+                data=as19_calib_2100[as19_calib_2100["RCP"] == rcp],
+                x="SLE (cm)",
+                weights=weights_calibrated,
+                color="k",
+                linestyle="solid",
+                linewidth=0.5,
+                ax=axs[k, l],
+                label="Weighted",
+            )
+            l_ca = sns.kdeplot(
+                data=as19_calib_2100[as19_calib_2100["RCP"] == rcp],
+                x="SLE (cm)",
+                color="k",
+                linestyle="dotted",
+                linewidth=0.5,
+                ax=axs[k, l],
+                label="Calibrated",
+            )
+            l_as19 = sns.kdeplot(
+                data=as19_2100[as19_2100["RCP"] == rcp],
+                x="SLE (cm)",
+                ax=axs[k, l],
+                color="k",
+                linestyle="dashed",
+                linewidth=0.5,
+                label="AS19",
+            )
+            # sns.kdeplot(
+            #     data=as19_2100[as19_2100["RCP"] == rcp],
+            #     x="SLE (cm)",
+            #     weights=weights_as19,
+            #     color=rcp_col_dict[rcp],
+            #     linestyle="dashed",
+            #     ax=axs[k, l],
+            #     label="AS19 Weighted Ensemble",
+            # )
+            axs[-1, l].set(xlabel=None)
+        axs[k, 0].set(ylabel=None)
+    [axs[0, l].set_title(rcp_dict[rcp], color=rcp_col_dict[rcp]) for l, rcp in enumerate(rcps)]
+    legend = axs[2, 1].legend()
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+
+    fig.supxlabel("Contribution to sea-level since 2008 (cm SLE)")
+    fig.supylabel("Density")
+    fig.savefig("calibrated.pdf", bbox_inches="tight")
