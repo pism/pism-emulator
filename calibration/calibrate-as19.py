@@ -461,7 +461,9 @@ if __name__ == "__main__":
     imbie_std = imbie_calib_period.std()
 
     as19_period_mean = as19_period.groupby(by=["RCP", "Experiment"]).mean().reset_index()
+    as19_period_std = as19_period.groupby(by=["RCP", "Experiment"]).std().reset_index()
     as19_calib_period_mean = as19_calib_period.groupby(by=["RCP", "Experiment"]).mean().reset_index()
+    as19_calib_period_std = as19_calib_period.groupby(by=["RCP", "Experiment"]).std().reset_index()
 
     fig, axs = plt.subplots(3, 3, sharex="col", sharey="row", figsize=[6.2, 5])
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
@@ -469,8 +471,15 @@ if __name__ == "__main__":
         imbie_gauss_dist = norm(imbie_mean[v], imbie_std[v])
 
         for l, rcp in enumerate(rcps):
+
+            as19_gauss_dist = norm(imbie_mean[v], imbie_std[v])
+
             v_as19_period_mean = as19_period_mean[as19_period_mean["RCP"] == rcp][v]
+            v_as19_period_std = as19_period_std[as19_period_std["RCP"] == rcp][v]
+
             v_as19_calib_period_mean = as19_calib_period_mean[as19_calib_period_mean["RCP"] == rcp][v]
+            v_as19_calib_period_std = as19_calib_period_std[as19_calib_period_std["RCP"] == rcp][v]
+
             weights_as19 = imbie_gauss_dist.pdf(v_as19_period_mean) / imbie_gauss_dist.pdf(v_as19_period_mean).sum()
             weights_calibrated = (
                 imbie_gauss_dist.pdf(v_as19_calib_period_mean) / imbie_gauss_dist.pdf(v_as19_calib_period_mean).sum()
