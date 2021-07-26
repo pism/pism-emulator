@@ -25,13 +25,64 @@ import pandas as pd
 from pyDOE import lhs
 import pylab as plt
 from SALib.sample import saltelli
-import scipy
-from scipy.stats.distributions import truncnorm
-from scipy.stats.distributions import gamma
-from scipy.stats.distributions import uniform
-from scipy.stats.distributions import randint
+from scipy.stats.distributions import truncnorm, gamma, uniform, randint
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
+import sys
+
+np.random.seed(0)
+
+
+def load_imbie(proj_start=2008):
+    """
+    Loading the IMBIE Greenland data set downloaded from
+    http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx
+
+    """
+    imbie_df = pd.read_excel(
+        "http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
+        sheet_name="Greenland Ice Mass",
+        engine="openpyxl",
+    )
+    imbie = imbie_df[
+        [
+            "Year",
+            "Cumulative ice sheet mass change (Gt)",
+            "Cumulative ice sheet mass change uncertainty (Gt)",
+            "Cumulative surface mass balance anomaly (Gt)",
+            "Cumulative surface mass balance anomaly uncertainty (Gt)",
+            "Cumulative ice dynamics anomaly (Gt)",
+            "Cumulative ice dynamics anomaly uncertainty (Gt)",
+            "Rate of mass balance anomaly (Gt/yr)",
+            "Rate of ice dynamics anomaly (Gt/yr)",
+            "Rate of mass balance anomaly uncertainty (Gt/yr)",
+            "Rate of ice dyanamics anomaly uncertainty (Gt/yr)",
+        ]
+    ].rename(
+        columns={
+            "Cumulative ice sheet mass change (Gt)": "Mass (Gt)",
+            "Cumulative ice sheet mass change uncertainty (Gt)": "Mass uncertainty (Gt)",
+            "Rate of mass balance anomaly (Gt/yr)": "SMB (Gt/yr)",
+            "Rate of ice dynamics anomaly (Gt/yr)": "D (Gt/yr)",
+            "Rate of mass balance anomaly uncertainty (Gt/yr)": "SMB uncertainty (Gt/yr)",
+            "Rate of ice dyanamics anomaly uncertainty (Gt/yr)": "D uncertainty (Gt/yr)",
+        }
+    )
+
+    for v in [
+        "Mass (Gt)",
+        "Cumulative ice dynamics anomaly (Gt)",
+        "Cumulative surface mass balance anomaly (Gt)",
+    ]:
+        imbie[v] -= imbie[imbie["Year"] == proj_start][v].values
+
+    s = imbie[(imbie["Year"] >= 1980) & (imbie["Year"] < 1990)]
+    mass_mean = s["Mass (Gt)"].mean() / (1990 - 1980)
+    smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
+    imbie[f"SMB (Gt/yr)"] += 2 * 1964 / 10
+    imbie[f"D (Gt/yr)"] -= 2 * 1964 / 10
+
+    return imbie
 
 
 def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
@@ -43,39 +94,76 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8))
     for k in range(4):
         idx = np.random.randint(len(data_loader.val_data))
-        X_val, F_val, _, _, _ = data_loader.val_data[idx]
+        (
+            X_val,
+            F_val,
+            _,
+            _,
+        ) = data_loader.val_data[idx]
         X_val_scaled = X_val * dataset.X_std + dataset.X_mean
         F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
         F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
-        corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
-        c1 = axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        c2 = axs[2, k].imshow(F_pred - F_val, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm")
-        axs[1, k].text(5, 5, f"r={corr:.3f}", c="white", size=6)
-        axs[0, k].text(
-            5,
-            5,
-            "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_scaled)]),
-            c="white",
-            size=6,
-        )
         mask = 10 ** F_val <= 1
         F_p = np.ma.array(data=10 ** F_pred, mask=mask)
         F_v = np.ma.array(data=10 ** F_val, mask=mask)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
-        axs[2, k].text(5, 5, f"RMSE: {rmse:.0f} m/yr", c="k", size=6)
+        corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
+        c1 = axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
+        axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
+        c2 = axs[2, k].imshow(F_pred - F_val, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm")
+        axs[1, k].text(
+            0.01,
+            0.01,
+            f"r={corr:.3f}",
+            c="white",
+            size=6,
+            transform=axs[1, k].transAxes,
+        )
+        axs[0, k].text(
+            0.01,
+            0.01,
+            "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_scaled)]),
+            c="white",
+            size=6,
+            transform=axs[0, k].transAxes,
+        )
+
+        axs[2, k].text(
+            0.01,
+            0.01,
+            f"RMSE: {rmse:.0f} m/yr",
+            c="k",
+            size=6,
+            transform=axs[2, k].transAxes,
+        )
 
         axs[0, k].set_axis_off()
         axs[1, k].set_axis_off()
         axs[2, k].set_axis_off()
-    axs[0, 0].text(5, 290, "PISM", c="white", size=6, weight="bold")
-    axs[1, 0].text(5, 290, "Emulator", c="white", size=6, weight="bold")
+    axs[0, 0].text(
+        0.01,
+        0.95,
+        "PISM",
+        c="white",
+        size=6,
+        weight="bold",
+        transform=axs[0, 0].transAxes,
+    )
+    axs[1, 0].text(
+        0.01,
+        0.95,
+        "Emulator",
+        c="white",
+        size=6,
+        weight="bold",
+        transform=axs[1, 0].transAxes,
+    )
     cb_ax = fig.add_axes([0.905, 0.525, 0.025, 0.15])
-    cbar1 = plt.colorbar(c1, cax=cb_ax, shrink=1, label="log speed (m/yr)", orientation="vertical")
+    plt.colorbar(c1, cax=cb_ax, shrink=1, label="log speed (m/yr)", orientation="vertical")
     cb_ax2 = fig.add_axes([0.905, 0.15, 0.025, 0.15])
-    cbar2 = plt.colorbar(c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical")
+    plt.colorbar(c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical")
     fig.subplots_adjust(wspace=0, hspace=0.02)
-    fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
+    fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}_test.pdf", bbox_inches="tight")
 
 
 def calc_bic(X, Y):
@@ -158,7 +246,7 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
         names = varnames
 
     assert n == len(names)
-    ## Need assertion error here
+    # Need assertion error here
 
     params_dict = {k: v for v, k in enumerate(names)}
     params_to_check = list(names)
@@ -405,7 +493,7 @@ def kl_divergence(p, q):
 
     From https://en.wikipedia.org/wiki/Kullback–Leibler_divergence:
 
-    In the context of machine learning, {\displaystyle D_{\text{KL}}(P\parallel Q)} is often called the information gain achieved if Q is used instead of P. By analogy with information theory, it is also called the relative entropy of P with respect to Q. In the context of coding theory, {\displaystyle D_{\text{KL}}(P\parallel Q)} can be constructed by measuring the expected number of extra bits required to code samples from P using a code optimized for Q rather than the code optimized for.
+    In the context of machine learning, {isplaystyle D_{\text{KL}}(P\parallel Q)} is often called the information gain achieved if Q is used instead of P. By analogy with information theory, it is also called the relative entropy of P with respect to Q. In the context of coding theory, {\displaystyle D_{\text{KL}}(P\parallel Q)} can be constructed by measuring the expected number of extra bits required to code samples from P using a code optimized for Q rather than the code optimized for.
 
     Expressed in the language of Bayesian inference, {\displaystyle D_{\text{KL}}(P\parallel Q)} is a measure of the information gained when one revises one's beliefs from the prior probability distribution Q to the posterior probability distribution P. In other words, it is the amount of information lost when Q is used to approximate P. In applications, P typically represents the "true" distribution of data, observations, or a precisely calculated theoretical distribution, while Q typically represents a theory, model, description, or approximation of P. In order to find a distribution Q that is closest to P, we can minimize KL divergence and compute an information projection.
 

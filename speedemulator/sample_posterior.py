@@ -2,14 +2,17 @@
 
 from argparse import ArgumentParser
 
+from glob import glob
 import numpy as np
 import os
+from os.path import join
 from scipy.special import gamma
 from scipy.stats import beta
 
 import torch
+import torch.multiprocessing as mp
 
-from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
+from pismemulator.nnemulator import NNEmulator, PISMDataset
 
 import pandas as pd
 import pylab as plt
@@ -17,6 +20,10 @@ import seaborn as sns
 
 
 class MALASampler(object):
+    """
+    MALA Sampler
+    """
+
     def __init__(self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01, emulator_dir="./emulator"):
         super().__init__()
         self.model = model.eval()
@@ -54,11 +61,8 @@ class MALASampler(object):
             X.data = mu.data
             if i % print_interval == 0:
                 print("===============================================")
-                print(
-                    f"iter: {i:d}, log(P): {log_pi:.1f}")
-                print(
-                    " ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())])
-                )
+                print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
+                print("".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
                 print("===============================================")
         return X
 
@@ -152,12 +156,12 @@ class MALASampler(object):
             os.makedirs(posterior_dir)
 
         local_data = None
-        vars = []
+        m_vars = []
         acc = acc_target
         print(n_iters)
         for i in range(n_iters):
             X, local_data, s = self.MALA_step(X, Y_target, X_min, X_max, h, local_data=local_data)
-            vars.append(X.detach())
+            m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
             if i % print_interval == 0:
@@ -170,9 +174,9 @@ class MALASampler(object):
                 print("///////////////////////////////////////////////")
                 print("Saving samples for model {0:03d}".format(model_index))
                 print("///////////////////////////////////////////////")
-                X_posterior = torch.stack(vars).cpu().numpy()
+                X_posterior = torch.stack(m_vars).cpu().numpy()
                 np.save(open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"), X_posterior)
-        X_posterior = torch.stack(vars).cpu().numpy()
+        X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
 
@@ -184,13 +188,14 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--num_posterior_samples", type=int, default=10000)
+    parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
+    hparams = vars(args)
 
     data_dir = args.data_dir
     device = args.device
@@ -216,23 +221,22 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     np.random.seed(0)
-
     models = []
 
     for model_index in range(num_models):
-        state_dict = torch.load(f"{emulator_dir}/emulator_{model_index:03d}.h5")
+        emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
+        state_dict = torch.load(emulator_file)
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],
             state_dict["V_hat"].shape[1],
             state_dict["V_hat"],
             state_dict["F_mean"],
-            args,
+            dataset.normed_area,
+            hparams,
         )
         e.load_state_dict(state_dict)
         e.to(device)
         models.append(e)
-
-    # alpha = 0.01
 
     nu = 1.0
 
@@ -270,7 +274,9 @@ if __name__ == "__main__":
         mala = MALASampler(model, emulator_dir=emulator_dir)
         X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
         # To reproduce the paper, n_iters should be 10^5
-        X_posterior = mala.MALA(X_map, U_target, n_iters=10000, model_index=j, save_interval=1000, print_interval=100)
+        X_posterior = mala.MALA(
+            X_map, U_target, n_iters=n_posterior_samples, model_index=j, save_interval=1000, print_interval=100
+        )
         X_posteriors.append(X_posterior)
 
     from matplotlib.ticker import NullFormatter
@@ -290,14 +296,16 @@ if __name__ == "__main__":
 
     for model_index in range(num_models):
         X_list.append(
-            np.load(open(f"{emulator_dir}/posterior_samples/X_posterior_model_{0:03d}.npy".format(model_index), "rb"))
+            np.load(
+                open(f"{emulator_dir}/posterior_samples/X_posterior_model_test_{0:03d}.npy".format(model_index), "rb")
+            )
         )
 
-        X_posterior = np.vstack(X_list)
-        X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
+    X_posterior = np.vstack(X_list)
+    X_posterior = X_posterior * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy()
 
-        C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-        Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
+    C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
+    Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
     for i in range(n_parameters):
         for j in range(n_parameters):
@@ -406,37 +414,3 @@ if __name__ == "__main__":
         ax.tick_params(axis="both", which="both", length=0)
 
     fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
-
-    Prior = pd.DataFrame(data=X_hat, columns=dataset.X_keys).sample(frac=0.1)
-    Prior["Type"] = "Pior"
-    Posterior = pd.DataFrame(data=X_posterior, columns=dataset.X_keys).sample(frac=0.1)
-    Posterior["Type"] = "Posterior"
-    PP = pd.concat([Prior, Posterior])
-
-    from scipy.stats import pearsonr
-
-    def corrfunc(x, y, **kwds):
-        cmap = kwds["cmap"]
-        norm = kwds["norm"]
-        ax = plt.gca()
-        ax.tick_params(bottom=False, top=False, left=False, right=False)
-        sns.despine(ax=ax, bottom=True, top=True, left=True, right=True)
-        r, _ = pearsonr(x, y)
-        facecolor = cmap(norm(r))
-        ax.set_facecolor(facecolor)
-        lightness = (max(facecolor[:3]) + min(facecolor[:3])) / 2
-        ax.annotate(
-            f"r={r:.2f}",
-            xy=(0.5, 0.5),
-            xycoords=ax.transAxes,
-            color="white" if lightness < 0.7 else "black",
-            size=6,
-            ha="center",
-            va="center",
-        )
-
-    g = sns.PairGrid(PP, hue="Type", diag_sharey=False)
-    g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
-    g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
-    g.map_diag(sns.kdeplot, lw=1)
-    g.savefig(f"{emulator_dir}/seaborn_test.pdf")

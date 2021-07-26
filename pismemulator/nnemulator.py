@@ -27,16 +27,27 @@ import xarray as xr
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+from torchmetrics.utilities.checks import _check_same_shape
+from torchmetrics import Metric
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 
-from pismemulator.utils import plot_validation
+from pismemulator.metrics import AbsoluteError, absolute_error
 
 
 class NNEmulator(pl.LightningModule):
     def __init__(
-        self, n_parameters, n_eigenglaciers, V_hat, F_mean, hparams, *args, **kwargs
+        self,
+        n_parameters,
+        n_eigenglaciers,
+        V_hat,
+        F_mean,
+        area,
+        hparams,
+        *args,
+        **kwargs,
     ):
         super().__init__()
         self.save_hyperparameters(hparams)
@@ -62,6 +73,11 @@ class NNEmulator(pl.LightningModule):
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
+
+        self.register_buffer("area", area)
+
+        self.train_ae = AbsoluteError()
+        self.test_ae = AbsoluteError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -106,72 +122,51 @@ class NNEmulator(pl.LightningModule):
 
         return parent_parser
 
+    def criterion_ae(self, F_pred, F_obs, omegas, area):
+        instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
+        return torch.sum(instance_misfit * omegas.squeeze())
+
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
-        )
+        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
         }
-        scheduler = {
-            "scheduler": ReduceLROnPlateau(optimizer),
-            "reduce_on_plateau": True,
-            "monitor": "test_loss",
-            "verbose": True,
-        }
+
         return [optimizer], [scheduler]
 
-    def criterion_ae(self, F_pred, F_obs, omegas, area):
-        instance_misfit = torch.sum(torch.abs(F_pred - F_obs) ** 2 * area, axis=1)
-        return torch.sum(instance_misfit * omegas.squeeze())
-
     def training_step(self, batch, batch_idx):
-        x, f, o, o_0, area = batch
-        area = torch.mean(area, axis=0)
+        x, f, o, _ = batch
         f_pred = self.forward(x)
-        loss = self.criterion_ae(f_pred, f, o, area)
+        loss = absolute_error(f_pred, f, o, self.area)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, f, o, o_0, area = batch
-        return {
-            "x": x,
-            "f": f,
-            "omegas": o,
-            "omegas_0": o_0,
-            "area": area,
-        }
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+
+        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
+
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
-        x = torch.stack([x["x"] for x in outputs])
-        f = torch.stack([x["f"] for x in outputs])
-        omegas = torch.stack([x["omegas"] for x in outputs])
-        omegas_0 = torch.stack([x["omegas_0"] for x in outputs])
-        area = torch.stack([x["area"] for x in outputs])
-        # x = []
-        # f = []
-        # omegas_0 = []
-        # omegas = []
-        # area = []
-        # for k, o in enumerate(outputs):
-        #     x.append(o["x"])
-        #     f.append(o["f"])
-        #     omegas.append(o["omegas"])
-        #     omegas_0.append(o["omegas_0"])
-        #     area.append(o["area"])
-        # x = torch.vstack(x)
-        # f = torch.vstack(f)
-        # omegas = torch.vstack(omegas)
-        # omegas_0 = torch.vstack(omegas_0)
-        # area = torch.vstack(area)
-        area = torch.mean(area, axis=0)
-        f_pred = self.forward(x)
-        train_loss = self.criterion_ae(f_pred, f, omegas, area)
-        test_loss = self.criterion_ae(f_pred, f, omegas_0, area)
 
-        self.log("train_loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(
+            "train_loss",
+            self.train_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -184,8 +179,9 @@ class PISMDataset(torch.utils.data.Dataset):
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
-        threshold=5,
+        threshold=100e3,
         epsilon=1e-10,
+        return_numpy=False,
     ):
         self.data_dir = data_dir
         self.samples_file = samples_file
@@ -196,12 +192,14 @@ class PISMDataset(torch.utils.data.Dataset):
         self.epsilon = epsilon
         self.log_y = log_y
         self.normalize_x = normalize_x
+        self.return_numpy = return_numpy
         self.load_data()
         if target_file is not None:
             self.load_target()
 
     def load_target(self):
         epsilon = self.epsilon
+        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         ds = xr.open_dataset(self.target_file)
         data = np.nan_to_num(
@@ -213,20 +211,23 @@ class PISMDataset(torch.utils.data.Dataset):
 
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
-        Y_target = torch.from_numpy(Y_target)
+        if not return_numpy:
+            Y_target = torch.from_numpy(Y_target)
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d
         self.grid_resolution = grid_resolution
 
     def load_data(self):
         epsilon = self.epsilon
+        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
+
         identifier_name = "id"
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(
-            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-        ).sort_values(by=identifier_name)
+        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
+            by=identifier_name
+        )
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -249,11 +250,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = (
-            ds0.variables["velsurf_mag"]
-            .values[:, ::thinning_factor, ::thinning_factor]
-            .shape
-        )
+        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -265,25 +262,23 @@ class PISMDataset(torch.utils.data.Dataset):
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.nan_to_num(
-                ds.variables["velsurf_mag"]
-                .values[:, ::thinning_factor, ::thinning_factor]
-                .flatten(),
+                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
                 epsilon,
             )
             response[idx, :] = data
             ds.close()
 
+        p = response.max(axis=1) < self.threshold
+
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
 
-        p = response.max(axis=1) < self.threshold
-
         X = np.array(samples[p], dtype=np.float32)
         Y = np.array(response[p], dtype=np.float32)
-
-        X = torch.from_numpy(X)
-        Y = torch.from_numpy(Y)
+        if not return_numpy:
+            X = torch.from_numpy(X)
+            Y = torch.from_numpy(Y)
         Y[Y < 0] = 0
 
         X_mean = X.mean(axis=0)
@@ -303,7 +298,9 @@ class PISMDataset(torch.utils.data.Dataset):
         self.n_samples = n_samples
         self.n_grid_points = n_grid_points
 
-        normed_area = torch.tensor(np.ones(n_grid_points))
+        normed_area = np.ones(n_grid_points)
+        if not return_numpy:
+            normed_area = torch.tensor(normed_area)
         normed_area /= normed_area.sum()
         self.normed_area = normed_area
 
@@ -321,9 +318,8 @@ class PISMDataModule(pl.LightningDataModule):
         F,
         omegas,
         omegas_0,
-        area,
         batch_size: int = 128,
-        test_size: float = 0.1,
+        train_size: float = 0.9,
         num_workers: int = 0,
     ):
         super().__init__()
@@ -331,41 +327,43 @@ class PISMDataModule(pl.LightningDataModule):
         self.F = F
         self.omegas = omegas
         self.omegas_0 = omegas_0
-        self.area = area
         self.batch_size = batch_size
-        self.test_size = test_size
+        self.train_size = train_size
         self.num_workers = num_workers
 
     def setup(self, stage: str = None):
 
-        all_data = TensorDataset(
-            self.X, self.F_bar, self.omegas, self.omegas_0, self.area
-        )
-        training_data, val_data = train_test_split(all_data, test_size=self.test_size)
+        all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
+        self.all_data = all_data
+
+        training_data, val_data = train_test_split(all_data, train_size=self.train_size, random_state=0)
         self.training_data = training_data
         self.test_data = training_data
+
         self.val_data = val_data
-        self.all_data = all_data
         train_all_loader = DataLoader(
             dataset=all_data,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
+            pin_memory=True,
         )
+        self.train_all_loader = train_all_loader
         val_all_loader = DataLoader(
             dataset=all_data,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            pin_memory=True,
         )
+        self.val_all_loader = val_all_loader
         train_loader = DataLoader(
             dataset=training_data,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
+            pin_memory=True,
         )
-        self.train_all_loader = train_all_loader
-        self.val_all_loader = val_all_loader
         self.train_loader = train_loader
         self.test_loader = train_loader
         val_loader = DataLoader(
@@ -404,8 +402,5 @@ class PISMDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return self.train_loader
 
-    def test_dataloader(self):
-        return self.test_loader
-
     def validation_dataloader(self):
-        return self.validation_loader
+        return self.val_loader
