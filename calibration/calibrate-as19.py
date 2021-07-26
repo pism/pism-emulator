@@ -452,6 +452,9 @@ if __name__ == "__main__":
     as19_2100["Ensemble"] = "AS19"
     as19_calib_2100["Ensemble"] = "Calibrated"
     as19_all_2100 = pd.concat([as19_2100, as19_calib_2100]).astype({"Ensemble": str})
+    as19_all_2100["ID"] = [
+        f"rcp_dict{k}, {l} " for k, l in zip(as19_all_2100["RCP"].values, as19_all_2100["Ensemble"].values)
+    ]
 
     plot_sle_pdfs("sle_pdf_2100.pdf", as19_all_2100)
 
@@ -531,3 +534,24 @@ if __name__ == "__main__":
     fig.supxlabel("Contribution to sea-level since 2008 (cm SLE)")
     fig.supylabel("Density")
     fig.savefig("calibrated.pdf", bbox_inches="tight")
+
+    # Initialize the FacetGrid object
+
+    g = sns.FacetGrid(as19_all_2100, row="ID", hue="RCP", aspect=10, height=1, palette=rcp_shade_col_dict)
+
+    # Draw the densities in a few steps
+    g.map(sns.violinplot, "SLE (cm)", bw_adjust=10, clip_on=False, inner="quartile", fill=True, alpha=0.5)
+    # Define and use a simple function to label the plot in axes coordinates
+    def label(x, color, label):
+        ax = plt.gca()
+        ax.text(0, 0.2, label, fontweight="bold", color=color, ha="left", va="center", transform=ax.transAxes)
+
+    g.map(label, "ID")
+
+    # Set the subplots to overlap
+    g.fig.subplots_adjust(hspace=0)
+
+    # Remove axes details that don't play well with overlap
+    g.set_titles("")
+    g.set(yticks=[])
+    g.despine(bottom=True, left=True)
