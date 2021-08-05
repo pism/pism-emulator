@@ -422,7 +422,7 @@ def resample_ensemble_by_data(imbie_calib_period, as19_calib_period, rcps, fudge
             if log_like != 0:
                 evals.append(i)
                 log_likes.append(log_like)
-                print(i, log_like)
+                print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
         experiments = np.array(evals)
         w = np.array(log_likes)
         w -= w.mean()
