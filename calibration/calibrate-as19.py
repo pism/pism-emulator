@@ -384,6 +384,9 @@ def plot_sle_pdfs(out_filename, df):
         orient="h",
         ax=ax,
     )
+    ax.set_xlabel("Contribution to sea-level since 2008 (cm SLE)")
+    ax.set_ylabel("")
+    sns.despine(left=True)
     plt.title("SLE PDF at 2100")
     set_size(5, 2.5)
     fig.savefig(out_filename, bbox_inches="tight")
@@ -451,10 +454,12 @@ if __name__ == "__main__":
 
     as19_2100["Ensemble"] = "AS19"
     as19_calib_2100["Ensemble"] = "Calibrated"
-    as19_all_2100 = pd.concat([as19_2100, as19_calib_2100]).astype({"Ensemble": str})
+    as19_all_2100 = pd.concat([as19_2100, as19_calib_2100])
     as19_all_2100["ID"] = [
-        f"rcp_dict{k}, {l} " for k, l in zip(as19_all_2100["RCP"].values, as19_all_2100["Ensemble"].values)
+        f"{rcp_dict[k]}, {l}" for k, l in zip(as19_all_2100["RCP"].values, as19_all_2100["Ensemble"].values)
     ]
+    as19_all_2100["RCPS"] = [(k / 10) for k in as19_all_2100["RCP"].values]
+    as19_all_2100 = as19_all_2100.astype({"Ensemble": str, "ID": str, "RCPS": float})
 
     plot_sle_pdfs("sle_pdf_2100.pdf", as19_all_2100)
 
@@ -468,9 +473,16 @@ if __name__ == "__main__":
     as19_calib_period_mean = as19_calib_period.groupby(by=["RCP", "Experiment"]).mean().reset_index()
     as19_calib_period_std = as19_calib_period.groupby(by=["RCP", "Experiment"]).std().reset_index()
 
+    m_uncalibrated = []
+    m_calibrated = []
+
     fig, axs = plt.subplots(3, 3, sharex="col", sharey="row", figsize=[6.2, 5])
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
     for k, v in enumerate(["Mass (Gt)", "SMB (Gt/yr)", "D (Gt/yr)"]):
+
+        uncalibrated = []
+        calibrated = []
+
         imbie_gauss_dist = norm(imbie_mean[v], imbie_std[v])
 
         for l, rcp in enumerate(rcps):
@@ -483,10 +495,32 @@ if __name__ == "__main__":
             v_as19_calib_period_mean = as19_calib_period_mean[as19_calib_period_mean["RCP"] == rcp][v]
             v_as19_calib_period_std = as19_calib_period_std[as19_calib_period_std["RCP"] == rcp][v]
 
+            ids_as19 = as19_period_mean[as19_period_mean["RCP"] == rcp]["Experiment"]
+            ids_calib = as19_calib_period_mean[as19_calib_period_mean["RCP"] == rcp]["Experiment"]
+
             weights_as19 = imbie_gauss_dist.pdf(v_as19_period_mean) / imbie_gauss_dist.pdf(v_as19_period_mean).sum()
             weights_calibrated = (
                 imbie_gauss_dist.pdf(v_as19_calib_period_mean) / imbie_gauss_dist.pdf(v_as19_calib_period_mean).sum()
             )
+            ids_as19_S = pd.Series(data=ids_as19.values, name="Experiment")
+            ids_calib_S = pd.Series(data=ids_calib.values, name="Experiment")
+
+            weights_as19_S = pd.Series(data=weights_as19, name=f"Weights {v}")
+            weights_calib_S = pd.Series(data=weights_calibrated, name=f"Weights {v}")
+
+            as19_df = pd.concat([ids_as19_S, weights_as19_S], axis=1)
+            calib_df = pd.concat([ids_calib_S, weights_calib_S], axis=1)
+
+            as19_df["RCP"] = rcp
+            as19_df["Ensemble"] = "AS19"
+            as19_df = as19_df.astype({"Ensemble": str})
+            calib_df["RCP"] = rcp
+            calib_df["Ensemble"] = "Calibrated"
+            calib_df = calib_df.astype({"Ensemble": str})
+
+            uncalibrated.append(as19_df)
+            calibrated.append(calib_df)
+
             l_we = sns.kdeplot(
                 data=as19_calib_2100[as19_calib_2100["RCP"] == rcp],
                 x="SLE (cm)",
@@ -526,6 +560,18 @@ if __name__ == "__main__":
             # )
             axs[-1, l].set(xlabel=None)
         axs[k, 0].set(ylabel=None)
+
+        m_calibrated.append(pd.concat(calibrated).reset_index(drop=True))
+        m_uncalibrated.append(pd.concat(uncalibrated).reset_index(drop=True))
+
+    from functools import reduce
+
+    calibrated_df = reduce(lambda df1, df2: pd.merge(df1, df2), m_calibrated)
+    uncalibrated_df = reduce(lambda df1, df2: pd.merge(df1, df2), m_uncalibrated)
+    df1 = pd.merge(as19_calib_2100, calibrated_df, on=["Ensemble", "Experiment", "RCP"])
+    df2 = pd.merge(as19_2100, uncalibrated_df, on=["Ensemble", "Experiment", "RCP"])
+    all_df = pd.concat([df1, df2])
+
     [axs[0, l].set_title(rcp_dict[rcp], color=rcp_col_dict[rcp]) for l, rcp in enumerate(rcps)]
     legend = axs[2, 1].legend()
     legend.get_frame().set_linewidth(0.0)
@@ -535,23 +581,93 @@ if __name__ == "__main__":
     fig.supylabel("Density")
     fig.savefig("calibrated.pdf", bbox_inches="tight")
 
-    # Initialize the FacetGrid object
+    fig, axs = plt.subplots(2, 1, sharex="col", figsize=[6.2, 5])
+    for k, val in enumerate(["FICE", "FSNOW"]):
+        for rcp in rcps:
+            sns.kdeplot(
+                data=all_df[all_df["RCP"] == rcp],
+                x=val,
+                hue="Ensemble",
+                palette=[rcp_col_dict[rcp], rcp_shade_col_dict[rcp]],
+                ax=axs[k],
+            )
+            sns.kdeplot(
+                data=all_df[all_df["RCP"] == rcp],
+                x=val,
+                hue="Ensemble",
+                palette=[rcp_col_dict[rcp], rcp_shade_col_dict[rcp]],
+                weights="Weights SMB (Gt/yr)",
+                linestyle="dashed",
+                ax=axs[k],
+            )
+    fig.savefig("foo.pdf")
 
-    g = sns.FacetGrid(as19_all_2100, row="ID", hue="RCP", aspect=10, height=1, palette=rcp_shade_col_dict)
+    # pal = ["#4393C3", "#003466", "#92C5DE", "#5492CD", "#F4A582", "#990002"]
+    # # Initialize the FacetGrid object
+    # row_order = [
+    #     "RCP 2.6, AS19",
+    #     "RCP 2.6, Calibrated",
+    #     "RCP 4.5, AS19",
+    #     "RCP 4.5, Calibrated",
+    #     "RCP 8.5, AS19",
+    #     "RCP 8.5, Calibrated",
+    # ]
 
-    # Draw the densities in a few steps
-    g.map(sns.violinplot, "SLE (cm)", bw_adjust=10, clip_on=False, inner="quartile", fill=True, alpha=0.5)
-    # Define and use a simple function to label the plot in axes coordinates
-    def label(x, color, label):
-        ax = plt.gca()
-        ax.text(0, 0.2, label, fontweight="bold", color=color, ha="left", va="center", transform=ax.transAxes)
+    # g = sns.FacetGrid(
+    #     as19_all_2100, row="ID", row_order=row_order, hue_order=row_order, hue="ID", aspect=6, height=1, palette=pal
+    # )
 
-    g.map(label, "ID")
+    # # Draw the densities in a few steps
+    # g.map(sns.kdeplot, "SLE (cm)", clip_on=False, fill=True, cut=0, alpha=0.5, linewidth=1.5)
+    # # g.map(sns.kdeplot, "SLE (cm)", clip_on=False, color="w", lw=2)
+    # # g.map(plt.axhline, y=0, lw=1, clip_on=False)
 
-    # Set the subplots to overlap
-    g.fig.subplots_adjust(hspace=0)
+    # # Define and use a simple function to label the plot in axes coordinates
+    # def label(x, color, label):
+    #     print(label)
+    #     ax = plt.gca()
+    #     ax.text(
+    #         0.01, 0.6, label, fontweight="bold", color=color, size=8, ha="left", va="center", transform=ax.transAxes
+    #     )
 
-    # Remove axes details that don't play well with overlap
-    g.set_titles("")
-    g.set(yticks=[])
-    g.despine(bottom=True, left=True)
+    # g.map(label, "ID")
+
+    # # Set the subplots to overlap
+    # # g.fig.subplots_adjust(hspace=-0.25)
+
+    # # Remove axes details that don't play well with overlap
+    # # g.set_titles("")
+    # # g.set(yticks=[])
+    # g.despine(bottom=False, left=True)
+
+    # set_size(6.2, 5, g.fig)
+    # g.fig.savefig("foo.pdf")
+
+    # g = sns.FacetGrid(
+    #     as19_all_2100,
+    #     row="ID",
+    #     row_order=row_order,
+    #     hue_order=row_order,
+    #     hue="ID",
+    #     aspect=6,
+    #     height=1,
+    #     palette=pal,
+    # )
+    # # Draw the densities in a few steps
+    # g.map(sns.violinplot, "SLE (cm)", clip_on=False, inner="quartile", fill=True, alpha=0.5)
+    # # Define and use a simple function to label the plot in axes coordinates
+    # def label(x, color, label):
+    #     ax = plt.gca()
+    #     ax.text(0, 0.2, label, fontweight="bold", color=color, ha="left", va="center", transform=ax.transAxes)
+
+    # g.map(label, "ID")
+
+    # # Set the subplots to overlap
+    # g.fig.subplots_adjust(hspace=0)
+
+    # # Remove axes details that don't play well with overlap
+    # g.set_titles("")
+    # g.set(yticks=[])
+    # g.despine(bottom=True, left=True)
+    # set_size(6.2, 5, g.fig)
+    # g.fig.savefig("bar.pdf")
