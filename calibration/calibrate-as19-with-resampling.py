@@ -167,7 +167,7 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
     """
 
     xmin = 2008
-    xmax = 2022
+    xmax = 2020
     ymin = -10000
     ymax = 1000
 
@@ -232,8 +232,8 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
     l_es_median = ax.plot(
         as19_median.index,
         as19_median,
-        color="k",
-        linewidth=0.6,
+        color="#08519c",
+        linewidth=0.8,
         label="Median(AS19 Ensemble)",
     )
     l_es_calib_median = ax.plot(
@@ -246,16 +246,16 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
     l_ctrl_median = ax.plot(
         as19_ctrl_median.index,
         as19_ctrl_median,
-        color="k",
-        linewidth=0.6,
+        color="#08519c",
         linestyle="dashed",
+        linewidth=0.8,
         label="Median(AS19 CTRL)",
     )
 
     ax.axhline(0, color="k", linestyle="dotted", linewidth=0.6)
 
     legend = ax.legend(
-        handles=[imbie_line[0], l_es_median[0], l_es_calib_median[0], l_ctrl_median[0], as19_ci, as19_ci_calib],
+        handles=[imbie_line[0], l_ctrl_median[0], l_es_median[0], l_es_calib_median[0], as19_ci, as19_ci_calib],
         loc="lower left",
     )
     legend.get_frame().set_linewidth(0.0)
@@ -299,15 +299,15 @@ def plot_partitioning(out_filename, df, df_calib, df_ctrl, imbie):
         )
 
         g = df_calib.groupby(by="Year")[f"{v} (Gt/yr)"]
-        as19_median = g.quantile(0.50)
-        as19_std = g.std()
-        as19_low = g.quantile(0.05)
-        as19_high = g.quantile(0.95)
+        as19_calib_median = g.quantile(0.50)
+        as19_calib_std = g.std()
+        as19_calib_low = g.quantile(0.05)
+        as19_calib_high = g.quantile(0.95)
 
         as19_calib_ci = axs[k].fill_between(
-            as19_median.index,
-            as19_low,
-            as19_high,
+            as19_calib_median.index,
+            as19_calib_low,
+            as19_calib_high,
             color="0.4",
             alpha=0.5,
             linewidth=0.0,
@@ -335,30 +335,39 @@ def plot_partitioning(out_filename, df, df_calib, df_ctrl, imbie):
         l_es_median = axs[k].plot(
             as19_median.index,
             as19_median,
-            color="k",
-            linewidth=0.6,
-            label="Median(Ensemble)",
+            color="#08519c",
+            linewidth=0.8,
+            label="Median(AS19 Ensemble)",
         )
         l_ctrl_median = axs[k].plot(
             as19_ctrl_median.index,
             as19_ctrl_median,
-            color="k",
-            linewidth=0.6,
+            color="#08519c",
+            linewidth=0.8,
             linestyle="dashed",
-            label="Median(CTRL)",
+            label="Median(AS19 CTRL)",
+        )
+        l_es_calib_median = axs[k].plot(
+            as19_calib_median.index,
+            as19_calib_median,
+            color="k",
+            linewidth=0.8,
+            label="Median(Calibrated Ensemble)",
         )
         axs[k].set_ylabel(f"{v} (Gt/yr)")
 
     imbie_line = mlines.Line2D([], [], color=imbie_signal_color, linewidth=imbie_signal_lw, label="IMBIE")
 
     legend = axs[1].legend(
-        handles=[imbie_line, l_es_median[0], l_ctrl_median[0], as19_ci, as19_calib_ci], loc="lower left", ncol=2
+        handles=[imbie_line, l_es_median[0], l_ctrl_median[0], l_es_calib_median[0], as19_ci, as19_calib_ci],
+        loc="lower left",
+        ncol=2,
     )
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
 
     axs[k].set_xlim(2010, 2020)
-    axs[0].set_ylim(-250, 750)
+    axs[0].set_ylim(-500, 1000)
     axs[1].set_ylim(-1500, 0)
 
     set_size(5, 3)
@@ -444,7 +453,7 @@ secpera = 3.15569259747e7
 
 simulated_signal_lw = 0.3
 simulated_signal_color = "#bdbdbd"
-imbie_signal_lw = 0.75
+imbie_signal_lw = 1.0
 imbie_signal_color = "#005a32"
 imbie_sigma_color = "#a1d99b"
 
