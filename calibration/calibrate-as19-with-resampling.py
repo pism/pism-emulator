@@ -522,3 +522,26 @@ if __name__ == "__main__":
 
     plot_partitioning("historical_partitioning_as19_resampled.pdf", as19, as19_resampled, as19_ctrl, imbie)
     plot_historical_with_calib("historical_calib_resampled.pdf", as19, as19_resampled, as19_ctrl, imbie)
+
+    as19["ID"] = "AS19"
+    as19_calib["ID"] = "Calibrated"
+    as19_resampled["ID"] = "Resampled"
+    all_df = pd.concat([as19, as19_calib, as19_resampled])
+
+    fig, axs = plt.subplots(4, 4, figsize=[20, 20])
+    fig.subplots_adjust(hspace=0.8, wspace=0.8)
+
+    sns.histplot(data=all_df, x="GCM", hue="ID", stat="density", lw=0.75, ax=axs[0, 0])
+
+    sns.kdeplot(data=all_df, x="PRS", hue="ID", lw=0.75, ax=axs[1, 0])
+    sns.kdeplot(data=all_df, x="FICE", hue="ID", lw=0.75, ax=axs[0, 1])
+    sns.kdeplot(data=all_df, x="FSNOW", hue="ID", lw=0.75, ax=axs[1, 1])
+    sns.kdeplot(data=all_df, x="RFR", hue="ID", lw=0.75, ax=axs[2, 1])
+    sns.histplot(data=all_df, x="OCM", hue="ID", stat="density", lw=0.75, ax=axs[0, 2])
+    sns.histplot(data=all_df, x="OCS", hue="ID", stat="density", lw=0.75, ax=axs[1, 2])
+    sns.histplot(data=all_df, x="TCT", hue="ID", stat="density", lw=0.75, ax=axs[2, 2])
+    sns.kdeplot(data=all_df, x="VCM", hue="ID", lw=0.75, ax=axs[3, 2])
+    sns.kdeplot(data=all_df, x="SIAE", hue="ID", lw=0.75, ax=axs[0, 3])
+    sns.kdeplot(data=all_df, x="PPQ", hue="ID", lw=0.75, ax=axs[1, 3])
+
+    fig.savefig("calibrated_kde.pdf")
