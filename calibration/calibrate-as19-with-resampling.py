@@ -374,8 +374,9 @@ def plot_partitioning(out_filename, df, df_calib, df_ctrl, imbie):
     fig.savefig(out_filename, bbox_inches="tight")
 
 
-def plot_sle_pdfs(out_filename, df):
+def plot_sle_pdfs(out_filename, df, year=2100):
 
+    df = df[df["Year"] == 2100]
     # Draw a nested violinplot and split the violins for easier comparison
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -385,7 +386,7 @@ def plot_sle_pdfs(out_filename, df):
         x="SLE (cm)",
         order=rcps,
         hue="Ensemble",
-        hue_order=["Calibrated", "AS19"],
+        hue_order=["Resampled", "AS19"],
         split=True,
         cut=0.0,
         inner="quart",
@@ -408,7 +409,7 @@ def load_df(respone_file, samples_file):
     return pd.merge(response, samples, on="Experiment")
 
 
-def resample_ensemble_by_data(imbie_calib_period, as19_calib_period, rcps, fudge_factor=3.0):
+def resample_ensemble_by_data(imbie_calib_period, as19_calib_period, rcps, fudge_factor=3.0, verbose=False):
     imbie_interp_mean = interp1d(imbie_calib_period["Year"], imbie_calib_period["Mass (Gt)"])
     imbie_interp_std = interp1d(imbie_calib_period["Year"], imbie_calib_period["Mass uncertainty (Gt)"])
     resampled_list = []
@@ -431,7 +432,8 @@ def resample_ensemble_by_data(imbie_calib_period, as19_calib_period, rcps, fudge
             if log_like != 0:
                 evals.append(i)
                 log_likes.append(log_like)
-                print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
+                if verbose:
+                    print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
         experiments = np.array(evals)
         w = np.array(log_likes)
         w -= w.mean()
@@ -468,6 +470,33 @@ calibration_start = 2010
 calibration_end = 2020
 proj_start = 2008
 
+fontsize = 6
+lw = 0.65
+aspect_ratio = 0.35
+markersize = 2
+
+params = {
+    "backend": "ps",
+    "axes.linewidth": 0.25,
+    "lines.linewidth": lw,
+    "axes.labelsize": fontsize,
+    "font.size": fontsize,
+    "xtick.direction": "in",
+    "xtick.labelsize": fontsize,
+    "xtick.major.size": 2.5,
+    "xtick.major.width": 0.25,
+    "ytick.direction": "in",
+    "ytick.labelsize": fontsize,
+    "ytick.major.size": 2.5,
+    "ytick.major.width": 0.25,
+    "legend.fontsize": fontsize,
+    "lines.markersize": markersize,
+    "font.size": fontsize,
+}
+
+plt.rcParams.update(params)
+
+
 if __name__ == "__main__":
 
     # Load AS19 (original LES)
@@ -488,60 +517,93 @@ if __name__ == "__main__":
     imbie_calib_time = (imbie["Year"] >= calibration_start) & (imbie["Year"] <= calibration_end)
     imbie_calib_period = imbie[imbie_calib_time]
 
-    plot_partitioning("historical_partitioning_as19.pdf", as19, as19_calib, as19_ctrl, imbie)
-    plot_historical("historical_as19.pdf", as19, as19_ctrl, imbie)
-    plot_historical_with_calib("historical_calib.pdf", as19, as19_calib, as19_ctrl, imbie)
-
     as19_resampled = resample_ensemble_by_data(imbie_calib_period, as19_calib_period, rcps)
-    as19_resampled_2100 = as19_resampled[as19_resampled["Year"] == 2100]
 
-    as19_2100 = as19[as19["Year"] == 2100]
-    numeric_cols = as19_2100.select_dtypes(exclude="number")
-    as19_2100.drop(numeric_cols, axis=1, inplace=True)
+    as19["Ensemble"] = "AS19"
+    as19_calib["Ensemble"] = "Calibrated"
+    as19_resampled["Ensemble"] = "Resampled"
+    all_df = pd.concat([as19, as19_calib, as19_resampled])
 
-    as19_calib_2100 = as19_calib[as19_calib["Year"] == 2100]
-    numeric_cols = as19_calib_2100.select_dtypes(exclude="number")
-    as19_calib_2100.drop(numeric_cols, axis=1, inplace=True)
+    # plot_partitioning("historical_partitioning_as19.pdf", as19, as19_calib, as19_ctrl, imbie)
+    # plot_historical("historical_as19.pdf", as19, as19_ctrl, imbie)
+    # plot_historical_with_calib("historical_calib.pdf", as19, as19_calib, as19_ctrl, imbie)
 
-    as19_2100["Ensemble"] = "AS19"
-    as19_calib_2100["Ensemble"] = "Calibrated"
-    as19_all_2100 = pd.concat([as19_2100, as19_calib_2100]).astype({"Ensemble": str})
-    as19_all_2100["ID"] = [
-        f"rcp_dict{k}, {l} " for k, l in zip(as19_all_2100["RCP"].values, as19_all_2100["Ensemble"].values)
-    ]
+    # as19_resampled_2100 = as19_resampled[as19_resampled["Year"] == 2100]
 
-    plot_sle_pdfs("sle_pdf_2100.pdf", as19_all_2100)
+    # as19_2100 = as19[as19["Year"] == 2100]
+    # numeric_cols = as19_2100.select_dtypes(exclude="number")
+    # as19_2100.drop(numeric_cols, axis=1, inplace=True)
 
-    as19_resampled_2100["Ensemble"] = "Calibrated"
-    as19_all_2100 = pd.concat([as19_2100, as19_resampled_2100]).astype({"Ensemble": str})
-    as19_all_2100["ID"] = [
-        f"rcp_dict{k}, {l} " for k, l in zip(as19_all_2100["RCP"].values, as19_all_2100["Ensemble"].values)
-    ]
+    # as19_calib_2100 = as19_calib[as19_calib["Year"] == 2100]
+    # numeric_cols = as19_calib_2100.select_dtypes(exclude="number")
+    # as19_calib_2100.drop(numeric_cols, axis=1, inplace=True)
 
-    plot_sle_pdfs("sle_pdf_2100_resampled.pdf", as19_all_2100)
+    # as19_2100["Ensemble"] = "AS19"
+    # as19_calib_2100["Ensemble"] = "Calibrated"
+    # as19_all_2100 = pd.concat([as19_2100, as19_calib_2100]).astype({"Ensemble": str})
+    # as19_all_2100["ID"] = [
+    #     f"rcp_dict{k}, {l} " for k, l in zip(as19_all_2100["RCP"].values, as19_all_2100["Ensemble"].values)
+    # ]
+
+    year = 2100
+    plot_sle_pdfs(f"sle_pdf_resampled_{year}.pdf", all_df, year=year)
 
     plot_partitioning("historical_partitioning_as19_resampled.pdf", as19, as19_resampled, as19_ctrl, imbie)
     plot_historical_with_calib("historical_calib_resampled.pdf", as19, as19_resampled, as19_ctrl, imbie)
 
-    as19["ID"] = "AS19"
-    as19_calib["ID"] = "Calibrated"
-    as19_resampled["ID"] = "Resampled"
-    all_df = pd.concat([as19, as19_calib, as19_resampled])
+    fig, axs = plt.subplots(4, 4, figsize=[10, 10])
+    fig.subplots_adjust(hspace=0.2, wspace=0.2)
 
-    fig, axs = plt.subplots(4, 4, figsize=[20, 20])
-    fig.subplots_adjust(hspace=0.8, wspace=0.8)
+    sns.histplot(
+        data=all_df[all_df["Year"] == year],
+        x="GCM",
+        hue="Ensemble",
+        bins=[-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
+        stat="density",
+        multiple="dodge",
+        lw=1.0,
+        ax=axs[0, 0],
+    )
 
-    sns.histplot(data=all_df, x="GCM", hue="ID", stat="density", lw=0.75, ax=axs[0, 0])
+    sns.kdeplot(data=all_df[all_df["Year"] == year], x="PRS", hue="Ensemble", lw=1.0, ax=axs[1, 0])
+    sns.kdeplot(data=all_df[all_df["Year"] == year], x="FICE", hue="Ensemble", lw=1.0, ax=axs[0, 1])
+    sns.kdeplot(data=all_df[all_df["Year"] == year], x="FSNOW", hue="Ensemble", lw=1.0, ax=axs[1, 1])
+    sns.kdeplot(data=all_df[all_df["Year"] == year], x="RFR", hue="Ensemble", lw=1.0, ax=axs[2, 1])
+    sns.histplot(
+        data=all_df[all_df["Year"] == year],
+        x="OCM",
+        hue="Ensemble",
+        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+        stat="density",
+        multiple="dodge",
+        lw=1.0,
+        ax=axs[0, 2],
+    )
+    sns.histplot(
+        data=all_df[all_df["Year"] == year],
+        x="OCS",
+        hue="Ensemble",
+        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+        stat="density",
+        multiple="dodge",
+        lw=1.0,
+        ax=axs[1, 2],
+    )
+    sns.histplot(
+        data=all_df[all_df["Year"] == year],
+        x="TCT",
+        hue="Ensemble",
+        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+        stat="density",
+        multiple="dodge",
+        lw=1.0,
+        ax=axs[2, 2],
+    )
+    sns.kdeplot(data=all_df[all_df["Year"] == year], x="VCM", hue="Ensemble", lw=1.0, ax=axs[3, 2])
+    sns.kdeplot(data=all_df[all_df["Year"] == year], x="SIAE", hue="Ensemble", lw=1.0, ax=axs[0, 3])
+    sns.kdeplot(data=all_df[all_df["Year"] == year], x="PPQ", hue="Ensemble", lw=1.0, ax=axs[1, 3])
 
-    sns.kdeplot(data=all_df, x="PRS", hue="ID", lw=0.75, ax=axs[1, 0])
-    sns.kdeplot(data=all_df, x="FICE", hue="ID", lw=0.75, ax=axs[0, 1])
-    sns.kdeplot(data=all_df, x="FSNOW", hue="ID", lw=0.75, ax=axs[1, 1])
-    sns.kdeplot(data=all_df, x="RFR", hue="ID", lw=0.75, ax=axs[2, 1])
-    sns.histplot(data=all_df, x="OCM", hue="ID", stat="density", lw=0.75, ax=axs[0, 2])
-    sns.histplot(data=all_df, x="OCS", hue="ID", stat="density", lw=0.75, ax=axs[1, 2])
-    sns.histplot(data=all_df, x="TCT", hue="ID", stat="density", lw=0.75, ax=axs[2, 2])
-    sns.kdeplot(data=all_df, x="VCM", hue="ID", lw=0.75, ax=axs[3, 2])
-    sns.kdeplot(data=all_df, x="SIAE", hue="ID", lw=0.75, ax=axs[0, 3])
-    sns.kdeplot(data=all_df, x="PPQ", hue="ID", lw=0.75, ax=axs[1, 3])
-
+    for ax, col in zip(axs[0], ["Climate", "Surface", "Ocean", "Dynamics"]):
+        ax.set_title(col)
+    fig.tight_layout()
     fig.savefig("calibrated_kde.pdf")
