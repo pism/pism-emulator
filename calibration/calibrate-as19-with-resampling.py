@@ -161,7 +161,7 @@ def plot_historical(out_filename, df, df_ctrl, imbie):
     fig.savefig(out_filename, bbox_inches="tight")
 
 
-def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
+def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
     """
     Plot historical simulations and observations
     """
@@ -176,7 +176,8 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
     fig = plt.figure(num="historical", clear=True)
     ax = fig.add_subplot(111)
 
-    g = df.groupby(by="Year")["Mass (Gt)"]
+    as19 = df[df["Ensemble"] == "AS19"]
+    g = as19.groupby(by="Year")["Mass (Gt)"]
     as19_median = g.quantile(0.50)
     as19_low = g.quantile(0.05)
     as19_high = g.quantile(0.95)
@@ -188,12 +189,13 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
         color="0.6",
         alpha=0.5,
         linewidth=0.0,
-        zorder=10,
+        zorder=-11,
         label="AS19 90% c.i.",
     )
     as19_ci.set_zorder(-11)
 
-    g = df_calib.groupby(by="Year")["Mass (Gt)"]
+    calib = df[df["Ensemble"] == "Calibrated"]
+    g = calib.groupby(by="Year")["Mass (Gt)"]
     as19_calib_median = g.quantile(0.50)
     as19_calib_low = g.quantile(0.05)
     as19_calib_high = g.quantile(0.95)
@@ -202,20 +204,36 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
         as19_calib_median.index,
         as19_calib_low,
         as19_calib_high,
-        color="0.4",
+        color="#08519c",
         alpha=0.5,
         linewidth=0.0,
-        zorder=10,
+        zorder=-10,
         label="Calibrated 90% c.i.",
     )
-    as19_ci_calib.set_zorder(-10)
+
+    resampled = df[df["Ensemble"] == "Resampled"]
+    g = resampled.groupby(by="Year")["Mass (Gt)"]
+    as19_resampled_median = g.quantile(0.50)
+    as19_resampled_low = g.quantile(0.05)
+    as19_resampled_high = g.quantile(0.95)
+
+    as19_ci_resampled = ax.fill_between(
+        as19_resampled_median.index,
+        as19_resampled_low,
+        as19_resampled_high,
+        color="0.2",
+        alpha=0.5,
+        linewidth=0.0,
+        zorder=-9,
+        label="Resampled 90% c.i.",
+    )
 
     imbie_fill = ax.fill_between(
         imbie["Year"],
         imbie["Mass (Gt)"] - 1 * imbie["Mass uncertainty (Gt)"],
         imbie["Mass (Gt)"] + 1 * imbie["Mass uncertainty (Gt)"],
         color=imbie_sigma_color,
-        alpha=0.5,
+        alpha=0.75,
         linewidth=0,
     )
     imbie_fill.set_zorder(5)
@@ -227,6 +245,7 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
         color=imbie_signal_color,
         linewidth=imbie_signal_lw,
         label="Observed (IMBIE)",
+        zorder=20,
     )
 
     l_es_median = ax.plot(
@@ -255,7 +274,15 @@ def plot_historical_with_calib(out_filename, df, df_calib, df_ctrl, imbie):
     ax.axhline(0, color="k", linestyle="dotted", linewidth=0.6)
 
     legend = ax.legend(
-        handles=[imbie_line[0], l_ctrl_median[0], l_es_median[0], l_es_calib_median[0], as19_ci, as19_ci_calib],
+        handles=[
+            imbie_line[0],
+            l_ctrl_median[0],
+            l_es_median[0],
+            l_es_calib_median[0],
+            as19_ci,
+            as19_ci_calib,
+            as19_ci_resampled,
+        ],
         loc="lower left",
     )
     legend.get_frame().set_linewidth(0.0)
@@ -524,32 +551,11 @@ if __name__ == "__main__":
     as19_resampled["Ensemble"] = "Resampled"
     all_df = pd.concat([as19, as19_calib, as19_resampled])
 
-    # plot_partitioning("historical_partitioning_as19.pdf", as19, as19_calib, as19_ctrl, imbie)
-    # plot_historical("historical_as19.pdf", as19, as19_ctrl, imbie)
-    # plot_historical_with_calib("historical_calib.pdf", as19, as19_calib, as19_ctrl, imbie)
-
-    # as19_resampled_2100 = as19_resampled[as19_resampled["Year"] == 2100]
-
-    # as19_2100 = as19[as19["Year"] == 2100]
-    # numeric_cols = as19_2100.select_dtypes(exclude="number")
-    # as19_2100.drop(numeric_cols, axis=1, inplace=True)
-
-    # as19_calib_2100 = as19_calib[as19_calib["Year"] == 2100]
-    # numeric_cols = as19_calib_2100.select_dtypes(exclude="number")
-    # as19_calib_2100.drop(numeric_cols, axis=1, inplace=True)
-
-    # as19_2100["Ensemble"] = "AS19"
-    # as19_calib_2100["Ensemble"] = "Calibrated"
-    # as19_all_2100 = pd.concat([as19_2100, as19_calib_2100]).astype({"Ensemble": str})
-    # as19_all_2100["ID"] = [
-    #     f"rcp_dict{k}, {l} " for k, l in zip(as19_all_2100["RCP"].values, as19_all_2100["Ensemble"].values)
-    # ]
-
     year = 2100
     plot_sle_pdfs(f"sle_pdf_resampled_{year}.pdf", all_df, year=year)
 
-    plot_partitioning("historical_partitioning_as19_resampled.pdf", as19, as19_resampled, as19_ctrl, imbie)
-    plot_historical_with_calib("historical_calib_resampled.pdf", as19, as19_resampled, as19_ctrl, imbie)
+    # plot_partitioning("historical_partitioning_as19_resampled.pdf", all_df, as19_ctrl, imbie)
+    plot_historical_with_calib("historical_calib_resampled.pdf", all_df, as19_ctrl, imbie)
 
     fig, axs = plt.subplots(4, 4, figsize=[10, 10])
     fig.subplots_adjust(hspace=0.2, wspace=0.2)
@@ -605,5 +611,12 @@ if __name__ == "__main__":
 
     for ax, col in zip(axs[0], ["Climate", "Surface", "Ocean", "Dynamics"]):
         ax.set_title(col)
+
+    axs[2, 0].set_axis_off()
+    axs[3, 0].set_axis_off()
+    axs[3, 1].set_axis_off()
+    axs[2, 3].set_axis_off()
+    axs[3, 3].set_axis_off()
+
     fig.tight_layout()
     fig.savefig("calibrated_kde.pdf")

@@ -43,17 +43,9 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-<<<<<<< HEAD
-    parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
-=======
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
->>>>>>> area
-    )
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
@@ -102,39 +94,6 @@ if __name__ == "__main__":
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
 
-<<<<<<< HEAD
-    for model_index in range(num_models):
-        print(f"Training model {model_index} of {num_models}")
-        omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
-        omegas = omegas.type_as(X)
-        omegas_0 = torch.ones_like(omegas) / len(omegas)
-
-        data_loader = PISMDataModule(
-            X, F, omegas, omegas_0, area, test_size=test_size, num_workers=0
-        )
-        data_loader.prepare_data()
-        data_loader.setup(stage="fit")
-        n_eigenglaciers = data_loader.n_eigenglaciers
-        V_hat = data_loader.V_hat
-        F_mean = data_loader.F_mean
-        F_train = data_loader.F_bar
-
-        early_stop_callback = EarlyStopping(
-            monitor="test_loss", min_delta=0.00, patience=5, verbose=False, mode="max"
-        )
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
-        )
-        logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
-        # profiler = PyTorchProfiler(emulator_dir)
-        lr_monitor = LearningRateMonitor(logging_interval="epoch")
-        e = NNEmulator(n_parameters, n_eigenglaciers, V_hat, F_mean, hparams)
-        trainer = pl.Trainer.from_argparse_args(
-            args,
-            callbacks=[lr_monitor, checkpoint_callback, early_stop_callback],
-            logger=logger,
-            deterministic=True,
-=======
     print(f"Training model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
     omegas = omegas.type_as(X)
@@ -143,9 +102,7 @@ if __name__ == "__main__":
     if train_size == 1.0:
         data_loader = PISMDataModule(X, F, omegas, omegas_0, num_workers=num_workers)
     else:
-        data_loader = PISMDataModule(
-            X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers
-        )
+        data_loader = PISMDataModule(X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers)
 
     data_loader.prepare_data()
     data_loader.setup(stage="fit")
@@ -155,10 +112,7 @@ if __name__ == "__main__":
     F_train = data_loader.F_bar
 
     if checkpoint:
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
->>>>>>> area
-        )
+        checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         callbacks.append(checkpoint_callback)
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
 

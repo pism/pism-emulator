@@ -176,6 +176,7 @@ if __name__ == "__main__":
                 axs[i, j].remove()
 
     keys = X_keys
+    keys = ["SIAe", "SSAe", "$\delta$", "$b_{base} (m)$", "$b_{range} (m)$", "$q$"]
 
     for i, ax in enumerate(axs[:, 0]):
         ax.set_ylabel(keys[i])
@@ -202,6 +203,7 @@ if __name__ == "__main__":
         ax.tick_params(axis="both", which="both", length=0)
 
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
+    fig.tight_layout()
     fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
 
     # Prior = pd.DataFrame(data=X_hat, columns=dataset.X_keys).sample(frac=0.1)
