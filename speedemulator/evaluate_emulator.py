@@ -38,7 +38,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--num_models", type=int, default=50)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument(
         "--target_file",
@@ -65,6 +65,7 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
+        threshold=500e3,
     )
 
     X = dataset.X
@@ -81,10 +82,7 @@ if __name__ == "__main__":
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    if train_size == 1.0:
-        data_loader = PISMDataModule(X, F, omegas, omegas_0)
-    else:
-        data_loader = PISMDataModule(X, F, omegas, omegas_0)
+    data_loader = PISMDataModule(X, F, omegas, omegas_0)
 
     data_loader.prepare_data()
     data_loader.setup(stage="fit")
@@ -93,11 +91,6 @@ if __name__ == "__main__":
     F_mean = data_loader.F_mean
     F_train = data_loader.F_bar
 
-    corrs = []
-    rmses = []
-    F_ps = []
-    F_vs = []
-    rel_diff = []
     for model_index in range(num_models):
         print(f"Loading emulator {model_index}")
         emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
@@ -126,11 +119,5 @@ if __name__ == "__main__":
             F_v = np.ma.array(data=10 ** F_val, mask=mask)
             rmse = np.sqrt(mean_squared_error(F_p, F_v))
             corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
-            rmses.append(rmse)
-            corrs.append(corr)
-
-            # Flatten predicted and validation speeds
-            r = (F_p - F_v) / F_v
-            rel_diff.append(r)
-
-    S_rd = np.array(rel_diff).flatten()
+            print(rmse)
+            print(corr)

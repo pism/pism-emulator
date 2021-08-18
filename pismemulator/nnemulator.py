@@ -269,7 +269,6 @@ class PISMDataset(torch.utils.data.Dataset):
             ds.close()
 
         p = response.max(axis=1) < self.threshold
-
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
@@ -389,8 +388,13 @@ class PISMDataModule(pl.LightningDataModule):
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
         Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-        U, S, V = torch.svd_lowrank(Z @ F_bar, q=40)
-        lamda = S ** 2 / (n_grid_points)
+        if F.shape[0] < 50:
+            S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
+            lamba, V = torch.eig(S, eigenvectors=True)  # Eq. 26
+            lamda = lamda[:, 0].squeeze()
+        else:
+            U, S, V = torch.svd_lowrank(Z @ F_bar, q=40)
+            lamda = S ** 2 / (n_grid_points)
 
         cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
         lamda_truncated = lamda.detach()[:cutoff_index]

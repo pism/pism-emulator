@@ -204,7 +204,7 @@ if __name__ == "__main__":
 
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
     fig.tight_layout()
-    fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
+    fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf", bbox_inches="tight")
 
     # Prior = pd.DataFrame(data=X_hat, columns=dataset.X_keys).sample(frac=0.1)
     # Prior["Type"] = "Pior"
