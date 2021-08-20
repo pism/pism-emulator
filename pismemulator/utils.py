@@ -85,7 +85,7 @@ def load_imbie(proj_start=2008):
     return imbie
 
 
-def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
+def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, return_fig=False):
     """
     Plot target (PISM) and predicted (Emulator) speeds for validation
     """
@@ -164,6 +164,9 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir):
     plt.colorbar(c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical")
     fig.subplots_adjust(wspace=0, hspace=0.02)
     fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}_test.pdf", bbox_inches="tight")
+
+    if return_fig:
+        return fig
 
 
 def calc_bic(X, Y):

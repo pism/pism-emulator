@@ -37,11 +37,17 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../tests/training_data")
+    parser.add_argument("--validation_data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
+    parser.add_argument("--validation_samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument(
         "--target_file",
+        default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+    )
+    parser.add_argument(
+        "--validation_target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
     )
     parser.add_argument("--train_size", type=float, default=1.0)
@@ -52,44 +58,50 @@ if __name__ == "__main__":
     hparams = vars(args)
 
     data_dir = args.data_dir
+    validation_data_dir = args.validation_data_dir
     emulator_dir = args.emulator_dir
     num_models = args.num_models
     samples_file = args.samples_file
+    validation_samples_file = args.validation_samples_file
     target_file = args.target_file
+    validation_target_file = args.validation_target_file
     train_size = args.train_size
     thinning_factor = args.thinning_factor
-    tb_logs_dir = f"{emulator_dir}/tb_logs"
 
-    dataset = PISMDataset(
-        data_dir=data_dir,
-        samples_file=samples_file,
-        target_file=target_file,
-        thinning_factor=thinning_factor,
+    # data_loader = PISMDataModule(X, F, omegas, omegas_0)
+
+    # data_loader.prepare_data()
+    # data_loader.setup(stage="fit")
+    # n_eigenglaciers = data_loader.n_eigenglaciers
+    # V_hat = data_loader.V_hat
+    # F_mean = data_loader.F_mean
+    # F_train = data_loader.F_bar
+
+    validation_dataset = PISMDataset(
+        data_dir=validation_data_dir,
+        samples_file=validation_samples_file,
+        target_file=validation_target_file,
+        thinning_factor=1,
         threshold=500e3,
     )
-
-    X = dataset.X
-    F = dataset.Y
-    area = dataset.normed_area
-    n_grid_points = dataset.n_grid_points
-    n_parameters = dataset.n_parameters
-    n_samples = dataset.n_samples
-
-    if not os.path.isdir(emulator_dir):
-        os.makedirs(emulator_dir)
+    X = validation_dataset.X
+    F = validation_dataset.Y
+    n_samples = validation_dataset.n_samples
 
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    data_loader = PISMDataModule(X, F, omegas, omegas_0)
+    data_loader = PISMDataModule(
+        X,
+        F,
+        omegas,
+        omegas_0,
+    )
 
     data_loader.prepare_data()
     data_loader.setup(stage="fit")
-    n_eigenglaciers = data_loader.n_eigenglaciers
-    V_hat = data_loader.V_hat
     F_mean = data_loader.F_mean
-    F_train = data_loader.F_bar
 
     for model_index in range(num_models):
         print(f"Loading emulator {model_index}")
@@ -100,20 +112,20 @@ if __name__ == "__main__":
             state_dict["V_hat"].shape[1],
             state_dict["V_hat"],
             state_dict["F_mean"],
-            dataset.normed_area,
+            state_dict["area"],
             hparams,
         )
         e.load_state_dict(state_dict)
-        for idx in range(len(data_loader.val_data)):
+        for idx in range(len(data_loader.all_data)):
             (
                 X_val,
                 F_val,
                 _,
                 _,
-            ) = data_loader.val_data[idx]
-            X_val_scaled = X_val * dataset.X_std + dataset.X_mean
-            F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
-            F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
+            ) = data_loader.all_data[idx]
+            X_val_scaled = X_val * validation_dataset.X_std + validation_dataset.X_mean
+            F_val = (F_val + F_mean).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
+            F_pred = e(X_val, add_mean=True).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
             mask = 10 ** F_val <= 1
             F_p = np.ma.array(data=10 ** F_pred, mask=mask)
             F_v = np.ma.array(data=10 ** F_val, mask=mask)

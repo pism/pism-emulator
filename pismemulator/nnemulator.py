@@ -382,19 +382,15 @@ class PISMDataModule(pl.LightningDataModule):
         self.n_eigenglaciers = n_eigenglaciers
 
     def get_eigenglaciers(self, cutoff=0.999):
+        print("Generating eigenglaciers")
         F = self.F
         omegas = self.omegas
         n_grid_points = F.shape[1]
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
         Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-        if F.shape[0] < 50:
-            S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
-            lamba, V = torch.eig(S, eigenvectors=True)  # Eq. 26
-            lamda = lamda[:, 0].squeeze()
-        else:
-            U, S, V = torch.svd_lowrank(Z @ F_bar, q=40)
-            lamda = S ** 2 / (n_grid_points)
+        U, S, V = torch.svd_lowrank(Z @ F_bar)
+        lamda = S ** 2 / (n_grid_points)
 
         cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
         lamda_truncated = lamda.detach()[:cutoff_index]
