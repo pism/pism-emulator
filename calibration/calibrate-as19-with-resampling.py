@@ -186,8 +186,8 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
         as19_median.index,
         as19_low,
         as19_high,
-        color="0.6",
-        alpha=0.5,
+        color="0.8",
+        alpha=1.0,
         linewidth=0.0,
         zorder=-11,
         label="AS19 90% c.i.",
@@ -204,8 +204,8 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
         as19_calib_median.index,
         as19_calib_low,
         as19_calib_high,
-        color="#08519c",
-        alpha=0.5,
+        color="0.6",
+        alpha=1.0,
         linewidth=0.0,
         zorder=-10,
         label="Calibrated 90% c.i.",
@@ -221,8 +221,8 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
         as19_resampled_median.index,
         as19_resampled_low,
         as19_resampled_high,
-        color="0.2",
-        alpha=0.5,
+        color="0.4",
+        alpha=1.0,
         linewidth=0.0,
         zorder=-9,
         label="Resampled 90% c.i.",
@@ -251,23 +251,30 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
     l_es_median = ax.plot(
         as19_median.index,
         as19_median,
-        color="#08519c",
-        linewidth=0.8,
+        color="#756bb1",
+        linewidth=0.75,
         label="Median(AS19 Ensemble)",
     )
     l_es_calib_median = ax.plot(
         as19_calib_median.index,
         as19_calib_median,
-        color="k",
-        linewidth=0.8,
+        color="#3182bd",
+        linewidth=0.75,
         label="Median(Calibrated Ensemble)",
+    )
+    l_es_resampled_median = ax.plot(
+        as19_resampled_median.index,
+        as19_resampled_median,
+        color="k",
+        linewidth=0.75,
+        label="Median(Resampled Ensemble)",
     )
     l_ctrl_median = ax.plot(
         as19_ctrl_median.index,
         as19_ctrl_median,
-        color="#08519c",
+        color="#756bb1",
         linestyle="dashed",
-        linewidth=0.8,
+        linewidth=0.75,
         label="Median(AS19 CTRL)",
     )
 
@@ -279,6 +286,7 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
             l_ctrl_median[0],
             l_es_median[0],
             l_es_calib_median[0],
+            l_es_resampled_median[0],
             as19_ci,
             as19_ci_calib,
             as19_ci_resampled,
@@ -417,7 +425,7 @@ def plot_sle_pdfs(out_filename, df, year=2100):
         split=True,
         cut=0.0,
         inner="quart",
-        palette=["0.6", "0.8"],
+        palette=["0.4", "0.8"],
         linewidth=1,
         orient="h",
         ax=ax,
@@ -482,7 +490,7 @@ secpera = 3.15569259747e7
 
 simulated_signal_lw = 0.3
 simulated_signal_color = "#bdbdbd"
-imbie_signal_lw = 1.0
+imbie_signal_lw = 0.75
 imbie_signal_color = "#005a32"
 imbie_sigma_color = "#a1d99b"
 
@@ -549,7 +557,11 @@ if __name__ == "__main__":
     as19["Ensemble"] = "AS19"
     as19_calib["Ensemble"] = "Calibrated"
     as19_resampled["Ensemble"] = "Resampled"
-    all_df = pd.concat([as19, as19_calib, as19_resampled])
+    all_df = (
+        pd.concat([as19, as19_calib, as19_resampled])
+        .drop_duplicates(subset=None, keep="first", inplace=False)
+        .reset_index()
+    )
 
     year = 2100
     plot_sle_pdfs(f"sle_pdf_resampled_{year}.pdf", all_df, year=year)
@@ -557,13 +569,17 @@ if __name__ == "__main__":
     # plot_partitioning("historical_partitioning_as19_resampled.pdf", all_df, as19_ctrl, imbie)
     plot_historical_with_calib("historical_calib_resampled.pdf", all_df, as19_ctrl, imbie)
 
+    all_2100_df = all_df[all_df["Year"] == year]
+
+    palette = ["0.8", "0.6", "0.4"]
     fig, axs = plt.subplots(4, 4, figsize=[10, 10])
     fig.subplots_adjust(hspace=0.2, wspace=0.2)
 
     sns.histplot(
-        data=all_df[all_df["Year"] == year],
+        data=all_2100_df,
         x="GCM",
         hue="Ensemble",
+        palette=palette,
         bins=[-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
         stat="density",
         multiple="dodge",
@@ -571,14 +587,15 @@ if __name__ == "__main__":
         ax=axs[0, 0],
     )
 
-    sns.kdeplot(data=all_df[all_df["Year"] == year], x="PRS", hue="Ensemble", lw=1.0, ax=axs[1, 0])
-    sns.kdeplot(data=all_df[all_df["Year"] == year], x="FICE", hue="Ensemble", lw=1.0, ax=axs[0, 1])
-    sns.kdeplot(data=all_df[all_df["Year"] == year], x="FSNOW", hue="Ensemble", lw=1.0, ax=axs[1, 1])
-    sns.kdeplot(data=all_df[all_df["Year"] == year], x="RFR", hue="Ensemble", lw=1.0, ax=axs[2, 1])
+    sns.kdeplot(data=all_2100_df, x="PRS", hue="Ensemble", palette=palette, lw=1.0, ax=axs[1, 0])
+    sns.kdeplot(data=all_2100_df, x="FICE", hue="Ensemble", palette=palette, lw=1.0, ax=axs[0, 1])
+    sns.kdeplot(data=all_2100_df, x="FSNOW", hue="Ensemble", palette=palette, lw=1.0, ax=axs[1, 1])
+    sns.kdeplot(data=all_2100_df, x="RFR", hue="Ensemble", palette=palette, lw=1.0, ax=axs[2, 1])
     sns.histplot(
-        data=all_df[all_df["Year"] == year],
+        data=all_2100_df,
         x="OCM",
         hue="Ensemble",
+        palette=palette,
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
@@ -586,9 +603,10 @@ if __name__ == "__main__":
         ax=axs[0, 2],
     )
     sns.histplot(
-        data=all_df[all_df["Year"] == year],
+        data=all_2100_df,
         x="OCS",
         hue="Ensemble",
+        palette=palette,
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
@@ -596,18 +614,19 @@ if __name__ == "__main__":
         ax=axs[1, 2],
     )
     sns.histplot(
-        data=all_df[all_df["Year"] == year],
+        data=all_2100_df,
         x="TCT",
         hue="Ensemble",
+        palette=palette,
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
         lw=1.0,
         ax=axs[2, 2],
     )
-    sns.kdeplot(data=all_df[all_df["Year"] == year], x="VCM", hue="Ensemble", lw=1.0, ax=axs[3, 2])
-    sns.kdeplot(data=all_df[all_df["Year"] == year], x="SIAE", hue="Ensemble", lw=1.0, ax=axs[0, 3])
-    sns.kdeplot(data=all_df[all_df["Year"] == year], x="PPQ", hue="Ensemble", lw=1.0, ax=axs[1, 3])
+    sns.kdeplot(data=all_2100_df, x="VCM", hue="Ensemble", palette=palette, lw=1.0, ax=axs[3, 2])
+    sns.kdeplot(data=all_2100_df, x="SIAE", hue="Ensemble", palette=palette, lw=1.0, ax=axs[0, 3])
+    sns.kdeplot(data=all_2100_df, x="PPQ", hue="Ensemble", palette=palette, lw=1.0, ax=axs[1, 3])
 
     for ax, col in zip(axs[0], ["Climate", "Surface", "Ocean", "Dynamics"]):
         ax.set_title(col)

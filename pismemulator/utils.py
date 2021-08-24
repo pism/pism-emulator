@@ -93,14 +93,13 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
     cmap = "viridis"
     fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8))
     for k in range(4):
-        idx = np.random.randint(len(data_loader.val_data))
+        idx = np.random.randint(len(data_loader.all_data))
         (
             X_val,
             F_val,
             _,
             _,
-        ) = data_loader.val_data[idx]
-        X_val_scaled = X_val * dataset.X_std + dataset.X_mean
+        ) = data_loader.all_data[idx]
         F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
         F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
         mask = 10 ** F_val <= 1

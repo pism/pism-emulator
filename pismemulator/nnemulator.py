@@ -197,6 +197,12 @@ class PISMDataset(torch.utils.data.Dataset):
         if target_file is not None:
             self.load_target()
 
+    def __getitem__(self, i):
+        return tuple(d[i] for d in [self.X, self.Y])
+
+    def __len__(self):
+        return min(len(d) for d in [self.X, self.Y])
+
     def load_target(self):
         epsilon = self.epsilon
         return_numpy = self.return_numpy

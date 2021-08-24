@@ -92,16 +92,16 @@ if __name__ == "__main__":
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    data_loader = PISMDataModule(
+    validation_data_loader = PISMDataModule(
         X,
         F,
         omegas,
         omegas_0,
     )
 
-    data_loader.prepare_data()
-    data_loader.setup(stage="fit")
-    F_mean = data_loader.F_mean
+    validation_data_loader.prepare_data()
+    validation_data_loader.setup(stage="fit")
+    F_mean = validation_data_loader.F_mean
 
     for model_index in range(num_models):
         print(f"Loading emulator {model_index}")
@@ -116,20 +116,22 @@ if __name__ == "__main__":
             hparams,
         )
         e.load_state_dict(state_dict)
-        for idx in range(len(data_loader.all_data)):
+        e.eval()
+        for idx in range(len(validation_data_loader.all_data)):
             (
                 X_val,
                 F_val,
                 _,
                 _,
-            ) = data_loader.all_data[idx]
-            X_val_scaled = X_val * validation_dataset.X_std + validation_dataset.X_mean
-            F_val = (F_val + F_mean).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
+            ) = validation_data_loader.all_data[idx]
+            # X_val_unscaled = X_val * validation_dataset.X_std + validation_dataset.X_mean
+            F_val = (
+                (F_val + state_dict["F_mean"]).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
+            )
             F_pred = e(X_val, add_mean=True).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
             mask = 10 ** F_val <= 1
             F_p = np.ma.array(data=10 ** F_pred, mask=mask)
             F_v = np.ma.array(data=10 ** F_val, mask=mask)
             rmse = np.sqrt(mean_squared_error(F_p, F_v))
             corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
-            print(rmse)
-            print(corr)
+            print(model_index, idx, rmse, corr)
