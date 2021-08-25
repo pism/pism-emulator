@@ -569,64 +569,131 @@ if __name__ == "__main__":
     # plot_partitioning("historical_partitioning_as19_resampled.pdf", all_df, as19_ctrl, imbie)
     plot_historical_with_calib("historical_calib_resampled.pdf", all_df, as19_ctrl, imbie)
 
-    all_2100_df = all_df[all_df["Year"] == year]
+    all_2100_df = all_df[(all_df["Year"] == year)]
 
-    palette = ["0.8", "0.6", "0.4"]
-    fig, axs = plt.subplots(4, 4, figsize=[10, 10])
-    fig.subplots_adjust(hspace=0.2, wspace=0.2)
+    palette = ["0.75", "0.5", "0.25"]
+    fig, axs = plt.subplots(4, 4, figsize=[6.2, 6.2])
+    fig.subplots_adjust(hspace=0.1, wspace=0.1)
 
     sns.histplot(
         data=all_2100_df,
         x="GCM",
         hue="Ensemble",
+        common_norm=False,
         palette=palette,
         bins=[-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
         stat="density",
         multiple="dodge",
-        lw=1.0,
+        lw=0.8,
         ax=axs[0, 0],
     )
 
-    sns.kdeplot(data=all_2100_df, x="PRS", hue="Ensemble", palette=palette, lw=1.0, ax=axs[1, 0])
-    sns.kdeplot(data=all_2100_df, x="FICE", hue="Ensemble", palette=palette, lw=1.0, ax=axs[0, 1])
-    sns.kdeplot(data=all_2100_df, x="FSNOW", hue="Ensemble", palette=palette, lw=1.0, ax=axs[1, 1])
-    sns.kdeplot(data=all_2100_df, x="RFR", hue="Ensemble", palette=palette, lw=1.0, ax=axs[2, 1])
+    sns.kdeplot(
+        data=all_2100_df,
+        x="PRS",
+        hue="Ensemble",
+        common_grid=False,
+        common_norm=False,
+        palette=palette,
+        lw=0.8,
+        ax=axs[1, 0],
+    )
+    sns.kdeplot(
+        data=all_2100_df,
+        x="FICE",
+        hue="Ensemble",
+        common_grid=False,
+        common_norm=False,
+        palette=palette,
+        lw=0.8,
+        ax=axs[0, 1],
+    )
+    sns.kdeplot(
+        data=all_2100_df,
+        x="FSNOW",
+        hue="Ensemble",
+        common_grid=False,
+        common_norm=False,
+        palette=palette,
+        lw=0.8,
+        ax=axs[1, 1],
+    )
+    sns.kdeplot(
+        data=all_2100_df,
+        x="RFR",
+        hue="Ensemble",
+        common_grid=False,
+        common_norm=False,
+        palette=palette,
+        lw=0.8,
+        ax=axs[2, 1],
+    )
     sns.histplot(
         data=all_2100_df,
         x="OCM",
         hue="Ensemble",
+        common_norm=False,
         palette=palette,
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        lw=1.0,
+        lw=0.8,
         ax=axs[0, 2],
     )
     sns.histplot(
         data=all_2100_df,
         x="OCS",
         hue="Ensemble",
+        common_norm=False,
         palette=palette,
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        lw=1.0,
+        lw=0.8,
         ax=axs[1, 2],
     )
     sns.histplot(
         data=all_2100_df,
         x="TCT",
         hue="Ensemble",
+        common_norm=False,
         palette=palette,
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        lw=1.0,
+        lw=0.8,
         ax=axs[2, 2],
     )
-    sns.kdeplot(data=all_2100_df, x="VCM", hue="Ensemble", palette=palette, lw=1.0, ax=axs[3, 2])
-    sns.kdeplot(data=all_2100_df, x="SIAE", hue="Ensemble", palette=palette, lw=1.0, ax=axs[0, 3])
-    sns.kdeplot(data=all_2100_df, x="PPQ", hue="Ensemble", palette=palette, lw=1.0, ax=axs[1, 3])
+    sns.kdeplot(
+        data=all_2100_df,
+        x="VCM",
+        hue="Ensemble",
+        common_grid=False,
+        common_norm=False,
+        palette=palette,
+        lw=0.8,
+        ax=axs[3, 2],
+    )
+    sns.kdeplot(
+        data=all_2100_df,
+        x="SIAE",
+        hue="Ensemble",
+        common_grid=False,
+        common_norm=False,
+        palette=palette,
+        lw=0.8,
+        ax=axs[0, 3],
+    )
+    sns.kdeplot(
+        data=all_2100_df,
+        x="PPQ",
+        hue="Ensemble",
+        common_grid=False,
+        common_norm=False,
+        palette=palette,
+        lw=0.8,
+        ax=axs[1, 3],
+    )
 
     for ax, col in zip(axs[0], ["Climate", "Surface", "Ocean", "Dynamics"]):
         ax.set_title(col)
@@ -636,6 +703,16 @@ if __name__ == "__main__":
     axs[3, 1].set_axis_off()
     axs[2, 3].set_axis_off()
     axs[3, 3].set_axis_off()
+
+    for ax in axs.reshape(-1):
+        ax.legend([], [], frameon=False)
+
+    l_as19 = mlines.Line2D([], [], color=palette[0], linewidth=0.8, label="AS19")
+    l_calib = mlines.Line2D([], [], color=palette[1], linewidth=0.8, label="Calibrated")
+    l_resampled = mlines.Line2D([], [], color=palette[2], linewidth=0.8, label="Resampled")
+    legend = axs[2, 0].legend(handles=[l_as19, l_calib, l_resampled], loc="center left", title="Ensemble")
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
 
     fig.tight_layout()
     fig.savefig("calibrated_kde.pdf")
