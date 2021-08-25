@@ -57,110 +57,6 @@ def set_size(w, h, ax=None):
     ax.figure.set_size_inches(figw, figh)
 
 
-def plot_historical(out_filename, df, df_ctrl, imbie):
-    """
-    Plot historical simulations and observations
-    """
-
-    def plot_signal(g):
-        m_df = g[-1]
-        x = m_df["Year"]
-        y = m_df["Mass (Gt)"]
-
-        return ax.plot(x, y, color=simulated_signal_color, linewidth=simulated_signal_lw)
-
-    xmin = 2008
-    xmax = 2020
-    ymin = -10000
-    ymax = 1000
-
-    g = df.groupby(by="Year")["Mass (Gt)"]
-    as19_median = g.quantile(0.50)
-    as19_std = g.std()
-    as19_low = g.quantile(0.05)
-    as19_high = g.quantile(0.95)
-
-    as19_ctrl_median = df_ctrl.groupby(by="Year")["Mass (Gt)"].quantile(0.50)
-
-    fig = plt.figure(num="historical", clear=True)
-    ax = fig.add_subplot(111)
-
-    as19_ci = ax.fill_between(
-        as19_median.index,
-        as19_low,
-        as19_high,
-        color="0.6",
-        alpha=1.0,
-        linewidth=0.0,
-        zorder=-11,
-        label="AS19 90% c.i.",
-    )
-
-    as19_ci = ax.fill_between(
-        as19_median.index,
-        as19_low,
-        as19_high,
-        color="0.4",
-        alpha=1.0,
-        linewidth=0.0,
-        zorder=-10,
-        label="AS19 90% c.i.",
-    )
-
-    imbie_fill = ax.fill_between(
-        imbie["Year"],
-        imbie["Mass (Gt)"] - 1 * imbie["Mass uncertainty (Gt)"],
-        imbie["Mass (Gt)"] + 1 * imbie["Mass uncertainty (Gt)"],
-        color=imbie_sigma_color,
-        alpha=0.5,
-        linewidth=0,
-    )
-    imbie_fill.set_zorder(5)
-    imbie_line = ax.plot(
-        imbie["Year"],
-        imbie["Mass (Gt)"],
-        "-",
-        color=imbie_signal_color,
-        linewidth=imbie_signal_lw,
-        label="Observed (IMBIE)",
-    )
-
-    l_es_median = ax.plot(
-        as19_median.index,
-        as19_median,
-        color="k",
-        linewidth=0.6,
-        label="Median(Ensemble)",
-    )
-    l_ctrl_median = ax.plot(
-        as19_ctrl_median.index,
-        as19_ctrl_median,
-        color="k",
-        linewidth=0.6,
-        linestyle="dashed",
-        label="Median(CTRL)",
-    )
-
-    ax.axhline(0, color="k", linestyle="dotted", linewidth=0.6)
-
-    legend = ax.legend(handles=[imbie_line[0], l_es_median[0], l_ctrl_median[0], as19_ci], loc="lower left")
-    legend.get_frame().set_linewidth(0.0)
-    legend.get_frame().set_alpha(0.0)
-
-    ax.set_xlabel("Year")
-    ax.set_ylabel(f"Cumulative mass change\nsince {proj_start} (Gt)")
-
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
-    ax_sle = ax.twinx()
-    ax_sle.set_ylabel(f"Contribution to sea-level \nsince {proj_start} (cm SLE)")
-    ax_sle.set_ylim(-ymin * gt2cmSLE, -ymax * gt2cmSLE)
-
-    set_size(5, 2)
-
-    fig.savefig(out_filename, bbox_inches="tight")
-
-
 def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
     """
     Plot historical simulations and observations
@@ -168,7 +64,7 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
 
     xmin = 2008
     xmax = 2020
-    ymin = -10000
+    ymin = -7500
     ymax = 1000
 
     as19_ctrl_median = df_ctrl.groupby(by="Year")["Mass (Gt)"].quantile(0.50)
@@ -228,22 +124,23 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
         label="Resampled 90% c.i.",
     )
 
-    imbie_fill = ax.fill_between(
+    imbie_ci = ax.fill_between(
         imbie["Year"],
         imbie["Mass (Gt)"] - 1 * imbie["Mass uncertainty (Gt)"],
         imbie["Mass (Gt)"] + 1 * imbie["Mass uncertainty (Gt)"],
         color=imbie_sigma_color,
         alpha=0.75,
         linewidth=0,
+        label="Observed uncertainty",
     )
-    imbie_fill.set_zorder(5)
+    imbie_ci.set_zorder(5)
 
     imbie_line = ax.plot(
         imbie["Year"],
         imbie["Mass (Gt)"],
         "-",
         color=imbie_signal_color,
-        linewidth=imbie_signal_lw,
+        linewidth=signal_lw,
         label="Observed (IMBIE)",
         zorder=20,
     )
@@ -251,30 +148,30 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
     l_es_median = ax.plot(
         as19_median.index,
         as19_median,
-        color="#756bb1",
-        linewidth=0.75,
+        color="#fd8d3c",
+        linewidth=signal_lw,
         label="Median(AS19 Ensemble)",
     )
     l_es_calib_median = ax.plot(
         as19_calib_median.index,
         as19_calib_median,
-        color="#3182bd",
-        linewidth=0.75,
+        color="#6baed6",
+        linewidth=signal_lw,
         label="Median(Calibrated Ensemble)",
     )
     l_es_resampled_median = ax.plot(
         as19_resampled_median.index,
         as19_resampled_median,
         color="k",
-        linewidth=0.75,
+        linewidth=signal_lw,
         label="Median(Resampled Ensemble)",
     )
     l_ctrl_median = ax.plot(
         as19_ctrl_median.index,
         as19_ctrl_median,
-        color="#756bb1",
+        color="#fd8d3c",
         linestyle="dashed",
-        linewidth=0.75,
+        linewidth=signal_lw,
         label="Median(AS19 CTRL)",
     )
 
@@ -287,6 +184,7 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
             l_es_median[0],
             l_es_calib_median[0],
             l_es_resampled_median[0],
+            imbie_ci,
             as19_ci,
             as19_ci_calib,
             as19_ci_resampled,
@@ -309,13 +207,14 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
     fig.savefig(out_filename, bbox_inches="tight")
 
 
-def plot_partitioning(out_filename, df, df_calib, df_ctrl, imbie):
+def plot_partitioning(out_filename, df, df_ctrl, imbie):
 
     fig, axs = plt.subplots(2, 1, sharex="col", figsize=[4.75, 3.5])
     fig.subplots_adjust(hspace=0.1, wspace=0.25)
 
     for k, v in enumerate(["SMB", "D"]):
-        g = df.groupby(by="Year")[f"{v} (Gt/yr)"]
+        as19 = df[df["Ensemble"] == "AS19"]
+        g = as19.groupby(by="Year")[f"{v} (Gt/yr)"]
         as19_median = g.quantile(0.50)
         as19_std = g.std()
         as19_low = g.quantile(0.05)
@@ -326,14 +225,15 @@ def plot_partitioning(out_filename, df, df_calib, df_ctrl, imbie):
             as19_median.index,
             as19_low,
             as19_high,
-            color="0.6",
-            alpha=0.5,
+            color="0.8",
+            alpha=01.0,
             linewidth=0.0,
             zorder=-11,
             label="AS19 90% c.i.",
         )
 
-        g = df_calib.groupby(by="Year")[f"{v} (Gt/yr)"]
+        calib = df[df["Ensemble"] == "Calibrated"]
+        g = calib.groupby(by="Year")[f"{v} (Gt/yr)"]
         as19_calib_median = g.quantile(0.50)
         as19_calib_std = g.std()
         as19_calib_low = g.quantile(0.05)
@@ -343,60 +243,96 @@ def plot_partitioning(out_filename, df, df_calib, df_ctrl, imbie):
             as19_calib_median.index,
             as19_calib_low,
             as19_calib_high,
-            color="0.4",
-            alpha=0.5,
+            color="0.6",
+            alpha=1.0,
             linewidth=0.0,
             zorder=-10,
             label="Calibrated 90% c.i.",
         )
 
-        axs[k].fill_between(
+        resampled = df[df["Ensemble"] == "Resampled"]
+        g = resampled.groupby(by="Year")[f"{v} (Gt/yr)"]
+        as19_resampled_median = g.quantile(0.50)
+        as19_resampled_std = g.std()
+        as19_resampled_low = g.quantile(0.05)
+        as19_resampled_high = g.quantile(0.95)
+
+        as19_resampled_ci = axs[k].fill_between(
+            as19_resampled_median.index,
+            as19_resampled_low,
+            as19_resampled_high,
+            color="0.4",
+            alpha=1.0,
+            linewidth=0.0,
+            zorder=-10,
+            label="Resampled 90% c.i.",
+        )
+
+        imbie_ci = axs[k].fill_between(
             imbie["Year"],
             imbie[f"{v} (Gt/yr)"] - 1 * imbie[f"{v} uncertainty (Gt/yr)"],
             imbie[f"{v} (Gt/yr)"] + 1 * imbie[f"{v} uncertainty (Gt/yr)"],
             color=imbie_sigma_color,
             alpha=0.5,
             linewidth=0,
+            label="Observed uncertainty",
         )
 
         axs[k].plot(
             imbie["Year"],
             imbie[f"{v} (Gt/yr)"],
             color=imbie_signal_color,
-            linewidth=imbie_signal_lw,
+            linewidth=signal_lw,
             linestyle="solid",
         )
 
         l_es_median = axs[k].plot(
             as19_median.index,
             as19_median,
-            color="#08519c",
-            linewidth=0.8,
+            color="#fd8d3c",
+            linewidth=signal_lw,
             label="Median(AS19 Ensemble)",
         )
         l_ctrl_median = axs[k].plot(
             as19_ctrl_median.index,
             as19_ctrl_median,
-            color="#08519c",
-            linewidth=0.8,
+            color="#fd8d3c",
+            linewidth=signal_lw,
             linestyle="dashed",
             label="Median(AS19 CTRL)",
         )
         l_es_calib_median = axs[k].plot(
             as19_calib_median.index,
             as19_calib_median,
+            color="#6baed6",
+            linewidth=signal_lw,
+            label="Median(Calibrated Ensemble)",
+        )
+        l_es_resampled_median = axs[k].plot(
+            as19_resampled_median.index,
+            as19_resampled_median,
             color="k",
-            linewidth=0.8,
+            linewidth=signal_lw,
             label="Median(Calibrated Ensemble)",
         )
         axs[k].set_ylabel(f"{v} (Gt/yr)")
 
-    imbie_line = mlines.Line2D([], [], color=imbie_signal_color, linewidth=imbie_signal_lw, label="IMBIE")
+    imbie_line = mlines.Line2D([], [], color=imbie_signal_color, linewidth=signal_lw, label="Observed (IMBIE)")
 
-    legend = axs[1].legend(
-        handles=[imbie_line, l_es_median[0], l_ctrl_median[0], l_es_calib_median[0], as19_ci, as19_calib_ci],
+    legend = axs[0].legend(
+        handles=[
+            imbie_line,
+            l_ctrl_median[0],
+            l_es_median[0],
+            l_es_calib_median[0],
+            l_es_resampled_median[0],
+            imbie_ci,
+            as19_ci,
+            as19_calib_ci,
+            as19_resampled_ci,
+        ],
         loc="lower left",
-        ncol=2,
+        ncol=3,
     )
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
@@ -486,20 +422,22 @@ def resample_ensemble_by_data(imbie_calib_period, as19_calib_period, rcps, fudge
     return as19_resampled
 
 
-secpera = 3.15569259747e7
-
-simulated_signal_lw = 0.3
-simulated_signal_color = "#bdbdbd"
-imbie_signal_lw = 0.75
-imbie_signal_color = "#005a32"
+signal_lw = 0.75
+imbie_signal_color = "#238b45"
 imbie_sigma_color = "#a1d99b"
 
+secpera = 3.15569259747e7
 gt2cmSLE = 1.0 / 362.5 / 10.0
 
 rcps = [26, 45, 85]
 rcp_col_dict = {85: "#990002", 45: "#5492CD", 26: "#003466"}
 rcp_shade_col_dict = {85: "#F4A582", 45: "#92C5DE", 26: "#4393C3"}
 rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
+palette_dict = {"AS19": "0.75", "Calibrated": "0.5", "Resampled": "0.25"}
+
+# cm = sns.color_palette("ch:s=-.2,r=.6", n_colors=6, as_cmap=False).as_hex()
+# cm = sns.color_palette("flare", n_colors=3, as_cmap=False).as_hex()
+# palette_dict = {"AS19": cm[0], "Calibrated": cm[1], "Resampled": cm[2]}
 
 calibration_start = 2010
 calibration_end = 2020
@@ -566,12 +504,11 @@ if __name__ == "__main__":
     year = 2100
     plot_sle_pdfs(f"sle_pdf_resampled_{year}.pdf", all_df, year=year)
 
-    # plot_partitioning("historical_partitioning_as19_resampled.pdf", all_df, as19_ctrl, imbie)
-    plot_historical_with_calib("historical_calib_resampled.pdf", all_df, as19_ctrl, imbie)
+    plot_partitioning("historical_partitioning.pdf", all_df, as19_ctrl, imbie)
+    plot_historical_with_calib("historical.pdf", all_df, as19_ctrl, imbie)
 
     all_2100_df = all_df[(all_df["Year"] == year)]
 
-    palette = ["0.75", "0.5", "0.25"]
     fig, axs = plt.subplots(4, 4, figsize=[6.2, 6.2])
     fig.subplots_adjust(hspace=0.1, wspace=0.1)
 
@@ -580,11 +517,11 @@ if __name__ == "__main__":
         x="GCM",
         hue="Ensemble",
         common_norm=False,
-        palette=palette,
+        palette=palette_dict.values(),
         bins=[-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
         stat="density",
         multiple="dodge",
-        lw=0.8,
+        linewidth=0.8,
         ax=axs[0, 0],
     )
 
@@ -594,8 +531,8 @@ if __name__ == "__main__":
         hue="Ensemble",
         common_grid=False,
         common_norm=False,
-        palette=palette,
-        lw=0.8,
+        palette=palette_dict.values(),
+        linewidth=0.8,
         ax=axs[1, 0],
     )
     sns.kdeplot(
@@ -604,8 +541,8 @@ if __name__ == "__main__":
         hue="Ensemble",
         common_grid=False,
         common_norm=False,
-        palette=palette,
-        lw=0.8,
+        palette=palette_dict.values(),
+        linewidth=0.8,
         ax=axs[0, 1],
     )
     sns.kdeplot(
@@ -614,8 +551,8 @@ if __name__ == "__main__":
         hue="Ensemble",
         common_grid=False,
         common_norm=False,
-        palette=palette,
-        lw=0.8,
+        palette=palette_dict.values(),
+        linewidth=0.8,
         ax=axs[1, 1],
     )
     sns.kdeplot(
@@ -624,8 +561,8 @@ if __name__ == "__main__":
         hue="Ensemble",
         common_grid=False,
         common_norm=False,
-        palette=palette,
-        lw=0.8,
+        palette=palette_dict.values(),
+        linewidth=0.8,
         ax=axs[2, 1],
     )
     sns.histplot(
@@ -633,11 +570,11 @@ if __name__ == "__main__":
         x="OCM",
         hue="Ensemble",
         common_norm=False,
-        palette=palette,
+        palette=palette_dict.values(),
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        lw=0.8,
+        linewidth=0.8,
         ax=axs[0, 2],
     )
     sns.histplot(
@@ -645,11 +582,11 @@ if __name__ == "__main__":
         x="OCS",
         hue="Ensemble",
         common_norm=False,
-        palette=palette,
+        palette=palette_dict.values(),
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        lw=0.8,
+        linewidth=0.8,
         ax=axs[1, 2],
     )
     sns.histplot(
@@ -657,11 +594,11 @@ if __name__ == "__main__":
         x="TCT",
         hue="Ensemble",
         common_norm=False,
-        palette=palette,
+        palette=palette_dict.values(),
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        lw=0.8,
+        linewidth=0.8,
         ax=axs[2, 2],
     )
     sns.kdeplot(
@@ -670,8 +607,8 @@ if __name__ == "__main__":
         hue="Ensemble",
         common_grid=False,
         common_norm=False,
-        palette=palette,
-        lw=0.8,
+        palette=palette_dict.values(),
+        linewidth=0.8,
         ax=axs[3, 2],
     )
     sns.kdeplot(
@@ -680,8 +617,8 @@ if __name__ == "__main__":
         hue="Ensemble",
         common_grid=False,
         common_norm=False,
-        palette=palette,
-        lw=0.8,
+        palette=palette_dict.values(),
+        linewidth=0.8,
         ax=axs[0, 3],
     )
     sns.kdeplot(
@@ -690,8 +627,8 @@ if __name__ == "__main__":
         hue="Ensemble",
         common_grid=False,
         common_norm=False,
-        palette=palette,
-        lw=0.8,
+        palette=palette_dict.values(),
+        linewidth=0.8,
         ax=axs[1, 3],
     )
 
@@ -707,9 +644,9 @@ if __name__ == "__main__":
     for ax in axs.reshape(-1):
         ax.legend([], [], frameon=False)
 
-    l_as19 = mlines.Line2D([], [], color=palette[0], linewidth=0.8, label="AS19")
-    l_calib = mlines.Line2D([], [], color=palette[1], linewidth=0.8, label="Calibrated")
-    l_resampled = mlines.Line2D([], [], color=palette[2], linewidth=0.8, label="Resampled")
+    l_as19 = mlines.Line2D([], [], color=palette_dict["AS19"], linewidth=0.8, label="AS19")
+    l_calib = mlines.Line2D([], [], color=palette_dict["Calibrated"], linewidth=0.8, label="Calibrated")
+    l_resampled = mlines.Line2D([], [], color=palette_dict["Resampled"], linewidth=0.8, label="Resampled")
     legend = axs[2, 0].legend(handles=[l_as19, l_calib, l_resampled], loc="center left", title="Ensemble")
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
