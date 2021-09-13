@@ -65,7 +65,7 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
     xmin = 2008
     xmax = 2020
     ymin = -7500
-    ymax = 1000
+    ymax = 500
 
     as19_ctrl_median = df_ctrl.groupby(by="Year")["Mass (Gt)"].quantile(0.50)
 
@@ -131,7 +131,7 @@ def plot_historical_with_calib(out_filename, df, df_ctrl, imbie):
         color=imbie_sigma_color,
         alpha=0.75,
         linewidth=0,
-        label="Observed uncertainty",
+        label="Observational uncertainty",
     )
     imbie_ci.set_zorder(5)
 
@@ -275,7 +275,7 @@ def plot_partitioning(out_filename, df, df_ctrl, imbie):
             color=imbie_sigma_color,
             alpha=0.5,
             linewidth=0,
-            label="Observed uncertainty",
+            label="Observational uncertainty",
         )
 
         axs[k].plot(

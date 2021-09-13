@@ -82,7 +82,7 @@ if __name__ == "__main__":
         samples_file=validation_samples_file,
         target_file=validation_target_file,
         thinning_factor=1,
-        threshold=500e3,
+        threshold=1e6,
     )
     X = validation_dataset.X
     F = validation_dataset.Y
@@ -125,9 +125,7 @@ if __name__ == "__main__":
                 _,
             ) = validation_data_loader.all_data[idx]
             # X_val_unscaled = X_val * validation_dataset.X_std + validation_dataset.X_mean
-            F_val = (
-                (F_val + state_dict["F_mean"]).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
-            )
+            F_val = (F_val + F_mean).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
             F_pred = e(X_val, add_mean=True).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
             mask = 10 ** F_val <= 1
             F_p = np.ma.array(data=10 ** F_pred, mask=mask)
