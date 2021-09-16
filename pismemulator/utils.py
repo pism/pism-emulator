@@ -39,11 +39,18 @@ def load_imbie(proj_start=2008):
     http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx
 
     """
-    imbie_df = pd.read_excel(
-        "http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
-        sheet_name="Greenland Ice Mass",
-        engine="openpyxl",
-    )
+    try:
+        imbie_df = pd.read_excel(
+            "http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
+            sheet_name="Greenland Ice Mass",
+            engine="openpyxl",
+        )
+    except:
+        imbie_df = pd.read_excel(
+            "imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
+            sheet_name="Greenland Ice Mass",
+            engine="openpyxl",
+        )
     imbie = imbie_df[
         [
             "Year",
