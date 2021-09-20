@@ -3,19 +3,13 @@
 # Copyright (C) 2020 Andy Aschwanden
 
 import matplotlib.lines as mlines
-from netCDF4 import Dataset as NC
 import numpy as np
 import os
 import pylab as plt
 import pandas as pd
 import seaborn as sns
-from pathlib import Path
-import statsmodels.api as sm
-
-import matplotlib as mpl
-import matplotlib.cm as cmx
-import matplotlib.colors as colors
-
+from functools import reduce
+from itertools import cycle
 
 from pismemulator.utils import load_imbie
 from scipy.interpolate import interp1d
@@ -154,23 +148,25 @@ def plot_historical(
     fig.savefig(out_filename, bbox_inches="tight")
 
 
-def plot_projection(out_filename, simulated=None, ensemble="Resampled", quantiles=[0.05, 0.95], violins=False):
+def plot_projection(
+    out_filename, simulated=None, ensemble="Resampled", quantiles=[0.05, 0.95], bars=False, quantile_df=None
+):
     """
     Plot historical simulations and observations
     """
 
     xmin = 2008
     xmax = 2100
-    ymax = 40
-    ymin = 0
+    ymax = 45
+    ymin = -0.5
 
-    if violins:
+    if bars:
         fig, axs = plt.subplots(
             1,
-            2,
-            sharey="col",
-            figsize=[6, 3],
-            gridspec_kw=dict(width_ratios=[8, 1]),
+            4,
+            sharey="row",
+            figsize=[6.2, 2.0],
+            gridspec_kw=dict(width_ratios=[20, 1, 1, 1]),
         )
         fig.subplots_adjust(hspace=0.1, wspace=0.05)
         ax = axs[0]
@@ -190,7 +186,7 @@ def plot_projection(out_filename, simulated=None, ensemble="Resampled", quantile
                 sim_median,
                 color=rcp_col_dict[rcp],
                 linewidth=signal_lw,
-                label=f"{rcp_dict[rcp]}",
+                label=f"{rcp_dict[rcp]} (median)",
             )
             legend_handles.append(l_es_median[0])
 
@@ -202,10 +198,10 @@ def plot_projection(out_filename, simulated=None, ensemble="Resampled", quantile
                 sim_low,
                 sim_high,
                 color=rcp_shade_col_dict[rcp],
-                alpha=0.4,
+                alpha=0.2,
                 linewidth=0.5,
                 zorder=-11,
-                label=f"{rcp_dict[rcp]} {credibility_interval}% c.i.",
+                label=f"{rcp_dict[rcp]} ({credibility_interval}% c.i.)",
             )
             legend_handles.append(ci)
             if len(quantiles) == 4:
@@ -217,10 +213,10 @@ def plot_projection(out_filename, simulated=None, ensemble="Resampled", quantile
                     sim_low,
                     sim_high,
                     color=rcp_shade_col_dict[rcp],
-                    alpha=1.0,
+                    alpha=0.4,
                     linewidth=0.5,
                     zorder=-11,
-                    label=f"{rcp_dict[rcp]} {credibility_interval}% c.i.",
+                    label=f"{rcp_dict[rcp]} ({credibility_interval}% c.i.)",
                 )
                 legend_handles.append(ci)
 
@@ -237,21 +233,77 @@ def plot_projection(out_filename, simulated=None, ensemble="Resampled", quantile
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
 
-    if violins:
-        sns.violinplot(
-            data=simulated[(simulated["Ensemble"] == ensemble) & (simulated["Year"] == 2100)],
-            x="RCP",
-            y="SLE (cm)",
-            hue="RCP",
-            palette=rcp_col_dict.values(),
-            ax=axs[1],
-        )
+    if bars:
+        width = 1.0
+        hatches = cycle(["", "///"])
+        q_df = make_quantile_df(simulated[simulated["Year"] == 2100], quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
+        for k, rcp in enumerate(rcps):
+            df = q_df[q_df["RCP"] == rcp]
+            for e, ens in enumerate(["Resampled", "AS19"]):
+                hatch = next(hatches)
+                s_df = df[df["Ensemble"] == ens]
+                rect1 = plt.Rectangle(
+                    (e, s_df[[0.05]].values[0][0]),
+                    width,
+                    s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
+                    color=rcp_shade_col_dict[rcp],
+                    alpha=0.2,
+                    lw=0,
+                )
+                rect2 = plt.Rectangle(
+                    (e, s_df[[0.16]].values[0][0]),
+                    width,
+                    s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
+                    color=rcp_shade_col_dict[rcp],
+                    alpha=0.4,
+                    lw=0,
+                )
+                rect3 = plt.Rectangle(
+                    (e, s_df[[0.05]].values[0][0]),
+                    width,
+                    s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
+                    color="k",
+                    alpha=1.0,
+                    fill=False,
+                    lw=0,
+                    hatch=hatch,
+                )
+                rect4 = plt.Rectangle(
+                    (e, s_df[[0.16]].values[0][0]),
+                    width,
+                    s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
+                    color="k",
+                    alpha=1.0,
+                    fill=False,
+                    lw=0,
+                    hatch=hatch,
+                )
+                axs[k + 1].add_patch(rect1)
+                axs[k + 1].add_patch(rect2)
+                axs[k + 1].add_patch(rect3)
+                axs[k + 1].add_patch(rect4)
+                axs[k + 1].plot(
+                    [e, e + width],
+                    [s_df[[0.50]].values[0][0], s_df[[0.50]].values[0][0]],
+                    color=rcp_col_dict[rcp],
+                    lw=signal_lw,
+                )
+
         sns.despine(ax=axs[1], left=True, bottom=True)
         axs[1].set_ylabel(None)
         axs[1].axes.xaxis.set_visible(False)
         axs[1].axes.yaxis.set_visible(False)
 
-    set_size(5, 2)
+        sns.despine(ax=axs[2], left=True, bottom=True)
+        axs[2].set_ylabel(None)
+        axs[2].axes.xaxis.set_visible(False)
+        axs[2].axes.yaxis.set_visible(False)
+
+        sns.despine(ax=axs[3], left=True, bottom=True)
+        axs[3].set_ylabel(None)
+        axs[3].axes.xaxis.set_visible(False)
+        axs[3].axes.yaxis.set_visible(False)
+
     fig.savefig(out_filename, bbox_inches="tight")
 
 
@@ -353,7 +405,7 @@ def plot_sle_pdfs(
     ensembles=["AS19", "Resampled"],
 ):
 
-    df = df[df["Year"] == 2100]
+    df = df[df["Year"] == year]
     # Draw a nested violinplot and split the violins for easier comparison
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -578,6 +630,59 @@ def resample_ensemble_by_data(observed_calib_period, as19_calib_period, rcps, fu
     return as19_resampled
 
 
+def make_quantile_table(q_df):
+    ensembles = ["AS19", "Calibrated", "Resampled"]
+    table_header = """
+    \\begin{table}
+    \centering
+    \caption{This is a table with scientific results.}
+    \medskip
+    \\begin{tabular}{p{.085\\textwidth}p{.145\\textwidth}p{.11\\textwidth}p{.145\\textwidth}p{.11\\textwidth}p{.145\\textwidth}p{.11\\textwidth}}
+    \hline
+    """
+
+    ls = []
+
+    f = "".join([f"& \multicolumn{{2}}{{l}}{{{ens}}}" for ens in ensembles])
+    ls.append(f"{f} \\\\ \n")
+    ls.append("\cline{2-7} \\\\ \n")
+    f = "& {:.0f}th [{:.0f}th, {:.0f}th] & [{:.0f}th, {:.0f}th] ".format(*(np.array(quantiles) * 100))
+    g = f * len(ensembles)
+    ls.append(f" {g} \\\\ \n")
+    q_str = "& percentiles " * len(ensembles) * 2
+    ls.append(f"{q_str} \\\\ \n")
+    sle_str = "& (cm SLE) " * len(ensembles * 2)
+    ls.append(f"{sle_str} \\\\ \n")
+    ls.append("\hline")
+
+    for rcp in rcps:
+        a = q_df[q_df["RCP"] == rcp]
+        f = "& ".join(
+            [
+                "{:.0f} [{:.0f}, {:.0f}] & [{:.0f}, {:.0f}]".format(*a[a["Ensemble"] == ens].values[0][2::])
+                for ens in ensembles
+            ]
+        )
+        ls.append(f"{rcp_dict[rcp]} & {f} \\\\ \n")
+
+    table_footer = """
+    \hline
+    \end{tabular}
+    \end{table}
+    """
+
+    print("".join([table_header, *ls, table_footer]))
+
+
+def make_quantile_df(df, quantiles):
+    q_dfs = [
+        df.groupby(by=["RCP", "Ensemble"])["SLE (cm)"].quantile(q).reset_index().rename(columns={"SLE (cm)": q})
+        for q in quantiles
+    ]
+
+    return reduce(lambda df1, df2: pd.merge(df1, df2, on=["RCP", "Ensemble"]), q_dfs)
+
+
 signal_lw = 1.0
 obs_signal_color = "#238b45"
 obs_sigma_color = "#a1d99b"
@@ -622,6 +727,7 @@ params = {
     "legend.fontsize": fontsize,
     "lines.markersize": markersize,
     "font.size": fontsize,
+    "hatch.linewidth": 0.25,
 }
 
 plt.rcParams.update(params)
@@ -660,9 +766,14 @@ if __name__ == "__main__":
 
     year = 2100
     all_2100_df = all_df[(all_df["Year"] == year)]
+    quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
+    q_df = make_quantile_df(all_2100_df, quantiles)
 
     plot_partitioning("historical_partitioning.pdf", simulated=all_df, observed=observed)
     plot_historical("historical.pdf", simulated=all_df, observed=observed)
     plot_projection("projection.pdf", simulated=all_df, quantiles=[0.05, 0.16, 0.84, 0.95])
+    plot_projection("projection_bars.pdf", simulated=all_df, quantiles=[0.05, 0.16, 0.84, 0.95], bars=True)
     plot_sle_pdfs(f"sle_pdf_resampled_{year}.pdf", all_df, year=year)
     plot_histograms(f"histograms_{year}.pdf", all_2100_df)
+
+    make_quantile_table(q_df)
