@@ -3,6 +3,7 @@
 # Copyright (C) 2020 Andy Aschwanden
 
 import matplotlib.lines as mlines
+from matplotlib.patches import Patch
 import numpy as np
 import os
 import pylab as plt
@@ -57,7 +58,7 @@ def plot_historical(
     observed=None,
     ensembles=["AS19", "Resampled"],
     quantiles=[0.05, 0.95],
-    sigma=1,
+    sigma=2,
     simulated_ctrl=None,
 ):
     """
@@ -69,14 +70,12 @@ def plot_historical(
     ymin = -10000
     ymax = 500
 
-    credibility_interval = int(np.round((quantiles[-1] - quantiles[0]) * 100))
-
-    fig = plt.figure(num="historical", clear=True)
+    fig = plt.figure(num="historical", clear=True, figsize=[4.6, 1.6])
     ax = fig.add_subplot(111)
 
-    legend_handles = []
     if simulated is not None:
-        for ens in ensembles:
+        for r, ens in enumerate(ensembles):
+            legend_handles = []
             sim = simulated[simulated["Ensemble"] == ens]
             g = sim.groupby(by="Year")["Mass (Gt)"]
             sim_median = g.quantile(0.50)
@@ -88,7 +87,7 @@ def plot_historical(
                 sim_median,
                 color=ts_median_palette_dict[ens],
                 linewidth=signal_lw,
-                label=f"Median({ens} Ensemble)",
+                label="Median",
             )
             legend_handles.append(l_es_median[0])
             ci = ax.fill_between(
@@ -99,18 +98,26 @@ def plot_historical(
                 alpha=1.0,
                 linewidth=0.0,
                 zorder=-11,
-                label=f"{ens} {credibility_interval}% c.i.",
+                label=f"{quantiles[0]*100:.0f}-{quantiles[-1]*100:.0f}%",
             )
             legend_handles.append(ci)
 
+            legend = ax.legend(
+                handles=legend_handles, loc="lower left", ncol=1, title=ens, bbox_to_anchor=(r * 0.2, 0.01)
+            )
+            legend.get_frame().set_linewidth(0.0)
+            legend.get_frame().set_alpha(0.0)
+            ax.add_artist(legend)
+
     if observed is not None:
+        legend_handles = []
         obs_line = ax.plot(
             observed["Year"],
             observed["Mass (Gt)"],
             "-",
             color=obs_signal_color,
             linewidth=signal_lw,
-            label="Observed (IMBIE)",
+            label="Mean",
             zorder=20,
         )
         legend_handles.append(obs_line[0])
@@ -122,18 +129,22 @@ def plot_historical(
             alpha=0.75,
             linewidth=0,
             zorder=5,
-            label=f"Observational uncertainty ({sigma}-sigma)",
+            label=f"{sigma}-sigma",
         )
         legend_handles.append(obs_ci)
 
-    ax.axhline(0, color="k", linestyle="dotted", linewidth=0.6)
+        legend = ax.legend(
+            handles=legend_handles,
+            loc="lower left",
+            ncol=1,
+            title="Observed (IMBIE)",
+            bbox_to_anchor=((r + 1) * 0.2, 0.01),
+        )
+        legend.get_frame().set_linewidth(0.0)
+        legend.get_frame().set_alpha(0.0)
+        ax.add_artist(legend)
 
-    legend = ax.legend(
-        handles=legend_handles,
-        loc="lower left",
-    )
-    legend.get_frame().set_linewidth(0.0)
-    legend.get_frame().set_alpha(0.0)
+    ax.axhline(0, color="k", linestyle="dotted", linewidth=0.6)
 
     ax.set_xlabel("Year")
     ax.set_ylabel(f"Cumulative mass change\nsince {proj_start} (Gt)")
@@ -144,7 +155,6 @@ def plot_historical(
     ax_sle.set_ylabel(f"Contribution to sea-level \nsince {proj_start} (cm SLE)")
     ax_sle.set_ylim(-ymin * gt2cmSLE, -ymax * gt2cmSLE)
 
-    set_size(5, 2)
     fig.savefig(out_filename, bbox_inches="tight")
 
 
@@ -165,18 +175,18 @@ def plot_projection(
             1,
             4,
             sharey="row",
-            figsize=[6.2, 2.0],
+            figsize=[6.0, 2.0],
             gridspec_kw=dict(width_ratios=[20, 1, 1, 1]),
         )
         fig.subplots_adjust(hspace=0.1, wspace=0.05)
         ax = axs[0]
     else:
-        fig = plt.figure(num="historical", clear=True)
+        fig = plt.figure(figsize=[5.2, 2.0])
         ax = fig.add_subplot(111)
 
-    legend_handles = []
     if simulated is not None:
-        for rcp in rcps:
+        for r, rcp in enumerate(rcps):
+            legend_handles = []
             sim = simulated[(simulated["Ensemble"] == ensemble) & (simulated["RCP"] == rcp)]
             g = sim.groupby(by="Year")["SLE (cm)"]
             sim_median = g.quantile(0.50)
@@ -186,7 +196,7 @@ def plot_projection(
                 sim_median,
                 color=rcp_col_dict[rcp],
                 linewidth=signal_lw,
-                label=f"{rcp_dict[rcp]} (median)",
+                label="Median",
             )
             legend_handles.append(l_es_median[0])
 
@@ -201,11 +211,10 @@ def plot_projection(
                 alpha=0.2,
                 linewidth=0.5,
                 zorder=-11,
-                label=f"{rcp_dict[rcp]} ({credibility_interval}% c.i.)",
+                label=f"{quantiles[0]*100:.0f}-{quantiles[-1]*100:.0f}%",
             )
             legend_handles.append(ci)
             if len(quantiles) == 4:
-                credibility_interval = int(np.round((quantiles[-2] - quantiles[1]) * 100))
                 sim_low = g.quantile(quantiles[1])
                 sim_high = g.quantile(quantiles[-2])
                 ci = ax.fill_between(
@@ -216,16 +225,16 @@ def plot_projection(
                     alpha=0.4,
                     linewidth=0.5,
                     zorder=-11,
-                    label=f"{rcp_dict[rcp]} ({credibility_interval}% c.i.)",
+                    label=f"{quantiles[1]*100:.0f}-{quantiles[-2]*100:.0f}%",
                 )
                 legend_handles.append(ci)
 
-    legend = ax.legend(
-        handles=legend_handles,
-        loc="upper left",
-    )
-    legend.get_frame().set_linewidth(0.0)
-    legend.get_frame().set_alpha(0.0)
+            legend = ax.legend(
+                handles=legend_handles, title=rcp_dict[rcp], loc="upper left", bbox_to_anchor=(r * 0.2, 0.99)
+            )
+            legend.get_frame().set_linewidth(0.0)
+            legend.get_frame().set_alpha(0.0)
+            ax.add_artist(legend)
 
     ax.set_xlabel("Year")
     ax.set_ylabel(f"Contribution to sea-level\nsince {proj_start} (cm SLE)")
@@ -235,7 +244,7 @@ def plot_projection(
 
     if bars:
         width = 1.0
-        hatches = cycle(["", "///"])
+        hatches = cycle(["", "////"])
         q_df = make_quantile_df(simulated[simulated["Year"] == 2100], quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
         for k, rcp in enumerate(rcps):
             df = q_df[q_df["RCP"] == rcp]
@@ -267,6 +276,7 @@ def plot_projection(
                     fill=False,
                     lw=0,
                     hatch=hatch,
+                    label=ens,
                 )
                 rect4 = plt.Rectangle(
                     (e, s_df[[0.16]].values[0][0]),
@@ -288,6 +298,13 @@ def plot_projection(
                     color=rcp_col_dict[rcp],
                     lw=signal_lw,
                 )
+
+        legend_elements = [
+            Patch(facecolor=None, edgecolor="k", fill=None, lw=0.25, hatch="////", label="AS19"),
+        ]
+        legend_2 = ax.legend(handles=legend_elements, loc="upper right")
+        legend_2.get_frame().set_linewidth(0.0)
+        legend_2.get_frame().set_alpha(0.0)
 
         sns.despine(ax=axs[1], left=True, bottom=True)
         axs[1].set_ylabel(None)
@@ -313,7 +330,7 @@ def plot_partitioning(
     observed=None,
     ensembles=["AS19", "Resampled"],
     quantiles=[0.05, 0.95],
-    sigma=1,
+    sigma=2,
     simulated_ctrl=None,
 ):
 
@@ -323,17 +340,15 @@ def plot_partitioning(
     if observed is not None:
         ncol += 1
 
-    credibility_interval = int(np.round((quantiles[-1] - quantiles[0]) * 100))
-
-    fig, axs = plt.subplots(2, 1, sharex="col", figsize=[5, 3])
+    fig, axs = plt.subplots(3, 1, sharex="col", figsize=[5.0, 3.8])
     fig.subplots_adjust(hspace=0.1, wspace=0.25)
 
-    legend_handles = []
     if simulated is not None:
-        for ens in ensembles:
+        for r, ens in enumerate(ensembles):
+            legend_handles = []
             sim = simulated[simulated["Ensemble"] == ens]
-            for k, v in enumerate(["SMB", "D"]):
-                g = sim.groupby(by="Year")[f"{v} (Gt/yr)"]
+            for k, (v, u) in enumerate(zip(["Mass", "SMB", "D"], ["Gt", "Gt/yr", "Gt/yr"])):
+                g = sim.groupby(by="Year")[f"{v} ({u})"]
                 sim_median = g.quantile(0.50)
                 sim_low = g.quantile(quantiles[0])
                 sim_high = g.quantile(quantiles[-1])
@@ -343,7 +358,7 @@ def plot_partitioning(
                     sim_median,
                     color=ts_median_palette_dict[ens],
                     linewidth=signal_lw,
-                    label=f"Median({ens} Ensemble)",
+                    label=f"Median",
                 )
                 ci = axs[k].fill_between(
                     sim_median.index,
@@ -353,48 +368,66 @@ def plot_partitioning(
                     alpha=1.0,
                     linewidth=0.0,
                     zorder=-11,
-                    label=f"{ens} {credibility_interval}% c.i.",
+                    label=f"{quantiles[0]*100:.0f}-{quantiles[-1]*100:.0f}%",
                 )
                 if k == 0:
                     legend_handles.append(l_es_median[0])
                     legend_handles.append(ci)
 
+            legend = axs[0].legend(
+                handles=legend_handles, loc="lower left", ncol=1, title=ens, bbox_to_anchor=(r * 0.2, 0.01)
+            )
+            legend.get_frame().set_linewidth(0.0)
+            legend.get_frame().set_alpha(0.0)
+            axs[0].add_artist(legend)
+
     if observed is not None:
-        for k, v in enumerate(["SMB", "D"]):
+        legend_handles = []
+        for k, (v, u) in enumerate(zip(["Mass", "SMB", "D"], ["Gt", "Gt/yr", "Gt/yr"])):
             obs_line = axs[k].plot(
                 observed["Year"],
-                observed[f"{v} (Gt/yr)"],
+                observed[f"{v} ({u})"],
                 "-",
                 color=obs_signal_color,
                 linewidth=signal_lw,
-                label="Observed (IMBIE)",
+                label="Mean",
                 zorder=20,
             )
             obs_ci = axs[k].fill_between(
                 observed["Year"],
-                observed[f"{v} (Gt/yr)"] - sigma * observed[f"{v} uncertainty (Gt/yr)"],
-                observed[f"{v} (Gt/yr)"] + sigma * observed[f"{v} uncertainty (Gt/yr)"],
+                observed[f"{v} ({u})"] - sigma * observed[f"{v} uncertainty ({u})"],
+                observed[f"{v} ({u})"] + sigma * observed[f"{v} uncertainty ({u})"],
                 color=obs_sigma_color,
                 alpha=0.75,
                 linewidth=0,
                 zorder=5,
-                label=f"Observational uncertainty ({sigma}-sigma)",
+                label=f"{sigma}-sigma",
             )
             if k == 0:
                 legend_handles.append(obs_line[0])
                 legend_handles.append(obs_ci)
 
-    for k, v in enumerate(["SMB", "D"]):
-        axs[k].set_ylabel(f"{v} (Gt/yr)")
-    legend = axs[0].legend(handles=legend_handles, loc="upper right", ncol=ncol)
-    legend.get_frame().set_linewidth(0.0)
-    legend.get_frame().set_alpha(0.0)
+        legend = axs[0].legend(
+            handles=legend_handles,
+            loc="upper left",
+            ncol=1,
+            title="Observed (IMBIE)",
+            bbox_to_anchor=((r + 1) * 0.2, 0.99),
+        )
+        legend.get_frame().set_linewidth(0.0)
+        legend.get_frame().set_alpha(0.0)
+        axs[0].add_artist(legend)
 
-    axs[k].set_xlim(2010, 2020)
-    axs[0].set_ylim(-250, 1250)
-    axs[1].set_ylim(-1500, 0)
+    for k, (v, u) in enumerate(
+        zip([f"Contribution to sea-level \nsince {proj_start}", "SMB", "D"], ["cm SLE", "Gt/yr", "Gt/yr"])
+    ):
+        axs[k].set_ylabel(f"{v} ({u})")
 
-    set_size(5, 3)
+    axs[-1].set_xlim(2010, 2020)
+    axs[0].set_ylim(-10000, 500)
+    axs[1].set_ylim(-250, 1250)
+    axs[2].set_ylim(-1500, 0)
+
     fig.savefig(out_filename, bbox_inches="tight")
 
 
@@ -430,7 +463,7 @@ def plot_sle_pdfs(
 
 
 def plot_histograms(out_filename, df):
-    fig, axs = plt.subplots(4, 4, figsize=[6.2, 4.0])
+    fig, axs = plt.subplots(4, 4, figsize=[6.0, 4.0])
     fig.subplots_adjust(hspace=0.1, wspace=0.1)
 
     sns.histplot(
@@ -668,6 +701,7 @@ def make_quantile_table(q_df):
     table_footer = """
     \hline
     \end{tabular}
+    \end{tab:sle}
     \end{table}
     """
 
@@ -777,3 +811,17 @@ if __name__ == "__main__":
     plot_histograms(f"histograms_{year}.pdf", all_2100_df)
 
     make_quantile_table(q_df)
+
+    q_df["90%"] = q_df[0.95] - q_df[0.05]
+    q_df["68%"] = q_df[0.84] - q_df[0.16]
+    q_df.astype({"90%": np.float32, "68%": np.float32})
+
+    q_abs = q_df[q_df["Ensemble"] == "Resampled"][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
+        q_df["Ensemble"] == "AS19"
+    ][["90%", "68%", 0.5]].reset_index(drop=True)
+
+    q_rel = q_abs / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True) * 100
+
+    q_abs["RCP"] = rcps
+    q_rel["RCP"] = rcps
+    print(q_rel)
