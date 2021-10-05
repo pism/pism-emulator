@@ -188,7 +188,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--num_posterior_samples", type=int, default=100000)
+    parser.add_argument("--num_posterior_samples", type=int, default=1000000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
     parser.add_argument("--thinning_factor", type=int, default=1)
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     models = []
 
     for model_index in range(num_models):
-        emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
+        emulator_file = join(emulator_dir, "emulator_{0:03d}.h5".format(model_index))
         state_dict = torch.load(emulator_file)
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],

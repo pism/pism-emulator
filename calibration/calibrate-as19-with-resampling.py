@@ -760,13 +760,13 @@ rcp_shade_col_dict = {26: "#4393C3", 45: "#92C5DE", 85: "#F4A582"}
 rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
 palette_dict = {
     "AS19": "0.9",
-    "Flow Calib.": "#deebf7",
+    "Flow Calib.": "#9ecae1",
     "AS19 Resampled": "#fee6ce",
     "Flow+Mass Calib.": "0.60",
 }
 ts_fill_palette_dict = {
     "AS19": "0.90",
-    "Flow Calib.": "#deebf7",
+    "Flow Calib.": "#9ecae1",
     "AS19 Resampled": "#fee6ce",
     "Flow+Mass Calib.": "0.60",
 }
