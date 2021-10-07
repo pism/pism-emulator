@@ -387,7 +387,7 @@ class PISMDataModule(pl.LightningDataModule):
         self.F_mean = F_mean
         self.n_eigenglaciers = n_eigenglaciers
 
-    def get_eigenglaciers(self, cutoff=0.999):
+    def get_eigenglaciers(self, cutoff=0.999, q=100):
         print("Generating eigenglaciers")
         F = self.F
         omegas = self.omegas
@@ -395,7 +395,7 @@ class PISMDataModule(pl.LightningDataModule):
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
         Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-        U, S, V = torch.svd_lowrank(Z @ F_bar)
+        U, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
         lamda = S ** 2 / (n_grid_points)
 
         cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
