@@ -2,17 +2,19 @@
 
 from argparse import ArgumentParser
 
-from glob import glob
 import numpy as np
 import os
 from os.path import join
 from scipy.special import gamma
 from scipy.stats import beta
 
+from pathlib import Path
 
 import pandas as pd
 import pylab as plt
 
+from matplotlib.ticker import NullFormatter
+from matplotlib.patches import Polygon
 
 fontsize = 6
 lw = 0.65
@@ -50,14 +52,12 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=50)
-    parser.add_argument("--num_posterior_samples", type=int, default=100000)
+    parser.add_argument("--num_posterior_samples", type=int, default=1000000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
 
     args = parser.parse_args()
 
     emulator_dir = args.emulator_dir
-    n_models = args.num_models
     n_posterior_samples = args.num_posterior_samples
 
     samples_file = args.samples_file
@@ -70,9 +70,6 @@ if __name__ == "__main__":
 
     n_parameters = X.shape[1]
 
-    from matplotlib.ticker import NullFormatter
-    from matplotlib.patches import Polygon
-
     X_min = X.min(axis=0) - 1e-3
     X_max = X.max(axis=0) + 1e-3
     # Eq 52
@@ -81,7 +78,6 @@ if __name__ == "__main__":
     alpha_b = 3.0
     beta_b = 3.0
     X_prior = beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters)) * (X_max - X_min) + X_min
-    X_hat = X_prior * X_std + X_mean
     X_hat = X_prior
 
     color_post_0 = "#00B25F"
@@ -91,18 +87,17 @@ if __name__ == "__main__":
     color_other = "#20484E0"
 
     X_list = []
-
-    for model_index in range(n_models):
-        m_file = f"{emulator_dir}/posterior_samples/X_posterior_model_{model_index:03}.npy"
+    p = Path(f"{emulator_dir}/posterior_samples/")
+    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
         print(f"Loading {m_file}")
         X_p = np.load(open(m_file, "rb"))
-        X_list.append(X_p)
+        X_df = pd.DataFrame(data=X_p * X_std + X_mean, columns=X_keys)
+        X_df["Model"] = m
+        X_list.append(X_df)
 
-    X_posterior = np.vstack(X_list)
-    X_posterior = X_posterior * X_std + X_mean
+    df.to_csv(f"{emulator_dir}/X_posterior.csv.gz", compression="infer")
 
-    df = pd.DataFrame(data=X_posterior, columns=X_keys)
-    df.to_csv(f"{emulator_dir}/X_posterior.csv.gz")
+    X_posterior = df.drop(columns=["Model"]).values
 
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
