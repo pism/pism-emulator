@@ -36,6 +36,25 @@ from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
 from pismemulator.utils import plot_validation
 
 
+def plot_eigenglaciers(data_loader, model_index, emulator_dir, nrows=2, ncols=3, figsize=(3.2, 4)):
+
+    import pylab as plt
+
+    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
+
+    lamda_scaled = lamda / lamda.sum() * 100
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize)
+    for k, ax in enumerate(axs.ravel()):
+        data = V_hat[:, k].reshape(dataset.ny, dataset.nx)
+        mask = data == 0
+        c = ax.imshow(np.ma.array(data=data, mask=mask), origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3)
+
+        ax.text(0.05, -0.025, f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%", transform=ax.transAxes)
+        ax.axis("off")
+    fig.subplots_adjust(wspace=0.05, hspace=0.05)
+    fig.savefig(f"{emulator_dir}/eigenglaciers_{model_index}.pdf")
+
+
 if __name__ == "__main__":
     __spec__ = None
 
@@ -138,7 +157,7 @@ if __name__ == "__main__":
         train_loader = data_loader.train_loader
         val_loader = data_loader.val_loader
 
-    trainer.fit(e, train_loader, val_loader)
-    torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
+    # trainer.fit(e, train_loader, val_loader)
+    # torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
-    plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
+    # plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)

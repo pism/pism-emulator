@@ -208,10 +208,13 @@ class PISMDataset(torch.utils.data.Dataset):
         return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         ds = xr.open_dataset(self.target_file)
+        data = ds.variables[self.target_var]
+        mask = data.isnull()
         data = np.nan_to_num(
-            ds.variables[self.target_var].values[::thinning_factor, ::thinning_factor],
+            data.values[::thinning_factor, ::thinning_factor],
             epsilon,
         )
+        mask = mask[::thinning_factor, ::thinning_factor].values
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         ds.close()
 
@@ -221,6 +224,7 @@ class PISMDataset(torch.utils.data.Dataset):
             Y_target = torch.from_numpy(Y_target)
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d
+        self.mask_2d = mask
         self.grid_resolution = grid_resolution
 
     def load_data(self):
@@ -379,31 +383,43 @@ class PISMDataModule(pl.LightningDataModule):
         )
         self.val_loader = val_loader
 
-    def prepare_data(self):
-        V_hat, F_bar, F_mean = self.get_eigenglaciers()
+    def prepare_data(self, **kwargs):
+        V_hat, F_bar, F_mean = self.get_eigenglaciers(**kwargs)
         n_eigenglaciers = V_hat.shape[1]
         self.V_hat = V_hat
         self.F_bar = F_bar
         self.F_mean = F_mean
         self.n_eigenglaciers = n_eigenglaciers
 
-    def get_eigenglaciers(self, cutoff=0.999, q=100):
+    def get_eigenglaciers(self, **kwargs):
         print("Generating eigenglaciers")
+        defaultKwargs = {"cutoff": 1.0, "q": 100, "svd_lowrank": True, "eigenvalues": False}
+        kwargs = {**defaultKwargs, **kwargs}
         F = self.F
         omegas = self.omegas
         n_grid_points = F.shape[1]
         F_mean = (F * omegas).sum(axis=0)
         F_bar = F - F_mean  # Eq. 28
-        Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-        U, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
-        lamda = S ** 2 / (n_grid_points)
+        if kwargs["svd_lowrank"]:
+            Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
+            U, S, V = torch.svd_lowrank(Z @ F_bar, q=kwargs["q"])
+            lamda = S ** 2 / (n_grid_points)
+        else:
+            S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
-        cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
+            lamda, V = torch.eig(S, eigenvectors=True)  # Eq. 26
+            lamda = lamda[:, 0].squeeze()
+
+        cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"])
+        print(f"...using the first {cutoff_index+1} eigen values")
         lamda_truncated = lamda.detach()[:cutoff_index]
         V = V.detach()[:, :cutoff_index]
         V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))
 
-        return V_hat, F_bar, F_mean
+        if kwargs["eigenvalues"]:
+            return V_hat, F_bar, F_mean, lamda
+        else:
+            return V_hat, F_bar, F_mean
 
     def train_dataloader(self):
         return self.train_loader
