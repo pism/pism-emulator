@@ -25,7 +25,6 @@ requirements = [
     "SALib",
     "pandas>=0.18.1",
     "matplotlib>=2.2.2",
-    "GPy>=1.9.0",
     "seaborn>=0.8",
     "xarray",
 ]
@@ -40,7 +39,7 @@ setup(
     author_email="andy.aschwanden@gmail.com",
     description=("Emulators for PISM"),
     license="GPL 3.0",
-    keywords="machine-learning gaussian-processes PISM",
+    keywords="machine-learning pytorch PISM",
     url="https://github.com/pism/pism-emulator",
     project_urls={
         "Bug Tracker": "https://github.com/pism/pism-emulator/issues",

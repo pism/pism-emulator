@@ -170,10 +170,27 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
     cb_ax2 = fig.add_axes([0.905, 0.15, 0.025, 0.15])
     plt.colorbar(c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical")
     fig.subplots_adjust(wspace=0, hspace=0.02)
-    fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}_test.pdf", bbox_inches="tight")
+    fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
 
     if return_fig:
         return fig
+
+
+def plot_eigenglaciers(data_loader, model_index, emulator_dir, nrows=2, ncols=3, figsize=(3.2, 4)):
+
+    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
+
+    lamda_scaled = lamda / lamda.sum() * 100
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize)
+    for k, ax in enumerate(axs.ravel()):
+        data = V_hat[:, k].reshape(dataset.ny, dataset.nx)
+        mask = data == 0
+        c = ax.imshow(np.ma.array(data=data, mask=mask), origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3)
+
+        ax.text(0.05, -0.025, f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%", transform=ax.transAxes)
+        ax.axis("off")
+    fig.subplots_adjust(wspace=0.05, hspace=0.05)
+    fig.savefig(f"{emulator_dir}/eigenglaciers_{model_index}.pdf")
 
 
 def calc_bic(X, Y):
