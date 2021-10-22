@@ -208,7 +208,7 @@ class PISMDataset(torch.utils.data.Dataset):
         return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         ds = xr.open_dataset(self.target_file)
-        data = ds.variables[self.target_var]
+        data = ds.variables[self.target_var].squeeze()
         mask = data.isnull()
         data = np.nan_to_num(
             data.values[::thinning_factor, ::thinning_factor],
@@ -218,6 +218,8 @@ class PISMDataset(torch.utils.data.Dataset):
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         ds.close()
 
+        ids = (mask == False).nonzero()
+        data = data[ids]
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
         if not return_numpy:
@@ -411,7 +413,7 @@ class PISMDataModule(pl.LightningDataModule):
             lamda = lamda[:, 0].squeeze()
 
         cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"])
-        print(f"...using the first {cutoff_index+1} eigen values")
+        print(f"...using the first {cutoff_index} eigen values")
         lamda_truncated = lamda.detach()[:cutoff_index]
         V = V.detach()[:, :cutoff_index]
         V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))
