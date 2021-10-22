@@ -138,7 +138,7 @@ if __name__ == "__main__":
         train_loader = data_loader.train_loader
         val_loader = data_loader.val_loader
 
-    # trainer.fit(e, train_loader, val_loader)
-    # torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
+    trainer.fit(e, train_loader, val_loader)
+    torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
-    # plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
+    plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
