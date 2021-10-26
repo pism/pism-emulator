@@ -33,7 +33,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
-from pismemulator.utils import plot_validation
+from pismemulator.utils import plot_eigenglaciers, plot_validation
 
 
 if __name__ == "__main__":
@@ -111,6 +111,8 @@ if __name__ == "__main__":
     F_mean = data_loader.F_mean
     F_train = data_loader.F_bar
 
+    plot_eigenglaciers(dataset, data_loader, model_line, emulator_dir)
+
     if checkpoint:
         checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         callbacks.append(checkpoint_callback)
@@ -142,4 +144,3 @@ if __name__ == "__main__":
     torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
     plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
-    plot_eigenglaciers(dataset, data_loader, model_line, emulator_dir)
