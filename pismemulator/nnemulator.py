@@ -176,6 +176,7 @@ class PISMDataset(torch.utils.data.Dataset):
         samples_file="path/to/file",
         target_file=None,
         target_var="velsurf_mag",
+        training_var="velsurf_mag",
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
@@ -189,13 +190,13 @@ class PISMDataset(torch.utils.data.Dataset):
         self.target_var = target_var
         self.thinning_factor = thinning_factor
         self.threshold = threshold
+        self.training_var = training_var
         self.epsilon = epsilon
         self.log_y = log_y
         self.normalize_x = normalize_x
         self.return_numpy = return_numpy
+        self.load_target()
         self.load_data()
-        if target_file is not None:
-            self.load_target()
 
     def __getitem__(self, i):
         return tuple(d[i] for d in [self.X, self.Y])
@@ -218,8 +219,8 @@ class PISMDataset(torch.utils.data.Dataset):
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         ds.close()
 
-        ids = (mask == False).nonzero()
-        data = data[ids]
+        idx = (mask == False).nonzero()
+        data = data[idx]
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
         if not return_numpy:
@@ -228,6 +229,8 @@ class PISMDataset(torch.utils.data.Dataset):
         self.Y_target_2d = Y_target_2d
         self.mask_2d = mask
         self.grid_resolution = grid_resolution
+        self.sparse_idx_2d = idx
+        self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
 
     def load_data(self):
         epsilon = self.epsilon
@@ -235,6 +238,7 @@ class PISMDataset(torch.utils.data.Dataset):
         thinning_factor = self.thinning_factor
 
         identifier_name = "id"
+        training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
         samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
@@ -267,17 +271,19 @@ class PISMDataset(torch.utils.data.Dataset):
         self.nx = nx
         self.ny = ny
 
-        response = np.zeros((m_samples, ny * nx))
+        response = np.zeros((m_samples, len(self.sparse_idx_1d)))
 
         print("  Loading data sets...")
         training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
-            data = np.nan_to_num(
-                ds.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].flatten(),
-                epsilon,
+            data = np.squeeze(
+                np.nan_to_num(
+                    ds.variables[training_var].values[:, ::thinning_factor, ::thinning_factor],
+                    epsilon,
+                )
             )
-            response[idx, :] = data
+            response[idx, :] = data[self.sparse_idx_2d].flatten()
             ds.close()
 
         p = response.max(axis=1) < self.threshold

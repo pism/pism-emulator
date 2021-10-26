@@ -176,16 +176,18 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         return fig
 
 
-def plot_eigenglaciers(data_loader, model_index, emulator_dir, nrows=2, ncols=3, figsize=(3.2, 4)):
+def plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, nrows=2, ncols=3, figsize=(3.2, 4)):
 
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
 
     lamda_scaled = lamda / lamda.sum() * 100
     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize)
     for k, ax in enumerate(axs.ravel()):
-        data = V_hat[:, k].reshape(dataset.ny, dataset.nx)
-        mask = data == 0
-        c = ax.imshow(np.ma.array(data=data, mask=mask), origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3)
+        V = V_hat[:, k]
+        data = np.zeros((dataset.ny, dataset.nx))
+        data.put(dataset.sparse_idx_1d, V)
+        eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
+        c = ax.imshow(eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3)
 
         ax.text(0.05, -0.025, f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%", transform=ax.transAxes)
         ax.axis("off")

@@ -142,3 +142,4 @@ if __name__ == "__main__":
     torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index:03d}.h5")
 
     plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
+    plot_eigenglaciers(dataset, data_loader, model_line, emulator_dir)
