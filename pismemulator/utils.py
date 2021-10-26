@@ -108,16 +108,22 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
             _,
         ) = data_loader.all_data[idx]
         X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
-        F_val = (F_val + F_mean).detach().numpy().reshape(dataset.ny, dataset.nx)
-        F_pred = e(X_val, add_mean=True).detach().numpy().reshape(dataset.ny, dataset.nx)
-        mask = 10 ** F_val <= 1
-        F_p = np.ma.array(data=10 ** F_pred, mask=mask)
-        F_v = np.ma.array(data=10 ** F_val, mask=mask)
+        F_val = (F_val + F_mean).detach().numpy()
+        F_pred = e(X_val, add_mean=True).detach().numpy()
+
+        F_val_2d = np.zeros((dataset.ny, dataset.nx))
+        F_val_2d.put(dataset.sparse_idx_1d, F_val)
+
+        F_pred_2d = np.zeros((dataset.ny, dataset.nx))
+        F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
+
+        F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
+        F_v = np.ma.array(data=10 ** F_val_2d, mask=dataset.mask_2d)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
         corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
-        c1 = axs[0, k].imshow(F_val, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        axs[1, k].imshow(F_pred, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        c2 = axs[2, k].imshow(F_pred - F_val, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm")
+        c1 = axs[0, k].imshow(F_val_2d, origin="lower", vmin=0, vmax=3, cmap=cmap)
+        axs[1, k].imshow(F_pred_2d, origin="lower", vmin=0, vmax=3, cmap=cmap)
+        c2 = axs[2, k].imshow(F_pred_2d - F_val_2d, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm")
         axs[1, k].text(
             0.01,
             0.01,
