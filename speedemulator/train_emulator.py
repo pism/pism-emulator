@@ -111,7 +111,7 @@ if __name__ == "__main__":
     F_mean = data_loader.F_mean
     F_train = data_loader.F_bar
 
-    plot_eigenglaciers(dataset, data_loader, model_line, emulator_dir)
+    plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir)
 
     if checkpoint:
         checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
