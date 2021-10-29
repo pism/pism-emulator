@@ -23,6 +23,8 @@ from math import sqrt
 from matplotlib.colors import LogNorm
 import numpy as np
 import pandas as pd
+from os import mkdir
+from os.path import isdir, join
 from pyDOE import lhs
 import pylab as plt
 from SALib.sample import saltelli
@@ -93,7 +95,7 @@ def load_imbie(proj_start=2008):
     return imbie
 
 
-def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, return_fig=False):
+def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=False, return_fig=False):
     """
     Plot target (PISM) and predicted (Emulator) speeds for validation
     """
@@ -109,7 +111,9 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
             _,
         ) = data_loader.all_data[idx]
         X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
+
         F_val = (F_val + F_mean).detach().numpy()
+        # F_val = (F_val).detach().numpy()
         F_pred = e(X_val, add_mean=True).detach().numpy()
 
         F_val_2d = np.zeros((dataset.ny, dataset.nx))
@@ -118,8 +122,8 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         F_pred_2d = np.zeros((dataset.ny, dataset.nx))
         F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
 
-        F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
         F_v = np.ma.array(data=10 ** F_val_2d, mask=dataset.mask_2d)
+        F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
         corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
         c1 = axs[0, k].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
@@ -190,7 +194,16 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
     cb_ax.set_yticklabels([1, 10, 100, 1000])
     cb_ax2.tick_params(labelsize=7)
     fig.subplots_adjust(wspace=0.05, hspace=0.15)
-    fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
+    if validation:
+        mode = "val"
+    else:
+        mode = "train"
+
+    fig_dir = f"{emulator_dir}/{mode}"
+    if not isdir(fig_dir):
+        mkdir(fig_dir)
+
+    fig.savefig(join(fig_dir, f"speed_emulator_{mode}_{model_index}.pdf"))
 
     if return_fig:
         return fig

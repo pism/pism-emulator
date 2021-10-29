@@ -98,7 +98,7 @@ class MALASampler(object):
             return log_pi
 
     def draw_sample(self, mu, cov, eps=1e-10):
-        L = torch.cholesky(cov + eps * torch.eye(cov.shape[0], device=device))
+        L = torch.linalg.cholesky(cov + eps * torch.eye(cov.shape[0], device=device))
         return mu + L @ torch.randn(L.shape[0], device=device)
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):

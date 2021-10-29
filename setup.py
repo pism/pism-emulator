@@ -24,6 +24,7 @@ requirements = [
     "PyDOE",
     "SALib",
     "pandas>=0.18.1",
+    "pathlib",
     "matplotlib>=2.2.2",
     "seaborn>=0.8",
     "xarray",

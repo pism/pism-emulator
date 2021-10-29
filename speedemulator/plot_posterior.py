@@ -90,8 +90,11 @@ if __name__ == "__main__":
     p = Path(f"{emulator_dir}/posterior_samples/")
     for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
         print(f"Loading {m_file}")
-        X_p = np.load(open(m_file, "rb"))
-        X_list.append(X_p)
+        try:
+            X_p = np.load(open(m_file, "rb"))
+            X_list.append(X_p)
+        except:
+            pass
 
     X_posterior = np.vstack(X_list)
     X_posterior = X_posterior * X_std + X_mean
@@ -171,7 +174,7 @@ if __name__ == "__main__":
                 axs[i, j].remove()
 
     keys = X_keys
-    keys = ["SIAe", "SSAe", "$\delta$", "$b_{base} (m)$", "$b_{range} (m)$", "$q$"]
+    # keys = ["SIAe", "SSAe", "$\delta$", "$b_{base} (m)$", "$b_{range} (m)$", "$q$"]
 
     for i, ax in enumerate(axs[:, 0]):
         ax.set_ylabel(keys[i])

@@ -37,17 +37,12 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../tests/training_data")
-    parser.add_argument("--validation_data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument("--validation_samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
     parser.add_argument(
         "--target_file",
-        default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
-    )
-    parser.add_argument(
-        "--validation_target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
     )
     parser.add_argument("--train_size", type=float, default=1.0)
@@ -58,54 +53,46 @@ if __name__ == "__main__":
     hparams = vars(args)
 
     data_dir = args.data_dir
-    validation_data_dir = args.validation_data_dir
     emulator_dir = args.emulator_dir
     num_models = args.num_models
     samples_file = args.samples_file
-    validation_samples_file = args.validation_samples_file
     target_file = args.target_file
-    validation_target_file = args.validation_target_file
     train_size = args.train_size
     thinning_factor = args.thinning_factor
 
-    # data_loader = PISMDataModule(X, F, omegas, omegas_0)
+    torch.manual_seed(0)
 
-    # data_loader.prepare_data()
-    # data_loader.setup(stage="fit")
-    # n_eigenglaciers = data_loader.n_eigenglaciers
-    # V_hat = data_loader.V_hat
-    # F_mean = data_loader.F_mean
-    # F_train = data_loader.F_bar
-
-    validation_dataset = PISMDataset(
-        data_dir=validation_data_dir,
-        samples_file=validation_samples_file,
-        target_file=validation_target_file,
+    dataset = PISMDataset(
+        data_dir=data_dir,
+        samples_file=samples_file,
+        target_file=target_file,
         thinning_factor=1,
         threshold=1e6,
     )
-    X = validation_dataset.X
-    F = validation_dataset.Y
-    n_samples = validation_dataset.n_samples
+    X = dataset.X
+    F = dataset.Y
+    n_samples = dataset.n_samples
 
-    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
-    omegas = omegas.type_as(X)
-    omegas_0 = torch.ones_like(omegas) / len(omegas)
-
-    validation_data_loader = PISMDataModule(
-        X,
-        F,
-        omegas,
-        omegas_0,
-    )
-
-    validation_data_loader.prepare_data()
-    validation_data_loader.setup(stage="fit")
-    F_mean = validation_data_loader.F_mean
-
-    for model_index in range(num_models):
+    for model_index in range(1, num_models):
         print(f"Loading emulator {model_index}")
-        emulator_file = join(emulator_dir, f"emulator_{0:03d}.h5".format(model_index))
+        np.random.seed(model_index)
+
+        omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
+        omegas = omegas.type_as(X)
+        omegas_0 = torch.ones_like(omegas) / len(omegas)
+
+        data_loader = PISMDataModule(
+            X,
+            F,
+            omegas,
+            omegas_0,
+        )
+
+        data_loader.prepare_data(q=19)
+        data_loader.setup(stage="fit")
+        F_mean = data_loader.F_mean
+
+        emulator_file = join(emulator_dir, "emulator_{0:03d}.h5".format(model_index))
         state_dict = torch.load(emulator_file)
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],
@@ -117,19 +104,30 @@ if __name__ == "__main__":
         )
         e.load_state_dict(state_dict)
         e.eval()
-        for idx in range(len(validation_data_loader.all_data)):
+
+        plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=True)
+
+        for idx in range(len(data_loader.all_data)):
             (
                 X_val,
                 F_val,
                 _,
                 _,
-            ) = validation_data_loader.all_data[idx]
-            # X_val_unscaled = X_val * validation_dataset.X_std + validation_dataset.X_mean
-            F_val = (F_val + F_mean).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
-            F_pred = e(X_val, add_mean=True).detach().numpy().reshape(validation_dataset.ny, validation_dataset.nx)
-            mask = 10 ** F_val <= 1
-            F_p = np.ma.array(data=10 ** F_pred, mask=mask)
-            F_v = np.ma.array(data=10 ** F_val, mask=mask)
+            ) = data_loader.all_data[idx]
+
+            X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
+            F_val = (F_val + F_mean).detach().numpy()
+            # F_val = (F_val).detach().numpy()
+            F_pred = e(X_val, add_mean=True).detach().numpy()
+
+            F_val_2d = np.zeros((dataset.ny, dataset.nx))
+            F_val_2d.put(dataset.sparse_idx_1d, F_val)
+
+            F_pred_2d = np.zeros((dataset.ny, dataset.nx))
+            F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
+
+            F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
+            F_v = np.ma.array(data=10 ** F_val_2d, mask=dataset.mask_2d)
             rmse = np.sqrt(mean_squared_error(F_p, F_v))
-            corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
+            corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
             print(model_index, idx, rmse, corr)
