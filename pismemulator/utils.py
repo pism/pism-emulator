@@ -20,6 +20,7 @@
 
 import collections
 from math import sqrt
+from matplotlib.colors import LogNorm
 import numpy as np
 import pandas as pd
 from pyDOE import lhs
@@ -98,7 +99,7 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
     """
     e.eval()
     cmap = "viridis"
-    fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.2, 8))
+    fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8))
     r_idx = np.random.choice(len(data_loader.all_data), size=4, replace=False)
     for k, idx in enumerate(r_idx):
         (
@@ -120,33 +121,33 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
         F_v = np.ma.array(data=10 ** F_val_2d, mask=dataset.mask_2d)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
-        corr = np.corrcoef(F_val.flatten(), F_pred.flatten())[0, 1]
-        c1 = axs[0, k].imshow(F_val_2d, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        axs[1, k].imshow(F_pred_2d, origin="lower", vmin=0, vmax=3, cmap=cmap)
-        c2 = axs[2, k].imshow(F_pred_2d - F_val_2d, origin="lower", vmin=-0.1, vmax=0.1, cmap="coolwarm")
+        corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
+        c1 = axs[0, k].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+        axs[1, k].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+        c2 = axs[2, k].imshow(F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm")
         axs[1, k].text(
             0.01,
-            0.01,
+            0.00,
             f"r={corr:.3f}",
-            c="white",
-            size=6,
+            c="k",
+            size=7,
             transform=axs[1, k].transAxes,
         )
-        axs[0, k].text(
+        axs[-1, k].text(
             0.01,
-            0.01,
+            -0.51,
             "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]),
-            c="white",
-            size=6,
-            transform=axs[0, k].transAxes,
+            c="k",
+            size=7,
+            transform=axs[-1, k].transAxes,
         )
 
         axs[2, k].text(
             0.01,
-            0.01,
+            0.00,
             f"RMSE: {rmse:.0f} m/yr",
             c="k",
-            size=6,
+            size=7,
             transform=axs[2, k].transAxes,
         )
 
@@ -155,27 +156,40 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         axs[2, k].set_axis_off()
     axs[0, 0].text(
         0.01,
-        0.95,
+        0.98,
         "PISM",
-        c="white",
-        size=6,
+        c="k",
+        size=7,
         weight="bold",
         transform=axs[0, 0].transAxes,
     )
     axs[1, 0].text(
         0.01,
-        0.95,
+        0.98,
         "Emulator",
-        c="white",
-        size=6,
+        c="k",
+        size=7,
         weight="bold",
         transform=axs[1, 0].transAxes,
     )
-    cb_ax = fig.add_axes([0.905, 0.525, 0.025, 0.15])
-    plt.colorbar(c1, cax=cb_ax, shrink=1, label="log speed (m/yr)", orientation="vertical")
-    cb_ax2 = fig.add_axes([0.905, 0.15, 0.025, 0.15])
-    plt.colorbar(c2, cax=cb_ax2, shrink=1, label="log diff. (m/yr)", orientation="vertical")
-    fig.subplots_adjust(wspace=0, hspace=0.02)
+    axs[2, 0].text(
+        0.01,
+        0.98,
+        "PISM-Emulator",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[2, 0].transAxes,
+    )
+
+    cb_ax = fig.add_axes([0.88, 0.525, 0.025, 0.15])
+    plt.colorbar(c1, cax=cb_ax, shrink=0.9, label="speed (m/yr)", orientation="vertical", extend="both")
+    cb_ax2 = fig.add_axes([0.88, 0.15, 0.025, 0.15])
+    plt.colorbar(c2, cax=cb_ax2, shrink=0.9, label="diff. (m/yr)", orientation="vertical", extend="both")
+    cb_ax.tick_params(labelsize=7)
+    cb_ax.set_yticklabels([1, 10, 100, 1000])
+    cb_ax2.tick_params(labelsize=7)
+    fig.subplots_adjust(wspace=0.05, hspace=0.15)
     fig.savefig(f"{emulator_dir}/speed_emulator_val_{model_index}.pdf")
 
     if return_fig:
