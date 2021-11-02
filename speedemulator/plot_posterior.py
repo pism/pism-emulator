@@ -93,25 +93,25 @@ if __name__ == "__main__":
     color_other = "#20484E0"
 
     if args.posterior_file:
-        df = pd.read_csv(args.posterior_file)
-        X_posterior = df.values[:, 1::]
+        df = pd.read_csv(args.posterior_file).drop(columns=["Unnamed: 0"])
+        X_posterior = df.values
     else:
         X_list = []
         p = Path(f"{emulator_dir}/posterior_samples/")
         for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
             print(f"Loading {m_file}")
-            try:
-                X_p = np.load(open(m_file, "rb"))
-                X_list.append(X_p)
-            except:
-                pass
+            X_p = np.load(open(m_file, "rb")) * X_std + X_mean
+            model = m_file.name.split("_")[-1].split(".")[0]
+            df = pd.DataFrame(data=X_p.astype("float32"), columns=X_keys)
+            df["Model"] = int(model)
+            X_list.append(df)
 
-        X_posterior = np.vstack(X_list)
-        X_posterior = X_posterior * X_std + X_mean
+        X_posterior_file = f"{emulator_dir}/X_posterior.csv.gz"
+        print(f"Merging posteriors into dataframe and save to {X_posterior_file}")
+        df = pd.concat(X_list)
+        df.to_csv(X_posterior_file, compression="infer")
 
-        df = pd.DataFrame(data=X_posterior.astype("float32"), columns=X_keys)
-        df.to_csv(f"{emulator_dir}/X_posterior.csv.gz", compression="infer")
-
+    X_posterior = df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
@@ -161,8 +161,10 @@ if __name__ == "__main__":
                 X_hat_hist, b = np.histogram(X_hat[:, i], bins, density=True)
                 b = 0.5 * (b[1:] + b[:-1])
                 lw = 1
-                for X_model_posterior in X_list:
-                    X_model_posterior = X_model_posterior * X_std[i] + X_mean[i]
+                all_models = df["Model"].unique()
+                for m_model in all_models:
+                    m_df = df[df["Model"] == m_model].drop(columns=["Model"])
+                    X_model_posterior = m_df.values
                     X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
                     axs[i, j].plot(b, X_model_posterior_hist, color="0.5", linewidth=0.2, linestyle="solid", alpha=0.5)
 
@@ -174,7 +176,7 @@ if __name__ == "__main__":
                 )
 
                 if i == 1:
-                    legend = axs[i, j].legend(fontsize=6, loc="upper left")
+                    legend = axs[i, j].legend(fontsize=6, loc="lower left")
                     legend.get_frame().set_linewidth(0.0)
                     legend.get_frame().set_alpha(0.0)
 
