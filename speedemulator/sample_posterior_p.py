@@ -175,7 +175,10 @@ class MALASampler(object):
                 print("Saving samples for model {0:03d}".format(model_index))
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
-                np.save(open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"), X_posterior)
+                np.save(
+                    open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"),
+                    X_posterior.astype("float32"),
+                )
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 

@@ -16,6 +16,8 @@ import pylab as plt
 from matplotlib.ticker import NullFormatter
 from matplotlib.patches import Polygon
 
+from pismemulator.utils import param_keys_dict as keys_dict
+
 fontsize = 6
 lw = 0.65
 aspect_ratio = 1
@@ -46,7 +48,6 @@ params = {
 
 plt.rcParams.update(params)
 
-
 if __name__ == "__main__":
     __spec__ = None
 
@@ -54,6 +55,11 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_posterior_samples", type=int, default=1000000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument(
+        "--posterior_file",
+        help="Posterior file in CSV format. If not given, posterior will be calculated from npy files.",
+        default=None,
+    )
 
     args = parser.parse_args()
 
@@ -86,21 +92,25 @@ if __name__ == "__main__":
     color_ensemble = "#BA9B00"
     color_other = "#20484E0"
 
-    X_list = []
-    p = Path(f"{emulator_dir}/posterior_samples/")
-    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
-        print(f"Loading {m_file}")
-        try:
-            X_p = np.load(open(m_file, "rb"))
-            X_list.append(X_p)
-        except:
-            pass
+    if args.posterior_file:
+        df = pd.read_csv(args.posterior_file)
+        X_posterior = df.values[:, 1::]
+    else:
+        X_list = []
+        p = Path(f"{emulator_dir}/posterior_samples/")
+        for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
+            print(f"Loading {m_file}")
+            try:
+                X_p = np.load(open(m_file, "rb"))
+                X_list.append(X_p)
+            except:
+                pass
 
-    X_posterior = np.vstack(X_list)
-    X_posterior = X_posterior * X_std + X_mean
+        X_posterior = np.vstack(X_list)
+        X_posterior = X_posterior * X_std + X_mean
 
-    df = pd.DataFrame(data=X_posterior, columns=X_keys)
-    df.to_csv(f"{emulator_dir}/X_posterior.csv.gz", compression="infer")
+        df = pd.DataFrame(data=X_posterior.astype("float32"), columns=X_keys)
+        df.to_csv(f"{emulator_dir}/X_posterior.csv.gz", compression="infer")
 
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
@@ -173,14 +183,11 @@ if __name__ == "__main__":
             else:
                 axs[i, j].remove()
 
-    keys = X_keys
-    # keys = ["SIAe", "SSAe", "$\delta$", "$b_{base} (m)$", "$b_{range} (m)$", "$q$"]
-
     for i, ax in enumerate(axs[:, 0]):
-        ax.set_ylabel(keys[i])
+        ax.set_ylabel(keys_dict[keys[i]])
 
     for j, ax in enumerate(axs[-1, :]):
-        ax.set_xlabel(keys[j])
+        ax.set_xlabel(keys_dict[keys[j]])
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
         plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
         if j > 0:

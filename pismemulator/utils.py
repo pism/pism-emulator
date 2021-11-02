@@ -35,6 +35,17 @@ import sys
 
 np.random.seed(0)
 
+param_keys_dict = {
+    "SIAE": "$E_{\mathrm{SIA}}$",
+    "SSAN": "$n_{\mathrm{SSA}}$",
+    "TEFO": "$\delta$",
+    "PPQ": "$q$",
+    "PHIMIN": "$\phi_{\mathrm{min}}$",
+    "PHIMAX": "$\phi_{\mathrm{max}}$",
+    "ZMIN": "$z_{\mathrm{min}}$",
+    "ZMAX": "$z_{\mathrm{max}}$",
+}
+
 
 def load_imbie(proj_start=2008):
     """
