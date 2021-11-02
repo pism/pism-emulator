@@ -184,10 +184,10 @@ if __name__ == "__main__":
                 axs[i, j].remove()
 
     for i, ax in enumerate(axs[:, 0]):
-        ax.set_ylabel(keys_dict[keys[i]])
+        ax.set_ylabel(keys_dict[X_keys[i]])
 
     for j, ax in enumerate(axs[-1, :]):
-        ax.set_xlabel(keys_dict[keys[j]])
+        ax.set_xlabel(keys_dict[X_keys[j]])
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
         plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
         if j > 0:
