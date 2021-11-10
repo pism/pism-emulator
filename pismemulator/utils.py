@@ -220,7 +220,7 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         return fig
 
 
-def plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, nrows=2, ncols=3, figsize=(3.2, 4)):
+def plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, nrows=2, ncols=3, figsize=(3.2, 3.6)):
 
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
 
@@ -236,7 +236,12 @@ def plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, nrows=2,
         ax.text(0.05, -0.025, f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%", transform=ax.transAxes)
         ax.axis("off")
     fig.subplots_adjust(wspace=0.05, hspace=0.05)
-    fig.savefig(f"{emulator_dir}/eigenglaciers_{model_index}.pdf")
+    plt.tight_layout()
+    fig_dir = f"{emulator_dir}/eigenglaciers"
+    if not isdir(fig_dir):
+        mkdir(fig_dir)
+
+    fig.savefig(join(fig_dir, f"eigenglaciers_{model_index}.pdf"))
 
 
 def calc_bic(X, Y):
