@@ -88,13 +88,13 @@ if __name__ == "__main__":
 
     color_post_0 = "#00B25F"
     color_post_1 = "#132DD6"
-    color_prior = "#D81727"
+    color_prior = "#2171b5"
+    color_posterior = "k"
     color_ensemble = "#BA9B00"
     color_other = "#20484E0"
 
     if args.posterior_file:
         df = pd.read_csv(args.posterior_file).drop(columns=["Unnamed: 0"])
-        X_posterior = df.values
     else:
         X_list = []
         p = Path(f"{emulator_dir}/posterior_samples/")
@@ -123,9 +123,29 @@ if __name__ == "__main__":
         X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
         X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
+        ax.plot(b, X_hat_hist, color=color_prior, linewidth=0.8, label="Prior")
+
+        if i == 0:
+            legend = ax.legend(loc="upper left")
+            legend.get_frame().set_linewidth(0.0)
+        legend.get_frame().set_alpha(0.0)
+        m_key = df.drop(columns=["Model"]).keys()[i]
+        ax.set_xlabel(keys_dict[m_key])
+    fig.subplots_adjust(hspace=0.05, wspace=0.05)
+    fig.tight_layout()
+    fig.savefig(f"{emulator_dir}/prior.pdf")
+
+    fig, axs = plt.subplots(ncols=int(n_parameters / 2), nrows=2, figsize=(6.2, 2.5))
+    for i, ax in enumerate(fig.axes):
+        min_val = min(X[:, i].min(), X_posterior[:, i].min())
+        max_val = max(X[:, i].max(), X_posterior[:, i].max())
+        bins = np.linspace(min_val, max_val, 30)
+        X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
+        b = 0.5 * (b[1:] + b[:-1])
+        X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
         ax.plot(b, X_hat_hist, color=color_prior, linewidth=0.8, label="Prior", linestyle="dashed")
 
-        ax.plot(b, X_posterior_hist, color="black", linewidth=0.8, linestyle="solid", label="Posterior")
+        ax.plot(b, X_posterior_hist, color=color_posterior, linewidth=0.8, linestyle="solid", label="Posterior")
         if i == 0:
             legend = ax.legend(loc="upper left")
             legend.get_frame().set_linewidth(0.0)
