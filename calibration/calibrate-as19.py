@@ -250,7 +250,7 @@ def plot_projection(
     if bars is not None:
         width = 1.0
         legend_elements = []
-        hatch_pattern_dict = {"Flow+Mass Calib.": "", "Flow Calib.": "......", "AS19": "\\\\\\"}
+        hatch_pattern_dict = {"Flow+Mass Calib.": "\\\\\\", "Flow Calib.": "......", "AS19": ""}
         hatch_patterns = [hatch_pattern_dict[ensemble] for ensemble in bars]
         hatches = cycle(hatch_patterns)
         q_df = make_quantile_df(simulated[simulated["Year"] == 2100], quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
