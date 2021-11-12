@@ -860,6 +860,20 @@ if __name__ == "__main__":
         bars=["AS19"],
     )
     plot_projection(
+        "projection_flow_bars.pdf",
+        simulated=all_df,
+        ensemble="Flow Calib.",
+        quantiles=[0.05, 0.16, 0.84, 0.95],
+        bars=["AS19", "Flow Calib."],
+    )
+    plot_projection(
+        "projection_flowmass_bars.pdf",
+        simulated=all_df,
+        ensemble="Flow+Mass Calib.",
+        quantiles=[0.05, 0.16, 0.84, 0.95],
+        bars=["AS19", "Flow Calib.", "Flow+Mass Calib."],
+    )
+    plot_projection(
         "projection_calibrated_bars.pdf",
         simulated=all_df,
         quantiles=[0.05, 0.16, 0.84, 0.95],
