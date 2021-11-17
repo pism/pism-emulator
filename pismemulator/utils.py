@@ -44,6 +44,14 @@ param_keys_dict = {
     "PHIMAX": "$\phi_{\mathrm{max}}$",
     "ZMIN": "$z_{\mathrm{min}}$",
     "ZMAX": "$z_{\mathrm{max}}$",
+    "sia_e": "$E_{\mathrm{SIA}}$",
+    "ssa_e": "$E_{\mathrm{SSA}}$",
+    "ppq": "$q$",
+    "tefo": "$\delta$",
+    "phi_min": "$\phi_{\mathrm{min}}$",
+    "z_min": "$z_{\mathrm{min}}$",
+    "z_max": "$z_{\mathrm{min}}$",
+    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$",
 }
 
 

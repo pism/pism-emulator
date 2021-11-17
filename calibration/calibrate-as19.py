@@ -213,7 +213,7 @@ def plot_projection(
                 sim_low,
                 sim_high,
                 color=rcp_shade_col_dict[rcp],
-                alpha=0.2,
+                alpha=0.3,
                 linewidth=0.5,
                 zorder=-11,
                 label=f"{quantiles[0]*100:.0f}-{quantiles[-1]*100:.0f}%",
@@ -227,7 +227,7 @@ def plot_projection(
                     sim_low,
                     sim_high,
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.4,
+                    alpha=0.5,
                     linewidth=0.5,
                     zorder=-11,
                     label=f"{quantiles[1]*100:.0f}-{quantiles[-2]*100:.0f}%",
@@ -264,7 +264,7 @@ def plot_projection(
                     width,
                     s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.2,
+                    alpha=0.3,
                     lw=0,
                 )
                 rect2 = plt.Rectangle(
@@ -272,7 +272,7 @@ def plot_projection(
                     width,
                     s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.4,
+                    alpha=0.5,
                     lw=0,
                 )
                 rect3 = plt.Rectangle(
