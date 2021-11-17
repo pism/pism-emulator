@@ -213,7 +213,7 @@ def plot_projection(
                 sim_low,
                 sim_high,
                 color=rcp_shade_col_dict[rcp],
-                alpha=0.3,
+                alpha=0.5,
                 linewidth=0.5,
                 zorder=-11,
                 label=f"{quantiles[0]*100:.0f}-{quantiles[-1]*100:.0f}%",
@@ -227,7 +227,7 @@ def plot_projection(
                     sim_low,
                     sim_high,
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.5,
+                    alpha=0.85,
                     linewidth=0.5,
                     zorder=-11,
                     label=f"{quantiles[1]*100:.0f}-{quantiles[-2]*100:.0f}%",
@@ -250,7 +250,14 @@ def plot_projection(
     if bars is not None:
         width = 1.0
         legend_elements = []
-        hatch_pattern_dict = {"Flow+Mass Calib.": "\\\\\\", "Flow Calib.": "......", "AS19": ""}
+        hatch_pattern_dict = {
+            "Flow+Mass Calib. S1": "\\\\\\",
+            "Flow+Mass Calib. S2": "\\\\\\",
+            "Flow+Mass Calib. S3": "\\\\\\",
+            "Flow+Mass Calib.": "\\\\\\",
+            "Flow Calib.": "......",
+            "AS19": "",
+        }
         hatch_patterns = [hatch_pattern_dict[ensemble] for ensemble in bars]
         hatches = cycle(hatch_patterns)
         q_df = make_quantile_df(simulated[simulated["Year"] == 2100], quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
@@ -264,7 +271,7 @@ def plot_projection(
                     width,
                     s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.3,
+                    alpha=0.5,
                     lw=0,
                 )
                 rect2 = plt.Rectangle(
@@ -272,7 +279,7 @@ def plot_projection(
                     width,
                     s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.5,
+                    alpha=0.85,
                     lw=0,
                 )
                 rect3 = plt.Rectangle(
@@ -282,7 +289,7 @@ def plot_projection(
                     color="k",
                     alpha=1.0,
                     fill=False,
-                    lw=0,
+                    lw=0.25,
                     hatch=hatch,
                     label=ens,
                 )
@@ -293,7 +300,7 @@ def plot_projection(
                     color="k",
                     alpha=1.0,
                     fill=False,
-                    lw=0,
+                    lw=0.25,
                     hatch=hatch,
                 )
                 axs[k + 1].add_patch(rect1)
@@ -628,11 +635,33 @@ def load_df(respone_file, samples_file):
 
 
 def resample_ensemble_by_data(
-    observed, simulated, rcps, calibration_start=2008, calibration_end=2020, fudge_factor=3.0, verbose=False
+    observed,
+    simulated,
+    rcps,
+    calibration_start=2008,
+    calibration_end=2020,
+    fudge_factor=3.0,
+    n_samples=500,
+    verbose=False,
 ):
     """
     Resampling algorithm by Douglas C. Brinkerhoff
 
+
+    Parameters
+    ----------
+    observed : pandas.DataFrame
+        A dataframe with observations
+    simulated : pandas.DataFrame
+        A dataframe with simulations
+    calibration_start : float
+        Start year for calibration
+    calibration_end : float
+        End year for calibration
+    fudge_factor : float
+        Tolerance for simulations. Calculated as fudge_factor * standard deviation of observed
+    n_samples : int
+        Number of samples to draw.
 
     """
 
@@ -673,7 +702,7 @@ def resample_ensemble_by_data(
         w -= w.mean()
         weights = np.exp(w)
         weights /= weights.sum()
-        resampled_experiments = np.random.choice(experiments, 500, p=weights)
+        resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
         new_frame = []
         for i in resampled_experiments:
             new_frame.append(simulated[(simulated["Experiment"] == i) & (simulated["RCP"] == rcp)])
@@ -685,7 +714,7 @@ def resample_ensemble_by_data(
 
 
 def make_quantile_table(q_df):
-    ensembles = ["AS19", "Flow Calib.", "AS19 Resampled", "Flow+Mass Calib."]
+    ensembles = ["AS19", "Flow Calib.", "AS19 Resampled", "Flow+Mass Calib. S3"]
     table_header = """
     \\begin{table}
     \\fontsize{6}{7.2}\selectfont
@@ -746,8 +775,8 @@ def make_quantile_df(df, quantiles):
 
 
 signal_lw = 1.0
-obs_signal_color = "#238b45"
-obs_sigma_color = "#a1d99b"
+obs_signal_color = "#6a51a3"
+obs_sigma_color = "#cbc9e2"
 
 secpera = 3.15569259747e7
 gt2cmSLE = 1.0 / 362.5 / 10.0
@@ -826,14 +855,20 @@ if __name__ == "__main__":
     )
 
     as19_resampled = resample_ensemble_by_data(observed, as19, rcps)
-    as19_calib_resampled = resample_ensemble_by_data(observed, calib, rcps)
+    as19_calib_resampled_3 = resample_ensemble_by_data(observed, calib, rcps)
+    as19_calib_resampled_2 = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=2)
+    as19_calib_resampled_1 = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=1)
 
     as19["Ensemble"] = "AS19"
     calib["Ensemble"] = "Flow Calib."
     as19_resampled["Ensemble"] = "AS19 Resampled"
-    as19_calib_resampled["Ensemble"] = "Flow+Mass Calib."
+    as19_calib_resampled_3["Ensemble"] = "Flow+Mass Calib. S3"
+    as19_calib_resampled_2["Ensemble"] = "Flow+Mass Calib. S2"
+    as19_calib_resampled_1["Ensemble"] = "Flow+Mass Calib. S1"
     all_df = (
-        pd.concat([as19, calib, as19_resampled, as19_calib_resampled])
+        pd.concat(
+            [as19, calib, as19_resampled, as19_calib_resampled_3, as19_calib_resampled_2, as19_calib_resampled_1]
+        )
         .drop_duplicates(subset=None, keep="first", inplace=False)
         .reset_index()
     )
@@ -867,17 +902,25 @@ if __name__ == "__main__":
         bars=["AS19", "Flow Calib."],
     )
     plot_projection(
-        "projection_flowmass_bars.pdf",
+        "projection_calibrated_bars_s1.pdf",
         simulated=all_df,
-        ensemble="Flow+Mass Calib.",
+        ensemble="Flow+Mass Calib. S1",
         quantiles=[0.05, 0.16, 0.84, 0.95],
-        bars=["AS19", "Flow Calib.", "Flow+Mass Calib."],
+        bars=["AS19", "Flow Calib.", "Flow+Mass Calib. S1"],
     )
     plot_projection(
-        "projection_calibrated_bars.pdf",
+        "projection_calibrated_bars_s2.pdf",
         simulated=all_df,
+        ensemble="Flow+Mass Calib. S2",
         quantiles=[0.05, 0.16, 0.84, 0.95],
-        bars=["AS19", "Flow Calib.", "Flow+Mass Calib."],
+        bars=["AS19", "Flow Calib.", "Flow+Mass Calib. S2"],
+    )
+    plot_projection(
+        "projection_calibrated_bars_s3.pdf",
+        simulated=all_df,
+        ensemble="Flow+Mass Calib. S3",
+        quantiles=[0.05, 0.16, 0.84, 0.95],
+        bars=["AS19", "Flow Calib.", "Flow+Mass Calib. S3"],
     )
     plot_sle_pdfs(f"sle_pdf_resampled_{year}.pdf", all_df, year=year)
     plot_histograms(f"histograms_{year}.pdf", all_2100_df)
@@ -888,7 +931,7 @@ if __name__ == "__main__":
     q_df["68%"] = q_df[0.84] - q_df[0.16]
     q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
+    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib. S3"][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
         q_df["Ensemble"] == "AS19"
     ][["90%", "68%", 0.5]].reset_index(drop=True)
 
