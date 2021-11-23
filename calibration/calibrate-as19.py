@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-# Copyright (C) 2020 Andy Aschwanden
+# Copyright (C) 2020-21 Andy Aschwanden, Douglas J. Brinkerhoff
 
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib import colors
@@ -15,6 +16,21 @@ from itertools import cycle
 
 from pismemulator.utils import load_imbie
 from scipy.interpolate import interp1d
+
+
+def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):
+    """
+    Adds an inner title to a given axis, with location loc.
+
+    from http://matplotlib.sourceforge.net/examples/axes_grid/demo_axes_grid2.html
+    """
+    from matplotlib.offsetbox import AnchoredText
+    from matplotlib.patheffects import withStroke
+
+    prop = dict(size=size, weight="bold")
+    at = AnchoredText(title, loc=loc, prop=prop, pad=0.0, borderpad=0.5, frameon=False, **kwargs)
+    ax.add_artist(at)
+    return at
 
 
 def rgba2rgb(rgba, background=(255, 255, 255)):
@@ -178,7 +194,7 @@ def plot_historical(
 def plot_projection(
     out_filename,
     simulated=None,
-    ensemble="Flow+Mass Calib.",
+    ensemble="Flow+Mass Calib. S2",
     quantiles=[0.05, 0.95],
     bars=None,
     quantile_df=None,
@@ -285,41 +301,41 @@ def plot_projection(
                 hatch = next(hatches)
                 s_df = df[df["Ensemble"] == ens]
                 rect1 = plt.Rectangle(
-                    (e, s_df[[0.05]].values[0][0]),
-                    width,
+                    (e + 0.2, s_df[[0.05]].values[0][0]),
+                    0.4,
                     s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
                     alpha=0.5,
                     lw=0,
                 )
                 rect2 = plt.Rectangle(
-                    (e, s_df[[0.16]].values[0][0]),
-                    width,
+                    (e + 0.2, s_df[[0.16]].values[0][0]),
+                    0.2,
                     s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
                     alpha=0.85,
                     lw=0,
                 )
                 rect3 = plt.Rectangle(
-                    (e, s_df[[0.05]].values[0][0]),
-                    width,
+                    (e + 0.2, s_df[[0.05]].values[0][0]),
+                    0.4,
                     s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
                     color="k",
                     alpha=1.0,
                     fill=False,
                     lw=0.25,
-                    hatch=hatch,
+                    # hatch=hatch,
                     label=ens,
                 )
                 rect4 = plt.Rectangle(
-                    (e, s_df[[0.16]].values[0][0]),
-                    width,
+                    (e + 0.2, s_df[[0.16]].values[0][0]),
+                    0.4,
                     s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
                     color="k",
                     alpha=1.0,
                     fill=False,
                     lw=0.25,
-                    hatch=hatch,
+                    # hatch=hatch,
                 )
                 axs[k + 1].add_patch(rect1)
                 axs[k + 1].add_patch(rect2)
@@ -361,7 +377,7 @@ def plot_partitioning(
     out_filename,
     simulated=None,
     observed=None,
-    ensembles=["AS19", "Flow+Mass Calib."],
+    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     quantiles=[0.05, 0.95],
     sigma=2,
     simulated_ctrl=None,
@@ -373,7 +389,13 @@ def plot_partitioning(
     if observed is not None:
         ncol += 1
 
-    fig, axs = plt.subplots(3, 1, sharex="col", figsize=[5.0, 3.8])
+    fig, axs = plt.subplots(
+        3,
+        1,
+        sharex="col",
+        figsize=[3.2, 4.2],
+        gridspec_kw=dict(height_ratios=[1.5, 1, 1]),
+    )
     fig.subplots_adjust(hspace=0.1, wspace=0.25)
 
     if simulated is not None:
@@ -453,12 +475,16 @@ def plot_partitioning(
         axs[0].add_artist(legend)
 
     for k, (v, u) in enumerate(
-        zip([f"Contribution to sea-level \nsince {proj_start}", "SMB", "D"], ["cm SLE", "Gt/yr", "Gt/yr"])
+        zip([f"Cumulative mass change \nsince {proj_start}", "SMB", "D"], ["Gt", "Gt/yr", "Gt/yr"])
     ):
         axs[k].set_ylabel(f"{v} ({u})")
 
-    axs[-1].set_xlim(2010, 2020)
-    axs[0].set_ylim(-10000, 500)
+    for k, (v, u) in enumerate(zip(["d", "e", "f"], ["", "", ""])):
+        add_inner_title(axs[k], f"{v}) {u}")
+
+    axs[-1].set_xlim(2008, 2020)
+    axs[-1].set_xlabel("Year")
+    axs[0].set_ylim(-12500, 2500)
     axs[1].set_ylim(-500, 1000)
     axs[2].set_ylim(-1500, 0)
 
@@ -535,10 +561,10 @@ def plot_sle_pdfs(
             s_df = p_df[p_df["Ensemble"] == ens]
 
             if e == len(all_ensembles) - 1:
-                alpha = 1 - +0.2 * (e - 1)
+                alpha = 1 - 0.2 * (e - 1)
                 lw = 0.35
             else:
-                alpha = 1 - +0.2 * (e)
+                alpha = 1 - 0.2 * (e)
                 lw = 0.1
 
             m_color = list(colors.to_rgba(rcp_col_dict[rcp]))
@@ -604,6 +630,9 @@ def plot_sle_pdfs(
 
         axs[k].legend().remove()
         axs[k * 2 + 1].legend().remove()
+
+    for k, (v, u) in enumerate(zip(["a", "b", "c"], ["", "", ""])):
+        add_inner_title(axs[k * 2], f"{v}) {u}")
 
     l_as19 = Patch(facecolor="0.8", edgecolor="0.0", linewidth=0.75, label="AS19")
     l_flow = Patch(facecolor="0.8", edgecolor="0.0", linewidth=0.5, label="Flow Calib.")
@@ -947,20 +976,20 @@ rcp_col_dict = {26: "#003466", 45: "#5492CD", 85: "#990002"}
 rcp_shade_col_dict = {26: "#4393C3", 45: "#92C5DE", 85: "#F4A582"}
 rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
 palette_dict = {
-    "AS19": "0.7",
-    "Flow Calib.": "#9ecae1",
+    "AS19": "0.70",
+    "Flow Calib.": "0.8",
     "Mass Calib.": "#fee6ce",
     "Flow+Mass Calib.": "0.60",
 }
 ts_fill_palette_dict = {
-    "AS19": "0.7",
-    "Flow Calib.": "#9ecae1",
+    "AS19": "0.80",
+    "Flow Calib.": "0.70",
     "Mass Calib.": "#fee6ce",
     "Flow+Mass Calib.": "0.60",
 }
 ts_median_palette_dict = {
-    "AS19": "0.30",
-    "Flow Calib.": "#3182bd",
+    "AS19": "0.50",
+    "Flow Calib.": "0.25",
     "Mass Calib.": "#e6550d",
     "Flow+Mass Calib.": "0.0",
 }
@@ -1002,18 +1031,45 @@ plt.rcParams.update(params)
 
 if __name__ == "__main__":
 
+    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.description = "Two-step Bayesian calibration for Aschwanden et al (2019) ."
+    parser.add_argument(
+        "--as19_results_file",
+        nargs=1,
+        help="Comma-separated file with AS19 results",
+        default="../data/as19/aschwanden_et_al_2019_les_2008_norm.csv.gz",
+    )
+    parser.add_argument(
+        "--as19_samples_file",
+        nargs=1,
+        help="Comma-separated file with AS19 samples",
+        default="../data/samples/lhs_samples_500.csv",
+    )
+    parser.add_argument(
+        "--calibrated_results_file",
+        nargs=1,
+        help="Comma-separated file with calibrated results",
+        default="../data/as19/aschwanden_et_al_2019_mc_2008_norm.csv.gz",
+    )
+    parser.add_argument(
+        "--calibrated_samples_file",
+        nargs=1,
+        help="Comma-separated file with calibrated samples",
+        default="../data/samples/lhs_plus_mc_samples.csv",
+    )
+    options = parser.parse_args()
+
     # Load Observations
     observed = load_imbie()
 
     # Load AS19 (original LES)
-    as19 = load_df("../data/as19/aschwanden_et_al_2019_les_2008_norm.csv.gz", "../data/samples/lhs_samples_500.csv")
+    as19 = load_df(options.as19_results_file, options.as19_samples_file)
     # Load AS19 (original CTRL)
     as19_ctrl = load_df("../data/as19/aschwanden_et_al_2019_ctrl.csv.gz", "../data/samples/lhs_control.csv")
     # Load AS19 (with calibrated ice dynamics)
-    calib = load_df(
-        "../data/as19/aschwanden_et_al_2019_mc_2008_norm.csv.gz", "../data/samples/lhs_plus_mc_samples.csv"
-    )
+    calib = load_df(options.calibrated_results_file, options.calibrated_samples_file)
 
+    # Bayesian calibration: resampling
     as19_resampled = resample_ensemble_by_data(observed, as19, rcps)
     as19_calib_resampled_3 = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=3)
     as19_calib_resampled_2 = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=2)
@@ -1072,6 +1128,13 @@ if __name__ == "__main__":
         bars=["AS19", "Flow Calib."],
     )
     plot_projection(
+        "projection_calibrated_bars.pdf",
+        simulated=all_df,
+        ensemble="Flow+Mass Calib. S2",
+        quantiles=[0.05, 0.16, 0.84, 0.95],
+        bars=["Flow+Mass Calib. S2"],
+    )
+    plot_projection(
         "projection_calibrated_bars_s1.pdf",
         simulated=all_df,
         ensemble="Flow+Mass Calib. S1",
@@ -1101,7 +1164,7 @@ if __name__ == "__main__":
     q_df["68%"] = q_df[0.84] - q_df[0.16]
     q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib. S3"][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
+    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
         q_df["Ensemble"] == "AS19"
     ][["90%", "68%", 0.5]].reset_index(drop=True)
 
