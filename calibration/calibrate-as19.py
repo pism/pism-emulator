@@ -214,7 +214,7 @@ def plot_projection(
             4,
             sharey="row",
             figsize=[6.0, 2.0],
-            gridspec_kw=dict(width_ratios=[16, 1, 1, 1]),
+            gridspec_kw=dict(width_ratios=[20, 1, 1, 1]),
         )
         fig.subplots_adjust(hspace=0.1, wspace=0.05)
         ax = axs[0]
@@ -301,24 +301,24 @@ def plot_projection(
                 hatch = next(hatches)
                 s_df = df[df["Ensemble"] == ens]
                 rect1 = plt.Rectangle(
-                    (e + 0.2, s_df[[0.05]].values[0][0]),
-                    0.4,
+                    (e + 0.4, s_df[[0.05]].values[0][0]),
+                    0.2,
                     s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.5,
+                    alpha=1.0,
                     lw=0,
                 )
                 rect2 = plt.Rectangle(
                     (e + 0.2, s_df[[0.16]].values[0][0]),
-                    0.2,
+                    0.6,
                     s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
                     color=rcp_shade_col_dict[rcp],
-                    alpha=0.85,
+                    alpha=1.0,
                     lw=0,
                 )
                 rect3 = plt.Rectangle(
-                    (e + 0.2, s_df[[0.05]].values[0][0]),
-                    0.4,
+                    (e + 0.4, s_df[[0.05]].values[0][0]),
+                    0.2,
                     s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
                     color="k",
                     alpha=1.0,
@@ -329,7 +329,7 @@ def plot_projection(
                 )
                 rect4 = plt.Rectangle(
                     (e + 0.2, s_df[[0.16]].values[0][0]),
-                    0.4,
+                    0.6,
                     s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
                     color="k",
                     alpha=1.0,
@@ -337,10 +337,10 @@ def plot_projection(
                     lw=0.25,
                     # hatch=hatch,
                 )
-                axs[k + 1].add_patch(rect1)
-                axs[k + 1].add_patch(rect2)
                 axs[k + 1].add_patch(rect3)
                 axs[k + 1].add_patch(rect4)
+                axs[k + 1].add_patch(rect1)
+                axs[k + 1].add_patch(rect2)
                 axs[k + 1].plot(
                     [e, e + width],
                     [s_df[[0.50]].values[0][0], s_df[[0.50]].values[0][0]],
@@ -1156,6 +1156,7 @@ if __name__ == "__main__":
         bars=["AS19", "Flow Calib.", "Flow+Mass Calib. S3"],
     )
     plot_sle_pdfs(f"sle_pdf_{year}.pdf", all_df, year=year)
+    plot_sle_pdfs(f"sle_pdf_betas_{year}.pdf", all_df, year=year)
     plot_histograms(f"histograms_{year}.pdf", all_2100_df)
 
     make_quantile_table(q_df)
