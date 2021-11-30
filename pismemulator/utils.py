@@ -110,6 +110,9 @@ def load_imbie(proj_start=2008):
     smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
     imbie[f"SMB (Gt/yr)"] += 2 * 1964 / 10
     imbie[f"D (Gt/yr)"] -= 2 * 1964 / 10
+    cmSLE = 1.0 / 362.5 / 10.0
+    imbie[f"SLE (cm)"] = -imbie["Mass (Gt)"] * cmSLE
+    imbie[f"SLE uncertainty (cm)"] = imbie["Mass uncertainty (Gt)"] * cmSLE
 
     return imbie
 

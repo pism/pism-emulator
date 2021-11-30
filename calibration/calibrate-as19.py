@@ -397,11 +397,11 @@ def plot_partitioning(
         ncol += 1
 
     fig, axs = plt.subplots(
-        3,
+        2,
         1,
         sharex="col",
-        figsize=[3.2, 4.2],
-        gridspec_kw=dict(height_ratios=[1.5, 1, 1]),
+        figsize=[3.2, 2.6],
+        gridspec_kw=dict(height_ratios=[1, 1]),
     )
     fig.subplots_adjust(hspace=0.1, wspace=0.25)
 
@@ -409,7 +409,7 @@ def plot_partitioning(
         for r, ens in enumerate(ensembles):
             legend_handles = []
             sim = simulated[simulated["Ensemble"] == ens]
-            for k, (v, u) in enumerate(zip(["Mass", "SMB", "D"], ["Gt", "Gt/yr", "Gt/yr"])):
+            for k, (v, u) in enumerate(zip(["D", "SMB"], ["Gt/yr", "Gt/yr"])):
                 g = sim.groupby(by="Year")[f"{v} ({u})"]
                 sim_median = g.quantile(0.50)
                 sim_low = g.quantile(quantiles[0])
@@ -437,16 +437,21 @@ def plot_partitioning(
                     legend_handles.append(l_es_median[0])
                     legend_handles.append(ci)
 
-            legend = axs[0].legend(
-                handles=legend_handles, loc="lower left", ncol=1, title=ens, bbox_to_anchor=(r * 0.16, 0.005)
+            legend = axs[1].legend(
+                bbox_to_anchor=(1.04, r * 0.05),
+                borderaxespad=0,
+                handles=legend_handles,
+                loc="lower left",
+                ncol=1,
+                title=ens,
             )
             legend.get_frame().set_linewidth(0.0)
             legend.get_frame().set_alpha(0.0)
-            axs[0].add_artist(legend)
+            axs[1].add_artist(legend)
 
     if observed is not None:
         legend_handles = []
-        for k, (v, u) in enumerate(zip(["Mass", "SMB", "D"], ["Gt", "Gt/yr", "Gt/yr"])):
+        for k, (v, u) in enumerate(zip(["D", "SMB"], ["Gt/yr", "Gt/yr"])):
             obs_line = axs[k].plot(
                 observed["Year"],
                 observed[f"{v} ({u})"],
@@ -470,30 +475,27 @@ def plot_partitioning(
                 legend_handles.append(obs_line[0])
                 legend_handles.append(obs_ci)
 
-        legend = axs[0].legend(
+        legend = axs[1].legend(
             handles=legend_handles,
             loc="lower left",
             ncol=1,
             title="Observed (IMBIE)",
-            bbox_to_anchor=((r + 1.5) * 0.16, 0.005),
+            bbox_to_anchor=((r + 1.5) * 0.20, 0.005),
         )
         legend.get_frame().set_linewidth(0.0)
         legend.get_frame().set_alpha(0.0)
-        axs[0].add_artist(legend)
+        axs[1].add_artist(legend)
 
-    for k, (v, u) in enumerate(
-        zip([f"Cumulative mass change \nsince {proj_start}", "SMB", "D"], ["Gt", "Gt/yr", "Gt/yr"])
-    ):
+    for k, (v, u) in enumerate(zip(["SMB", "D"], ["Gt/yr", "Gt/yr"])):
         axs[k].set_ylabel(f"{v} ({u})")
 
-    for k, (v, u) in enumerate(zip(["d", "e", "f"], ["", "", ""])):
+    for k, (v, u) in enumerate(zip(["a", "b"], ["", ""])):
         add_inner_title(axs[k], f"{v}) {u}")
 
     axs[-1].set_xlim(2008, 2020)
     axs[-1].set_xlabel("Year")
-    axs[0].set_ylim(-12500, 2500)
-    axs[1].set_ylim(-500, 1000)
-    axs[2].set_ylim(-1500, 0)
+    axs[1].set_ylim(-750, 750)
+    axs[0].set_ylim(-1500, 0)
 
     fig.savefig(out_filename, bbox_inches="tight")
 
@@ -501,147 +503,130 @@ def plot_partitioning(
 def plot_posterior_sle_pdfs(
     out_filename,
     df,
-    year=2100,
+    observed=None,
+    years=[2018, 2100],
 ):
 
-    df = df[df["Year"] == year]
-    q_df = make_quantile_df(df, quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
     ensembles = ["AS19", "Flow Calib.", "Flow+Mass Calib."]
     alphas = [0.8, 0.9, 1.0]
 
     fig, axs = plt.subplots(
         6,
-        1,
+        2,
         sharex="col",
-        figsize=[3.2, 4.2],
+        figsize=[6.2, 4.2],
         gridspec_kw=dict(height_ratios=[0.75, 4] * 3),
     )
     fig.subplots_adjust(hspace=0.0, wspace=-0.0)
     for k, rcp in enumerate(rcps):
-        m_df = df[df["RCP"] == rcp]
-        p_df = q_df[q_df["RCP"] == rcp]
+        for y, year in enumerate(years):
+            y_df = df[df["Year"] == year]
+            q_df = make_quantile_df(y_df, quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
 
-        sns.kdeplot(
-            data=m_df,
-            x="SLE (cm)",
-            hue="Ensemble",
-            hue_order=ensembles,
-            common_norm=False,
-            common_grid=True,
-            multiple="layer",
-            fill=True,
-            lw=0,
-            palette=[color_tint(rcp_col_dict[rcp], alpha) for alpha in alphas],
-            ax=axs[k * 2 + 1],
-        )
+            m_df = y_df[y_df["RCP"] == rcp]
+            p_df = q_df[q_df["RCP"] == rcp]
 
-        sns.kdeplot(
-            data=m_df,
-            x="SLE (cm)",
-            hue="Ensemble",
-            hue_order=ensembles,
-            common_norm=False,
-            common_grid=True,
-            multiple="layer",
-            fill=False,
-            lw=0.25,
-            palette=["k"] * len(ensembles),
-            ax=axs[k * 2 + 1],
-        )
-
-        for e, ens in enumerate(ensembles):
-            s_df = p_df[p_df["Ensemble"] == ens]
-            mk_df = df[df["Ensemble"] == ens]
-
-            alpha = alphas[e] - 0.2 * (len(ensembles) - e)
-            m_color = color_tint(rcp_col_dict[rcp], alpha)
-            lw = 0.25
-
-            #             sns.kdeplot(
-            #                 data=mk_df,
-            #                 x="SLE (cm)",
-            #                 common_norm=False,
-            #                 common_grid=True,
-            #                 multiple="layer",
-            #                 fill=True,
-            #                 lw=0.0,
-            #                 color=m_color,
-            #                 ax=axs[k * 2 + 1],
-            #         )
-            #             sns.kdeplot(
-            #                 data=mk_df,
-            #                 x="SLE (cm)",
-            #                 common_norm=False,
-            #                 common_grid=True,
-            #                 multiple="layer",
-            #                 fill=False,
-            #                 lw=0.5,
-            #                 color="k",
-            #                 ax=axs[k * 2 + 1],
-            #         )
-
-            rect0 = plt.Rectangle(
-                (s_df[[0.5]].values[0][0] - 0.1, e + 0.1),
-                0.2,
-                0.8,
-                color="k",
+            sns.kdeplot(
+                data=m_df,
+                x="SLE (cm)",
+                hue="Ensemble",
+                hue_order=ensembles,
+                common_norm=False,
+                common_grid=True,
+                multiple="layer",
+                fill=True,
                 lw=0,
+                palette=[color_tint(rcp_col_dict[rcp], alpha) for alpha in alphas],
+                ax=axs[k * 2 + 1, y],
             )
 
-            rect1 = plt.Rectangle(
-                (s_df[[0.05]].values[0][0], e + 0.4),
-                s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
-                0.2,
-                color=m_color,
-                alpha=1,
-                lw=0,
-            )
-            rect2 = plt.Rectangle(
-                (s_df[[0.16]].values[0][0], e + 0.2),
-                s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
-                0.6,
-                color=m_color,
-                alpha=1,
-                lw=0,
-            )
-            rect3 = plt.Rectangle(
-                (s_df[[0.05]].values[0][0], e + 0.4),
-                s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
-                0.2,
-                color="k",
-                alpha=1,
+            sns.kdeplot(
+                data=m_df,
+                x="SLE (cm)",
+                hue="Ensemble",
+                hue_order=ensembles,
+                common_norm=False,
+                common_grid=True,
+                multiple="layer",
                 fill=False,
-                lw=lw,
-            )
-            rect4 = plt.Rectangle(
-                (s_df[[0.16]].values[0][0], e + 0.2),
-                s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
-                0.6,
-                color="k",
-                alpha=1,
-                fill=False,
-                lw=lw,
+                lw=0.25,
+                palette=["k"] * len(ensembles),
+                ax=axs[k * 2 + 1, y],
             )
 
-            axs[(k * 2)].add_patch(rect1)
-            axs[(k * 2)].add_patch(rect3)
-            axs[(k * 2)].add_patch(rect2)
-            axs[(k * 2)].add_patch(rect4)
-            axs[(k * 2)].add_patch(rect0)
+            for e, ens in enumerate(ensembles):
+                s_df = p_df[p_df["Ensemble"] == ens]
+                mk_df = y_df[y_df["Ensemble"] == ens]
 
-            axs[(k * 2)].set_ylabel(None)
-            axs[(k * 2)].axes.xaxis.set_visible(False)
-            axs[(k * 2)].axes.yaxis.set_visible(False)
-            sns.despine(ax=axs[(k * 2)], left=True, bottom=True)
-            sns.despine(ax=axs[(k * 2) + 1], top=True)
+                alpha = alphas[e] - 0.2 * (len(ensembles) - e)
+                m_color = color_tint(rcp_col_dict[rcp], alpha)
+                lw = 0.25
 
-            axs[(k * 2)].set_ylim(0, len(ensembles))
+                axs[(k * 2), y].vlines(s_df[[0.5]].values[0][0], e, e + 1, colors="k", lw=1)
 
-        axs[k].legend().remove()
-        axs[k * 2 + 1].legend().remove()
+                rect1 = plt.Rectangle(
+                    (s_df[[0.05]].values[0][0], e + 0.4),
+                    s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
+                    0.2,
+                    color=m_color,
+                    alpha=1,
+                    lw=0,
+                )
+                rect2 = plt.Rectangle(
+                    (s_df[[0.16]].values[0][0], e + 0.2),
+                    s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
+                    0.6,
+                    color=m_color,
+                    alpha=1,
+                    lw=0,
+                )
+                rect3 = plt.Rectangle(
+                    (s_df[[0.05]].values[0][0], e + 0.4),
+                    s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
+                    0.2,
+                    color="k",
+                    alpha=1,
+                    fill=False,
+                    lw=lw,
+                )
+                rect4 = plt.Rectangle(
+                    (s_df[[0.16]].values[0][0], e + 0.2),
+                    s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
+                    0.6,
+                    color="k",
+                    alpha=1,
+                    fill=False,
+                    lw=lw,
+                )
+
+                axs[(k * 2), y].add_patch(rect1)
+                axs[(k * 2), y].add_patch(rect3)
+                axs[(k * 2), y].add_patch(rect2)
+                axs[(k * 2), y].add_patch(rect4)
+
+                axs[(k * 2), y].set_ylabel(None)
+                axs[(k * 2), y].axes.xaxis.set_visible(False)
+                axs[(k * 2), y].axes.yaxis.set_visible(False)
+                sns.despine(ax=axs[(k * 2), y], left=True, bottom=True)
+                sns.despine(ax=axs[(k * 2) + 1, y], top=True)
+
+                axs[(k * 2), y].set_ylim(0, len(ensembles))
+
+                axs[k, y].legend().remove()
+                axs[k * 2 + 1, y].legend().remove()
+
+                axs[0, y].set_title(f"Year {year}")
+
+        if observed is not None:
+            obs = observed[(observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)]
+            obs_mean = obs["SLE (cm)"].mean()
+            obs_std = obs["SLE uncertainty (cm)"].mean()
+            axs[(k * 2) + 1, 0].axvline(obs_mean, c="k", lw=0.5)
+            axs[(k * 2) + 1, 0].axvline(obs_mean - 2 * obs_std, c="k", lw=0.5, ls="dotted")
+            axs[(k * 2) + 1, 0].axvline(obs_mean + 2 * obs_std, c="k", lw=0.5, ls="dotted")
 
     for k, rcp in enumerate(rcps):
-        add_inner_title(axs[k * 2 + 1], rcp_dict[rcp])
+        add_inner_title(axs[k * 2 + 1, 0], rcp_dict[rcp])
 
     l_as19 = Patch(
         facecolor=str(alphas[2] - 0.2 * (len(ensembles) - 2)), edgecolor="0.0", linewidth=0.25, label="Prior (AS19)"
@@ -659,313 +644,24 @@ def plot_posterior_sle_pdfs(
         label="Posterior (Flow+Mass Calib.)",
     )
 
-    legend_1 = axs[1].legend(
+    legend_1 = axs[-1, 0].legend(
         handles=[l_as19, l_mass, l_calib],
         loc="upper left",
         bbox_to_anchor=(0.4, 1.1, 0, 0),
     )
     legend_1.get_frame().set_linewidth(0.0)
     legend_1.get_frame().set_alpha(0.0)
-    axs[1].add_artist(legend_1)
+    axs[-1, 0].add_artist(legend_1)
 
-    # l_ = []
-    # for rcp in rcps:
-    #     l_.append(Line2D([], [], color=rcp_col_dict[rcp], label=rcp_dict[rcp]))
-    # legend_2 = axs[3].legend(
-    #     handles=l_,
-    #     loc="upper left",
-    #     bbox_to_anchor=(0.4, 1.1, 0, 0),
-    # )
-    # legend_2.get_frame().set_linewidth(0.0)
-    # legend_2.get_frame().set_alpha(0.0)
-    # axs[3].add_artist(legend_2)
-
-    fig.tight_layout()
-    fig.savefig(out_filename)
-
-
-def compare_sle_pdfs(
-    out_filename,
-    df,
-    year=2100,
-):
-
-    df = df[df["Year"] == year]
-
-    q_df = make_quantile_df(df, quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
-
-    mass_ensembles = [
-        "Mass Calib. S3",
-        "Mass Calib. S2",
-        "Mass Calib. S1",
-    ]
-    flowmass_ensembles = [
-        "Flow+Mass Calib. S3",
-        "Flow+Mass Calib. S2",
-        "Flow+Mass Calib. S1",
-    ]
-    all_ensembles = ["AS19", "Flow Calib."] + mass_ensembles + flowmass_ensembles
-    mass_ensembles_palette = ["#756bb1", "#9e9ac8", "#cbc9e2"]
-    flowmass_ensembles_palette = ["#3182bd", "#6baed6", "#bdd7e7"]
-    all_ensembles_palette = ["#636363", "#31a354"] + mass_ensembles_palette + flowmass_ensembles_palette
-    fig, axs = plt.subplots(
-        6,
-        1,
-        sharex="col",
-        figsize=[3.2, 4.2],
-        gridspec_kw=dict(height_ratios=[1.75, 4] * 3),
-    )
-    fig.subplots_adjust(hspace=0.0, wspace=-0.0)
-    for k, rcp in enumerate(rcps):
-        m_df = df[df["RCP"] == rcp]
-        p_df = q_df[q_df["RCP"] == rcp]
-
-        sns.kdeplot(
-            data=m_df,
-            x="SLE (cm)",
-            hue="Ensemble",
-            hue_order=all_ensembles,
-            fill=False,
-            lw=0.5,
-            palette=all_ensembles_palette,
-            ax=axs[k * 2 + 1],
-        )
-
-        for e, ens in enumerate(all_ensembles):
-            s_df = p_df[p_df["Ensemble"] == ens]
-
-            lw = 0.1
-
-            rect0 = plt.Rectangle(
-                (s_df[[0.5]].values[0][0] - 0.1, e + 0.1),
-                0.2,
-                0.8,
-                color="k",
-                lw=0,
-            )
-
-            rect1 = plt.Rectangle(
-                (s_df[[0.05]].values[0][0], e + 0.4),
-                s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
-                0.2,
-                color=all_ensembles_palette[e],
-                alpha=1,
-                lw=0,
-            )
-            rect2 = plt.Rectangle(
-                (s_df[[0.16]].values[0][0], e + 0.2),
-                s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
-                0.6,
-                color=all_ensembles_palette[e],
-                alpha=1,
-                lw=0,
-            )
-            rect3 = plt.Rectangle(
-                (s_df[[0.05]].values[0][0], e + 0.4),
-                s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
-                0.2,
-                color="k",
-                alpha=1,
-                fill=False,
-                lw=lw,
-            )
-            rect4 = plt.Rectangle(
-                (s_df[[0.16]].values[0][0], e + 0.2),
-                s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
-                0.6,
-                color="k",
-                alpha=1,
-                fill=False,
-                lw=lw,
-            )
-
-            axs[(k * 2)].add_patch(rect1)
-            axs[(k * 2)].add_patch(rect3)
-            axs[(k * 2)].add_patch(rect2)
-            axs[(k * 2)].add_patch(rect4)
-            axs[(k * 2)].add_patch(rect0)
-
-            axs[(k * 2)].set_ylabel(None)
-            axs[(k * 2)].axes.xaxis.set_visible(False)
-            axs[(k * 2)].axes.yaxis.set_visible(False)
-            sns.despine(ax=axs[(k * 2)], left=True, bottom=True)
-            sns.despine(ax=axs[(k * 2) + 1], top=True)
-
-            axs[(k * 2)].set_ylim(0, len(all_ensembles))
-            axs[k * 2 + 1].legend().remove()
-
-    for k, rcp in enumerate(rcps):
-        add_inner_title(axs[k * 2], rcp_dict[rcp])
-
-    l_as19 = Patch(facecolor="0.8", edgecolor="0.0", linewidth=0.75, label="AS19")
-    l_flow = Patch(facecolor="0.8", edgecolor="0.0", linewidth=0.5, label="Flow Calib.")
-    l_calib_s3 = Patch(facecolor="0.6", edgecolor="0.0", linewidth=0.25, label="Flow+Mass Calib. $\\beta$=3")
-    l_calib_s2 = Patch(facecolor="0.4", edgecolor="0.0", linewidth=0.25, label="Flow+Mass Calib. $\\beta$=2")
-
-    l_calib_s1 = Patch(facecolor="0.4", edgecolor="0.0", linewidth=0.25, label="Flow+Mass Calib. $\\beta$=1")
-
-    # legend_1 = axs[1].legend(
-    #     handles=[l_as19, l_flow, l_calib_s3, l_calib_s2, l_calib_s1],
-    #     loc="upper left",
-    #     bbox_to_anchor=(0.48, 1.1, 0, 0),
-    # )
-    # legend_1.get_frame().set_linewidth(0.0)
-    # legend_1.get_frame().set_alpha(0.0)
-    # axs[1].add_artist(legend_1)
-
-    l_ = []
-    for e, ens in enumerate(all_ensembles):
-        l_.append(Line2D([], [], color=all_ensembles_palette[e], label=ens))
-    legend = axs[1].legend(
-        handles=l_,
+    l_obs_mean = Line2D([], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean")
+    l_obs_std = Line2D([], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$")
+    legend_2 = axs[1, 0].legend(
+        handles=[l_obs_mean, l_obs_std],
         loc="upper left",
-        bbox_to_anchor=(0.48, 1.2, 0, 0),
+        bbox_to_anchor=(0.4, 1.1, 0, 0),
     )
-    legend.get_frame().set_linewidth(0.0)
-    legend.get_frame().set_alpha(0.0)
-    axs[1].add_artist(legend)
-
-    fig.tight_layout()
-    fig.savefig(out_filename)
-
-
-def compare_sle_pdfs_1(
-    out_filename,
-    df,
-    year=2100,
-):
-
-    df = df[df["Year"] == year]
-
-    q_df = make_quantile_df(df, quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
-
-    mass_ensembles = [
-        "Mass Calib. S3",
-        "Mass Calib. S2",
-        "Mass Calib. S1",
-    ]
-    flowmass_ensembles = [
-        "Flow+Mass Calib. S3",
-        "Flow+Mass Calib. S2",
-        "Flow+Mass Calib. S1",
-    ]
-    all_ensembles = ["AS19", "Flow Calib."] + mass_ensembles + flowmass_ensembles
-    mass_ensembles_palette = ["#756bb1", "#9e9ac8", "#cbc9e2"]
-    flowmass_ensembles_palette = ["#3182bd", "#6baed6", "#bdd7e7"]
-    all_ensembles_palette = ["#636363", "#31a354"] + mass_ensembles_palette + flowmass_ensembles_palette
-    fig, axs = plt.subplots(
-        2,
-        1,
-        sharex="col",
-        figsize=[3.2, 1.8],
-        gridspec_kw=dict(height_ratios=[1.5, 4]),
-    )
-    fig.subplots_adjust(hspace=0.0, wspace=-0.0)
-    m_df = df
-    p_df = q_df
-
-    sns.kdeplot(
-        data=m_df,
-        x="SLE (cm)",
-        hue="Ensemble",
-        hue_order=all_ensembles,
-        fill=False,
-        lw=0.5,
-        palette=all_ensembles_palette,
-        ax=axs[1],
-    )
-
-    for e, ens in enumerate(all_ensembles):
-        s_df = p_df[p_df["Ensemble"] == ens]
-        k_df = df[df["Ensemble"] == ens]
-
-        lw = 0.1
-
-        rect0 = plt.Rectangle(
-            (s_df[[0.5]].values[0][0] - 0.1, e + 0.1),
-            0.2,
-            0.8,
-            color="k",
-            lw=0,
-        )
-
-        rect1 = plt.Rectangle(
-            (s_df[[0.05]].values[0][0], e + 0.4),
-            s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
-            0.2,
-            color=all_ensembles_palette[e],
-            alpha=1,
-            lw=0,
-        )
-        rect2 = plt.Rectangle(
-            (s_df[[0.16]].values[0][0], e + 0.2),
-            s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
-            0.6,
-            color=all_ensembles_palette[e],
-            alpha=1,
-            lw=0,
-        )
-        rect3 = plt.Rectangle(
-            (s_df[[0.05]].values[0][0], e + 0.4),
-            s_df[[0.95]].values[0][0] - s_df[[0.05]].values[0][0],
-            0.2,
-            color="k",
-            alpha=1,
-            fill=False,
-            lw=lw,
-        )
-        rect4 = plt.Rectangle(
-            (s_df[[0.16]].values[0][0], e + 0.2),
-            s_df[[0.84]].values[0][0] - s_df[[0.16]].values[0][0],
-            0.6,
-            color="k",
-            alpha=1,
-            fill=False,
-            lw=lw,
-        )
-
-        axs[0].add_patch(rect1)
-        axs[0].add_patch(rect3)
-        axs[0].add_patch(rect2)
-        axs[0].add_patch(rect4)
-        axs[0].add_patch(rect0)
-
-        axs[0].set_ylabel(None)
-        axs[0].axes.xaxis.set_visible(False)
-        axs[0].axes.yaxis.set_visible(False)
-        sns.despine(ax=axs[0], left=True, bottom=True)
-        sns.despine(ax=axs[1], top=True)
-
-        axs[0].set_ylim(0, len(all_ensembles))
-        axs[1].legend().remove()
-
-    l_as19 = Patch(facecolor="0.8", edgecolor="0.0", linewidth=0.75, label="AS19")
-    l_flow = Patch(facecolor="0.8", edgecolor="0.0", linewidth=0.5, label="Flow Calib.")
-    l_calib_s3 = Patch(facecolor="0.6", edgecolor="0.0", linewidth=0.25, label="Flow+Mass Calib. $\\beta$=3")
-    l_calib_s2 = Patch(facecolor="0.4", edgecolor="0.0", linewidth=0.25, label="Flow+Mass Calib. $\\beta$=2")
-
-    l_calib_s1 = Patch(facecolor="0.4", edgecolor="0.0", linewidth=0.25, label="Flow+Mass Calib. $\\beta$=1")
-
-    # legend_1 = axs[1].legend(
-    #     handles=[l_as19, l_flow, l_calib_s3, l_calib_s2, l_calib_s1],
-    #     loc="upper left",
-    #     bbox_to_anchor=(0.48, 1.1, 0, 0),
-    # )
-    # legend_1.get_frame().set_linewidth(0.0)
-    # legend_1.get_frame().set_alpha(0.0)
-    # axs[1].add_artist(legend_1)
-
-    l_ = []
-    for e, ens in enumerate(all_ensembles):
-        l_.append(Line2D([], [], color=all_ensembles_palette[e], label=ens))
-    legend = axs[1].legend(
-        handles=l_,
-        loc="lower right",
-        bbox_to_anchor=(1.0, 0.2, 0, 0),
-    )
-    legend.get_frame().set_linewidth(0.0)
-    legend.get_frame().set_alpha(0.0)
-    axs[1].add_artist(legend)
+    legend_2.get_frame().set_linewidth(0.0)
+    legend_2.get_frame().set_alpha(0.0)
 
     fig.tight_layout()
     fig.savefig(out_filename)
@@ -1133,7 +829,7 @@ def resample_ensemble_by_data(
     rcps,
     calibration_start=2008,
     calibration_end=2020,
-    fudge_factor=2.0,
+    fudge_factor=3.0,
     n_samples=500,
     verbose=False,
 ):
@@ -1208,7 +904,7 @@ def resample_ensemble_by_data(
 
 
 def make_quantile_table(q_df):
-    ensembles = ["AS19", "Flow Calib.", "Mass Calib.", "Flow+Mass Calib. S3"]
+    ensembles = ["AS19", "Flow Calib.", "Mass Calib.", "Flow+Mass Calib."]
     table_header = """
     \\begin{table}
     \\fontsize{6}{7.2}\selectfont
@@ -1369,30 +1065,16 @@ if __name__ == "__main__":
 
     # Load AS19 (original LES)
     as19 = load_df(options.as19_results_file, options.as19_samples_file)
-    # Load AS19 (original CTRL)
-    as19_ctrl = load_df("../data/as19/aschwanden_et_al_2019_ctrl.csv.gz", "../data/samples/lhs_control.csv")
     # Load AS19 (with calibrated ice dynamics)
     calib = load_df(options.calibrated_results_file, options.calibrated_samples_file)
 
     # Bayesian calibration: resampling
-    as19_resampled = resample_ensemble_by_data(observed, as19, rcps, fudge_factor=2)
-    as19_resampled_3 = resample_ensemble_by_data(observed, as19, rcps, fudge_factor=3)
-    as19_resampled_2 = resample_ensemble_by_data(observed, as19, rcps, fudge_factor=2)
-    as19_resampled_1 = resample_ensemble_by_data(observed, as19, rcps, fudge_factor=1)
-    as19_calib_resampled_3 = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=3)
-    as19_calib_resampled_2 = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=2)
-    as19_calib_resampled_1 = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=1)
-    as19_calib_resampled = resample_ensemble_by_data(observed, calib, rcps, fudge_factor=2)
+    as19_resampled = resample_ensemble_by_data(observed, as19, rcps)
+    as19_calib_resampled = resample_ensemble_by_data(observed, calib, rcps)
 
     as19["Ensemble"] = "AS19"
     calib["Ensemble"] = "Flow Calib."
     as19_resampled["Ensemble"] = "Mass Calib."
-    as19_resampled_3["Ensemble"] = "Mass Calib. S3"
-    as19_resampled_2["Ensemble"] = "Mass Calib. S2"
-    as19_resampled_1["Ensemble"] = "Mass Calib. S1"
-    as19_calib_resampled_3["Ensemble"] = "Flow+Mass Calib. S3"
-    as19_calib_resampled_2["Ensemble"] = "Flow+Mass Calib. S2"
-    as19_calib_resampled_1["Ensemble"] = "Flow+Mass Calib. S1"
     as19_calib_resampled["Ensemble"] = "Flow+Mass Calib."
     all_df = (
         pd.concat(
@@ -1400,12 +1082,6 @@ if __name__ == "__main__":
                 as19,
                 calib,
                 as19_resampled,
-                as19_resampled_3,
-                as19_resampled_2,
-                as19_resampled_1,
-                as19_calib_resampled_3,
-                as19_calib_resampled_2,
-                as19_calib_resampled_1,
                 as19_calib_resampled,
             ]
         )
@@ -1419,13 +1095,12 @@ if __name__ == "__main__":
     q_df = make_quantile_df(all_2100_df, quantiles)
 
     plot_partitioning("historical_partitioning.pdf", simulated=all_df, observed=observed)
-    plot_historical("historical.pdf", simulated=all_df, observed=observed)
     plot_projection("projection_as19.pdf", simulated=all_df, ensemble="AS19", quantiles=[0.05, 0.16, 0.84, 0.95])
     plot_projection(
         "projection_flow.pdf", simulated=all_df, ensemble="Flow Calib.", quantiles=[0.05, 0.16, 0.84, 0.95]
     )
     plot_projection(
-        "projection_flowmass.pdf", simulated=all_df, ensemble="Flow+Mass Calib.", quantiles=[0.05, 0.16, 0.84, 0.95]
+        "projection_calibrated.pdf", simulated=all_df, ensemble="Flow+Mass Calib.", quantiles=[0.05, 0.16, 0.84, 0.95]
     )
     plot_projection(
         "projection_as19_bars.pdf",
@@ -1444,34 +1119,13 @@ if __name__ == "__main__":
     plot_projection(
         "projection_calibrated_bars.pdf",
         simulated=all_df,
-        ensemble="Flow+Mass Calib. S2",
+        ensemble="Flow+Mass Calib.",
         quantiles=[0.05, 0.16, 0.84, 0.95],
-        bars=["Flow+Mass Calib. S2"],
+        bars=["Flow+Mass Calib."],
     )
-    plot_projection(
-        "projection_calibrated_bars_s1.pdf",
-        simulated=all_df,
-        ensemble="Flow+Mass Calib. S1",
-        quantiles=[0.05, 0.16, 0.84, 0.95],
-        bars=["AS19", "Flow Calib.", "Flow+Mass Calib. S1"],
-    )
-    plot_projection(
-        "projection_calibrated_bars_s2.pdf",
-        simulated=all_df,
-        ensemble="Flow+Mass Calib. S2",
-        quantiles=[0.05, 0.16, 0.84, 0.95],
-        bars=["AS19", "Flow Calib.", "Flow+Mass Calib. S2"],
-    )
-    plot_projection(
-        "projection_calibrated_bars_s3.pdf",
-        simulated=all_df,
-        ensemble="Flow+Mass Calib. S3",
-        quantiles=[0.05, 0.16, 0.84, 0.95],
-        bars=["AS19", "Flow Calib.", "Flow+Mass Calib. S3"],
-    )
-    plot_posterior_sle_pdfs(f"sle_pdf_{year}.pdf", all_df, year=year)
-    compare_sle_pdfs_1(f"sle_pdf_betas_{year}.pdf", all_df, year=year)
-    plot_histograms(f"histograms_{year}.pdf", all_2100_df)
+
+    years = [2018, 2100]
+    plot_posterior_sle_pdfs(f"sle_pdf_{years[0]}_{years[1]}.pdf", all_df, observed=observed, years=years)
 
     make_quantile_table(q_df)
 
