@@ -8,7 +8,6 @@ import re
 import sys
 from pathlib import Path
 
-from pkg_resources import parse_version
 from setuptools import find_packages, setup
 
 # load version form _version.py
@@ -28,6 +27,8 @@ requirements = [
     "matplotlib>=2.2.2",
     "seaborn>=0.8",
     "xarray",
+    "torch",
+    "pytorch-lightning",
 ]
 
 packages = find_packages(".")
