@@ -491,16 +491,17 @@ def plot_partitioning(
     fig.savefig(out_filename, bbox_inches="tight")
 
 
-
 def plot_posterior_sle_pdfs(
     out_filename,
     df,
     observed=None,
+    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     years=[2018, 2100],
+    ylim=None,
 ):
 
-    ensembles = ["AS19", "Flow Calib.", "Flow+Mass Calib."]
     alphas = [0.8, 0.9, 1.0]
+    m_alphas = alphas[: len(ensembles)]
 
     fig, axs = plt.subplots(
         6,
@@ -528,7 +529,7 @@ def plot_posterior_sle_pdfs(
                 multiple="layer",
                 fill=True,
                 lw=0,
-                palette=[color_tint(rcp_col_dict[rcp], alpha) for alpha in alphas],
+                palette=[color_tint(rcp_col_dict[rcp], alpha) for alpha in m_alphas],
                 ax=axs[k * 2 + 1, y],
             )
 
@@ -608,6 +609,8 @@ def plot_posterior_sle_pdfs(
                 axs[k * 2 + 1, y].legend().remove()
 
                 axs[0, y].set_title(f"Year {year}")
+                if ylim is not None:
+                    axs[(k * 2) + 1, y].set_ylim(ylim)
 
         if observed is not None:
             obs = observed[(observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)]
@@ -621,26 +624,35 @@ def plot_posterior_sle_pdfs(
         add_inner_title(axs[k * 2 + 1, 0], rcp_dict[rcp])
 
     l_as19 = Patch(
-        facecolor=str(alphas[2] - 0.2 * (len(ensembles) - 2)), edgecolor="0.0", linewidth=0.25, label="Prior (AS19)"
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[0] - 0.6), edgecolor="0.0", linewidth=0.25, label="Prior (AS19)"
     )
-    l_mass = Patch(
-        facecolor=str(alphas[1] - 0.2 * (len(ensembles) - 1)),
+    l_flow = Patch(
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[1] - 0.4),
         edgecolor="0.0",
         linewidth=0.25,
         label="Posterior (Flow Calib.)",
     )
+    l_mass = Patch(
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[1] - 0.4),
+        edgecolor="0.0",
+        linewidth=0.25,
+        label="Posterior (Mass Calib.)",
+    )
     l_calib = Patch(
-        facecolor=str(alphas[0] - 0.2 * (len(ensembles) - 0)),
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[2] - 0.2),
         edgecolor="0.0",
         linewidth=0.25,
         label="Posterior (Flow+Mass Calib.)",
     )
 
+    ens_label_dict = {"AS19": l_as19, "Flow Calib.": l_flow, "Mass Calib.": l_mass, "Flow+Mass Calib.": l_calib}
+
     legend_1 = axs[-1, 0].legend(
-        handles=[l_as19, l_mass, l_calib],
+        handles=[ens_label_dict[e] for e in ensembles],
         loc="upper left",
-        bbox_to_anchor=(0.4, 1.1, 0, 0),
+        bbox_to_anchor=(0.45, 1.1, 0, 0),
     )
+
     legend_1.get_frame().set_linewidth(0.0)
     legend_1.get_frame().set_alpha(0.0)
     axs[-1, 0].add_artist(legend_1)
@@ -658,18 +670,18 @@ def plot_posterior_sle_pdfs(
     fig.tight_layout()
     fig.savefig(out_filename)
 
+
 def plot_posterior_sle_pdf(
     out_filename,
     df,
     observed=None,
     year=2100,
-    ensembles = ["AS19", "Flow Calib.", "Flow+Mass Calib."],
+    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     ylim=None,
 ):
 
-    
     alphas = [0.8, 0.9, 1.0]
-    m_alphas = alphas[:len(ensembles)]
+    m_alphas = alphas[: len(ensembles)]
     fig, axs = plt.subplots(
         6,
         1,
@@ -790,23 +802,28 @@ def plot_posterior_sle_pdf(
         add_inner_title(axs[k * 2 + 1], rcp_dict[rcp])
 
     l_as19 = Patch(
-        facecolor=color_tint(rcp_col_dict[rcp], alphas[0]- 0.6), edgecolor="0.0", linewidth=0.25, label="Prior (AS19)"
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[0] - 0.6), edgecolor="0.0", linewidth=0.25, label="Prior (AS19)"
     )
     l_flow = Patch(
-        facecolor=color_tint(rcp_col_dict[rcp], alphas[1]- 0.4),
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[1] - 0.4),
         edgecolor="0.0",
         linewidth=0.25,
         label="Posterior (Flow Calib.)",
     )
+    l_mass = Patch(
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[1] - 0.4),
+        edgecolor="0.0",
+        linewidth=0.25,
+        label="Posterior (Mass Calib.)",
+    )
     l_calib = Patch(
-        facecolor=color_tint(rcp_col_dict[rcp], alphas[2]- 0.2),
+        facecolor=color_tint(rcp_col_dict[rcp], alphas[2] - 0.2),
         edgecolor="0.0",
         linewidth=0.25,
         label="Posterior (Flow+Mass Calib.)",
     )
 
-
-    ens_label_dict = {"AS19": l_as19, "Flow Calib.": l_flow, "Flow+Mass Calib.": l_calib}
+    ens_label_dict = {"AS19": l_as19, "Flow Calib.": l_flow, "Mass Calib.": l_mass, "Flow+Mass Calib.": l_calib}
 
     legend_1 = axs[-1].legend(
         handles=[ens_label_dict[e] for e in ensembles],
@@ -817,7 +834,7 @@ def plot_posterior_sle_pdf(
     legend_1.get_frame().set_alpha(0.0)
     axs[-1].add_artist(legend_1)
 
-    if observed:
+    if observed is not None:
         l_obs_mean = Line2D([], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean")
         l_obs_std = Line2D([], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$")
         legend_2 = axs[1].legend(
@@ -830,6 +847,7 @@ def plot_posterior_sle_pdf(
 
     fig.tight_layout()
     fig.savefig(out_filename)
+
 
 def plot_histograms(out_filename, df):
 
@@ -1290,22 +1308,67 @@ if __name__ == "__main__":
 
     years = [2018, 2100]
     plot_posterior_sle_pdfs(f"sle_pdf_{years[0]}_{years[1]}.pdf", all_df, observed=observed, years=years)
+    plot_posterior_sle_pdfs(
+        f"sle_pdf_as19_{years[0]}_{years[1]}.pdf", all_df, observed=observed, years=years, ensembles=["AS19"]
+    )
+    plot_posterior_sle_pdfs(
+        f"sle_pdf_as19flow_{years[0]}_{years[1]}.pdf",
+        all_df,
+        observed=observed,
+        years=years,
+        ensembles=["AS19", "Flow Calib."],
+    )
+    plot_posterior_sle_pdfs(
+        f"sle_pdf_massflow_{years[0]}_{years[1]}.pdf",
+        all_df,
+        observed=observed,
+        years=years,
+        ensembles=["AS19", "Mass Calib.", "Flow+Mass Calib."],
+    )
+    plot_posterior_sle_pdfs(f"sle_pdf_calibratded_{years[0]}_{years[1]}.pdf", all_df, observed=observed, years=years)
+
+    year = 2018
+    plot_posterior_sle_pdf(f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"])
+    plot_posterior_sle_pdf(f"sle_pdf_as19_{year}.pdf", all_df, year=year, observed=observed, ensembles=["AS19"])
+
+    year = 2018
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"], ylim=[0, 2.5], observed=observed
+    )
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_as19flow_{year}.pdf",
+        all_df,
+        year=year,
+        ensembles=["AS19", "Flow Calib."],
+        ylim=[0, 2.5],
+        observed=observed,
+    )
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_as19mass_{year}.pdf",
+        all_df,
+        year=year,
+        ylim=[0, 2.5],
+        observed=observed,
+        ensembles=["AS19", "Mass Calib.", "Flow+Mass Calib."],
+    )
+    plot_posterior_sle_pdf(f"sle_pdf_w_obs_calibrated_{year}.pdf", all_df, year=year, ylim=[0, 2.5], observed=observed)
     year = 2100
     plot_posterior_sle_pdf(f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"])
-    plot_posterior_sle_pdf(f"sle_pdf_calibrate_{year}.pdf", all_df, year=year)
+    plot_posterior_sle_pdf(f"sle_pdf_as19flow_{year}.pdf", all_df, year=year, ensembles=["AS19", "Flow Calib."])
+    plot_posterior_sle_pdf(f"sle_pdf_calibrated_{year}.pdf", all_df, year=year)
 
-    make_quantile_table(q_df)
+    # make_quantile_table(q_df)
 
-    q_df["90%"] = q_df[0.95] - q_df[0.05]
-    q_df["68%"] = q_df[0.84] - q_df[0.16]
-    q_df.astype({"90%": np.float32, "68%": np.float32})
+    # q_df["90%"] = q_df[0.95] - q_df[0.05]
+    # q_df["68%"] = q_df[0.84] - q_df[0.16]
+    # q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
-        q_df["Ensemble"] == "AS19"
-    ][["90%", "68%", 0.5]].reset_index(drop=True)
+    # q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
+    #     q_df["Ensemble"] == "AS19"
+    # ][["90%", "68%", 0.5]].reset_index(drop=True)
 
-    q_rel = q_abs / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True) * 100
+    # q_rel = q_abs / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True) * 100
 
-    q_abs["RCP"] = rcpss
-    q_rel["RCP"] = rcpss
-    print(q_rel)
+    # q_abs["RCP"] = rcpss
+    # q_rel["RCP"] = rcpss
+    # print(q_rel)
