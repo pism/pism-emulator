@@ -716,10 +716,10 @@ def plot_posterior_sle_pdfs(
         l_obs_std = Line2D(
             [], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$"
         )
-        legend_2 = axs[-1, 0].legend(
+        legend_2 = axs[-3, 0].legend(
             handles=[l_obs_mean, l_obs_std],
             loc="lower left",
-            bbox_to_anchor=(0.4, 0.05, 0, 0),
+            bbox_to_anchor=(0.4, 0.45, 0, 0),
         )
         legend_2.get_frame().set_linewidth(0.0)
         legend_2.get_frame().set_alpha(0.0)
@@ -916,10 +916,10 @@ def plot_posterior_sle_pdf(
         l_obs_std = Line2D(
             [], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$"
         )
-        legend_2 = axs[-1].legend(
+        legend_2 = axs[-3].legend(
             handles=[l_obs_mean, l_obs_std],
             loc="lower left",
-            bbox_to_anchor=(0.4, 0.05, 0, 0),
+            bbox_to_anchor=(0.4, 0.45, 0, 0),
         )
         legend_2.get_frame().set_linewidth(0.0)
         legend_2.get_frame().set_alpha(0.0)
@@ -1278,9 +1278,6 @@ ts_median_palette_dict = {
     "Flow+Mass Calib.": "0.0",
 }
 
-# cm = sns.color_palette("ch:s=-.2,r=.6", n_colors=6, as_cmap=False).as_hex()
-# ts_median_palette_dict = {"AS19": cm[0], "Flow Calib.": cm[1], "Resampled": cm[2]}
-
 calibration_start = 2010
 calibration_end = 2020
 proj_start = 2008
@@ -1386,6 +1383,12 @@ if __name__ == "__main__":
         observed=observed,
         ensembles=["AS19", "Flow Calib."],
     )
+    plot_partitioning(
+        "historical_partitioning_mass.pdf",
+        simulated=all_df,
+        observed=observed,
+        ensembles=["AS19", "Mass Calib."],
+    )
     plot_projection(
         "projection_as19.pdf",
         simulated=all_df,
@@ -1473,6 +1476,26 @@ if __name__ == "__main__":
         ensembles=["AS19"],
     )
 
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_as19flow_{year}.pdf",
+        all_df,
+        year=year,
+        ensembles=["AS19", "Flow Calib."],
+        observed=observed,
+    )
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_as19mass_{year}.pdf",
+        all_df,
+        year=year,
+        observed=observed,
+        ensembles=["AS19", "Mass Calib.", "Flow+Mass Calib."],
+    )
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_calibrated_{year}.pdf",
+        all_df,
+        year=year,
+        observed=observed,
+    )
     year = 2018
     plot_posterior_sle_pdf(
         f"sle_pdf_w_obs_scaled_as19_{year}.pdf",
@@ -1519,16 +1542,24 @@ if __name__ == "__main__":
 
     # make_quantile_table(q_df)
 
-    # q_df["90%"] = q_df[0.95] - q_df[0.05]
-    # q_df["68%"] = q_df[0.84] - q_df[0.16]
-    # q_df.astype({"90%": np.float32, "68%": np.float32})
+    q_df["90%"] = q_df[0.95] - q_df[0.05]
+    q_df["68%"] = q_df[0.84] - q_df[0.16]
+    q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    # q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
-    #     q_df["Ensemble"] == "AS19"
-    # ][["90%", "68%", 0.5]].reset_index(drop=True)
+    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][
+        ["90%", "68%", 0.5]
+    ].reset_index(drop=True) - q_df[q_df["Ensemble"] == "AS19"][
+        ["90%", "68%", 0.5]
+    ].reset_index(
+        drop=True
+    )
 
-    # q_rel = q_abs / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True) * 100
+    q_rel = (
+        q_abs
+        / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True)
+        * 100
+    )
 
-    # q_abs["RCP"] = rcpss
-    # q_rel["RCP"] = rcpss
-    # print(q_rel)
+    q_abs["RCP"] = rcpss
+    q_rel["RCP"] = rcpss
+    print(q_rel)
