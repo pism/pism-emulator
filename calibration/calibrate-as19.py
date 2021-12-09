@@ -532,7 +532,7 @@ def plot_posterior_sle_pdfs(
         6,
         2,
         sharex="col",
-        figsize=[6.2, 4.2],
+        figsize=[5.8, 4.2],
         gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * 3),
     )
     fig.subplots_adjust(hspace=0.0, wspace=0)
