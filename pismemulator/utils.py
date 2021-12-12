@@ -55,6 +55,36 @@ param_keys_dict = {
 }
 
 
+def load_imbie_csv(proj_start=2008):
+
+    df = pd.read_csv("imbie_greenland_2021_Gt.csv")
+
+    df = df.rename(
+        columns={
+            "Mass balance (Gt/yr)": "Mass change (Gt/yr)",
+            "Mass balance uncertainty (Gt/yr)": "Mass change uncertainty (Gt/yr)",
+            "Cumulative mass balance (Gt)": "Mass (Gt)",
+            "Cumulative mass balance uncertainty (Gt)": "Mass uncertainty (Gt)",
+        }
+    )
+    df = df[df["Year"] >= proj_start]
+    for v in [
+        "Mass (Gt)",
+    ]:
+        df[v] -= df[df["Year"] == proj_start][v].values
+
+    cmSLE = 1.0 / 362.5 / 10.0
+    df["Mass change uncertainty squared (Gt/yr)"] = (
+        df["Mass change uncertainty (Gt/yr)"] ** 2
+    )
+    df["Mass uncertainty (Gt)"] = np.sqrt(df["Mass change uncertainty squared (Gt/yr)"])
+    df = df.drop(columns=["Mass change uncertainty squared (Gt/yr)"])
+    df["SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
+    df["SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
+    df["SLE change uncertainty (cm/yr)"] = df["Mass change uncertainty (Gt/yr)"] * cmSLE
+    return df
+
+
 def load_imbie(proj_start=2008):
     """
     Loading the IMBIE Greenland data set downloaded from
@@ -62,18 +92,18 @@ def load_imbie(proj_start=2008):
 
     """
     try:
-        imbie_df = pd.read_excel(
+        df_df = pd.read_excel(
             "http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
             sheet_name="Greenland Ice Mass",
             engine="openpyxl",
         )
     except:
-        imbie_df = pd.read_excel(
+        df_df = pd.read_excel(
             "imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
             sheet_name="Greenland Ice Mass",
             engine="openpyxl",
         )
-    imbie = imbie_df[
+    df = df_df[
         [
             "Year",
             "Cumulative ice sheet mass change (Gt)",
@@ -103,27 +133,38 @@ def load_imbie(proj_start=2008):
         "Cumulative ice dynamics anomaly (Gt)",
         "Cumulative surface mass balance anomaly (Gt)",
     ]:
-        imbie[v] -= imbie[imbie["Year"] == proj_start][v].values
+        df[v] -= df[df["Year"] == proj_start][v].values
 
-    s = imbie[(imbie["Year"] >= 1980) & (imbie["Year"] < 1990)]
+    s = df[(df["Year"] >= 1980) & (df["Year"] < 1990)]
     mass_mean = s["Mass (Gt)"].mean() / (1990 - 1980)
     smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
-    imbie[f"SMB (Gt/yr)"] += 2 * 1964 / 10
-    imbie[f"D (Gt/yr)"] -= 2 * 1964 / 10
+    df[f"SMB (Gt/yr)"] += 2 * 1964 / 10
+    df[f"D (Gt/yr)"] -= 2 * 1964 / 10
     cmSLE = 1.0 / 362.5 / 10.0
-    imbie[f"SLE (cm)"] = -imbie["Mass (Gt)"] * cmSLE
-    imbie[f"SLE uncertainty (cm)"] = imbie["Mass uncertainty (Gt)"] * cmSLE
+    df[f"SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
+    df[f"SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
 
-    return imbie
+    return df
 
 
-def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=False, return_fig=False):
+def plot_validation(
+    e,
+    F_mean,
+    dataset,
+    data_loader,
+    model_index,
+    emulator_dir,
+    validation=False,
+    return_fig=False,
+):
     """
     Plot target (PISM) and predicted (Emulator) speeds for validation
     """
     e.eval()
     cmap = "viridis"
-    fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8))
+    fig, axs = plt.subplots(
+        nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
+    )
     r_idx = np.random.choice(len(data_loader.all_data), size=4, replace=False)
     for k, idx in enumerate(r_idx):
         (
@@ -148,9 +189,13 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
         corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-        c1 = axs[0, k].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+        c1 = axs[0, k].imshow(
+            F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
+        )
         axs[1, k].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
-        c2 = axs[2, k].imshow(F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm")
+        c2 = axs[2, k].imshow(
+            F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm"
+        )
         axs[1, k].text(
             0.01,
             0.00,
@@ -162,7 +207,9 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         axs[-1, k].text(
             0.01,
             -0.51,
-            "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]),
+            "\n".join(
+                [f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]
+            ),
             c="k",
             size=7,
             transform=axs[-1, k].transAxes,
@@ -209,9 +256,23 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
     )
 
     cb_ax = fig.add_axes([0.88, 0.525, 0.025, 0.15])
-    plt.colorbar(c1, cax=cb_ax, shrink=0.9, label="speed (m/yr)", orientation="vertical", extend="both")
+    plt.colorbar(
+        c1,
+        cax=cb_ax,
+        shrink=0.9,
+        label="speed (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
     cb_ax2 = fig.add_axes([0.88, 0.15, 0.025, 0.15])
-    plt.colorbar(c2, cax=cb_ax2, shrink=0.9, label="diff. (m/yr)", orientation="vertical", extend="both")
+    plt.colorbar(
+        c2,
+        cax=cb_ax2,
+        shrink=0.9,
+        label="diff. (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
     cb_ax.tick_params(labelsize=7)
     cb_ax.set_yticklabels([1, 10, 100, 1000])
     cb_ax2.tick_params(labelsize=7)
@@ -231,20 +292,37 @@ def plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, 
         return fig
 
 
-def plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, nrows=2, ncols=3, figsize=(3.2, 3.6)):
+def plot_eigenglaciers(
+    dataset,
+    data_loader,
+    model_index,
+    emulator_dir,
+    nrows=2,
+    ncols=3,
+    figsize=(3.2, 3.6),
+):
 
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
 
     lamda_scaled = lamda / lamda.sum() * 100
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize)
+    fig, axs = plt.subplots(
+        nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize
+    )
     for k, ax in enumerate(axs.ravel()):
         V = V_hat[:, k]
         data = np.zeros((dataset.ny, dataset.nx))
         data.put(dataset.sparse_idx_1d, V)
         eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
-        c = ax.imshow(eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3)
+        c = ax.imshow(
+            eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3
+        )
 
-        ax.text(0.05, -0.025, f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%", transform=ax.transAxes)
+        ax.text(
+            0.05,
+            -0.025,
+            f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%",
+            transform=ax.transAxes,
+        )
         ax.axis("off")
     fig.subplots_adjust(wspace=0.05, hspace=0.05)
     plt.tight_layout()
@@ -366,7 +444,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                 if len(subnames) != 2:
                     sys.exit("Interaction unexpected")
                 # Temporary X that contains the interaction term
-                tempX = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
+                tempX = np.column_stack(
+                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
+                )
                 # BIC for baseline model + interaction term
                 lm_bic = calc_bic(tempX, Y)
             else:
@@ -381,9 +461,17 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
         min_key = min(bic_dict.keys(), key=(lambda k: bic_dict[k]))
         min_bic = bic_dict[min_key]
         if "*" in min_key:
-            print("  Minimum BIC = {:2.2f} when adding {} to model".format(min_bic, min_key))
+            print(
+                "  Minimum BIC = {:2.2f} when adding {} to model".format(
+                    min_bic, min_key
+                )
+            )
         else:
-            print("  Minimum BIC = {:2.2f} when removing {} from model".format(min_bic, min_key))
+            print(
+                "  Minimum BIC = {:2.2f} when removing {} from model".format(
+                    min_bic, min_key
+                )
+            )
 
         # Compare lowest BIC to baseline model BIC
         if min_bic < whole_lm_bic:
@@ -406,7 +494,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                         print("  Removed {} from model-eligible variables".format(s))
 
                 # Update X and BIC to reflect new baseline model
-                X = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
+                X = np.column_stack(
+                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
+                )
                 whole_lm_bic = calc_bic(X, Y)
 
             else:
@@ -478,16 +568,16 @@ def prepare_data(
     print("\nPreparing sample {} and response {}".format(samples_file, response_file))
 
     # Load Samples file as Pandas DataFrame
-    samples = pd.read_csv(samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-        by=identifier_name
-    )
+    samples = pd.read_csv(
+        samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+    ).sort_values(by=identifier_name)
     samples.index = samples[identifier_name]
     samples.index.name = None
 
     # Load Response file as Pandas DataFrame
-    response = pd.read_csv(response_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-        by=identifier_name
-    )
+    response = pd.read_csv(
+        response_file, delimiter=",", squeeze=True, skipinitialspace=True
+    ).sort_values(by=identifier_name)
     response.index = response[identifier_name]
     response.index.name = None
 

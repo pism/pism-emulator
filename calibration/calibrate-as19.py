@@ -14,7 +14,7 @@ import seaborn as sns
 from functools import reduce
 from itertools import cycle
 
-from pismemulator.utils import load_imbie
+from pismemulator.utils import load_imbie, load_imbie_csv
 from scipy.interpolate import interp1d
 
 
@@ -102,15 +102,12 @@ def plot_historical(
     quantiles=[0.05, 0.95],
     sigma=2,
     simulated_ctrl=None,
+    xlims=[2008, 2021],
+    ylims=[-10000, 500],
 ):
     """
     Plot historical simulations and observations
     """
-
-    xmin = 2008
-    xmax = 2020
-    ymin = -10000
-    ymax = 500
 
     fig = plt.figure(num="historical", clear=True, figsize=[4.6, 1.6])
     ax = fig.add_subplot(111)
@@ -179,6 +176,8 @@ def plot_historical(
         )
         legend_handles.append(obs_ci)
 
+        if simulated is None:
+            r = 0
         legend = ax.legend(
             handles=legend_handles,
             loc="lower left",
@@ -195,11 +194,11 @@ def plot_historical(
     ax.set_xlabel("Year")
     ax.set_ylabel(f"Cumulative mass change\nsince {proj_start} (Gt)")
 
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
+    ax.set_xlim(xlims)
+    ax.set_ylim(ylims)
     ax_sle = ax.twinx()
     ax_sle.set_ylabel(f"Contribution to sea-level \nsince {proj_start} (cm SLE)")
-    ax_sle.set_ylim(-ymin * gt2cmSLE, -ymax * gt2cmSLE)
+    ax_sle.set_ylim(-np.array(ylims) * gt2cmSLE)
 
     fig.savefig(out_filename, bbox_inches="tight")
 
@@ -211,15 +210,12 @@ def plot_projection(
     quantiles=[0.05, 0.95],
     bars=None,
     quantile_df=None,
+    xlims=[2008, 2100],
+    ylims=[-0.5, 45],
 ):
     """
     Plot historical simulations and observations
     """
-
-    xmin = 2008
-    xmax = 2100
-    ymax = 45
-    ymin = -0.5
 
     if bars:
         fig, axs = plt.subplots(
@@ -295,8 +291,8 @@ def plot_projection(
     ax.set_xlabel("Year")
     ax.set_ylabel(f"Contribution to sea-level\nsince {proj_start} (cm SLE)")
 
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
+    ax.set_xlim(xlims)
+    ax.set_ylim(ylims)
 
     if bars is not None:
         width = 1.0
@@ -520,7 +516,7 @@ def plot_posterior_sle_pdfs(
     df,
     observed=None,
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    years=[2018, 2100],
+    years=[2020, 2100],
     ylim=None,
 ):
 
@@ -1091,9 +1087,11 @@ def resample_ensemble_by_data(
     rcps,
     calibration_start=2008,
     calibration_end=2020,
-    fudge_factor=3.0,
+    fudge_factor=4.0,
     n_samples=500,
     verbose=False,
+    m_var="Mass (Gt)",
+    m_var_std="Mass uncertainty (Gt)",
 ):
     """
     Resampling algorithm by Douglas C. Brinkerhoff
@@ -1120,12 +1118,13 @@ def resample_ensemble_by_data(
         observed["Year"] <= calibration_end
     )
     observed_calib_period = observed[observed_calib_time]
+    # print(observed_calib_period)
     # Should we interpolate the simulations at observed time?
     observed_interp_mean = interp1d(
-        observed_calib_period["Year"], observed_calib_period["Mass (Gt)"]
+        observed_calib_period["Year"], observed_calib_period[m_var]
     )
     observed_interp_std = interp1d(
-        observed_calib_period["Year"], observed_calib_period["Mass uncertainty (Gt)"]
+        observed_calib_period["Year"], observed_calib_period[m_var_std]
     )
 
     simulated_calib_time = (simulated["Year"] >= calibration_start) & (
@@ -1144,7 +1143,7 @@ def resample_ensemble_by_data(
                 & (simulated_calib_period["RCP"] == rcp)
             ]
             log_like = 0.0
-            for year, exp_mass in zip(exp_["Year"], exp_["Mass (Gt)"]):
+            for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
                 try:
                     observed_mass = observed_interp_mean(year)
                     observed_std = observed_interp_std(year) * fudge_factor
@@ -1341,7 +1340,8 @@ if __name__ == "__main__":
     options = parser.parse_args()
 
     # Load Observations
-    observed = load_imbie()
+    observed_f = load_imbie()
+    observed = load_imbie_csv()
 
     # Load AS19 (original LES)
     as19 = load_df(options.as19_results_file, options.as19_samples_file)
@@ -1375,18 +1375,18 @@ if __name__ == "__main__":
     q_df = make_quantile_df(all_2100_df, quantiles)
 
     plot_partitioning(
-        "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed
+        "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
     )
     plot_partitioning(
         "historical_partitioning_flow.pdf",
         simulated=all_df,
-        observed=observed,
+        observed=observed_f,
         ensembles=["AS19", "Flow Calib."],
     )
     plot_partitioning(
         "historical_partitioning_mass.pdf",
         simulated=all_df,
-        observed=observed,
+        observed=observed_f,
         ensembles=["AS19", "Mass Calib."],
     )
     plot_projection(
@@ -1429,7 +1429,7 @@ if __name__ == "__main__":
         bars=["Flow+Mass Calib."],
     )
 
-    years = [2018, 2100]
+    years = [2020, 2100]
     plot_posterior_sle_pdfs(
         f"sle_pdf_w_obs_{years[0]}_{years[1]}.pdf",
         all_df,
@@ -1464,7 +1464,7 @@ if __name__ == "__main__":
         years=years,
     )
 
-    year = 2018
+    year = 2020
     plot_posterior_sle_pdf(
         f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"]
     )
@@ -1496,7 +1496,7 @@ if __name__ == "__main__":
         year=year,
         observed=observed,
     )
-    year = 2018
+    year = 2020
     plot_posterior_sle_pdf(
         f"sle_pdf_w_obs_scaled_as19_{year}.pdf",
         all_df,
