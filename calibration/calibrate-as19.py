@@ -1085,9 +1085,9 @@ def resample_ensemble_by_data(
     observed,
     simulated,
     rcps,
-    calibration_start=2008,
+    calibration_start=2010,
     calibration_end=2020,
-    fudge_factor=4.0,
+    fudge_factor=3,
     n_samples=500,
     verbose=False,
     m_var="Mass (Gt)",
@@ -1342,6 +1342,7 @@ if __name__ == "__main__":
     # Load Observations
     observed_f = load_imbie()
     observed = load_imbie_csv()
+    # observed = observed_f
 
     # Load AS19 (original LES)
     as19 = load_df(options.as19_results_file, options.as19_samples_file)

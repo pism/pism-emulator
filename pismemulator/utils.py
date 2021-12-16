@@ -67,18 +67,17 @@ def load_imbie_csv(proj_start=2008):
             "Cumulative mass balance uncertainty (Gt)": "Mass uncertainty (Gt)",
         }
     )
-    df = df[df["Year"] >= proj_start]
     for v in [
         "Mass (Gt)",
     ]:
         df[v] -= df[df["Year"] == proj_start][v].values
 
     cmSLE = 1.0 / 362.5 / 10.0
-    df["Mass change uncertainty squared (Gt/yr)"] = (
-        df["Mass change uncertainty (Gt/yr)"] ** 2
-    )
-    df["Mass uncertainty (Gt)"] = np.sqrt(df["Mass change uncertainty squared (Gt/yr)"])
-    df = df.drop(columns=["Mass change uncertainty squared (Gt/yr)"])
+    # df["Mass change uncertainty squared (Gt/yr)"] = (
+    #     df["Mass change uncertainty (Gt/yr)"] ** 2
+    # )
+    # df["Mass uncertainty (Gt)"] = np.sqrt(df["Mass change uncertainty squared (Gt/yr)"])
+    # df = df.drop(columns=["Mass change uncertainty squared (Gt/yr)"])
     df["SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
     df["SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
     df["SLE change uncertainty (cm/yr)"] = df["Mass change uncertainty (Gt/yr)"] * cmSLE
@@ -382,7 +381,7 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
     """
     Stepwise model selection using the Bayesian Information Criterion (BIC)
 
-    General function (not project-specific) modeled after R's stepAIC function.
+    General fuction (not project-specific) modeled after R's stepAIC function.
 
     Starts with full least squares model as in backward selection. If interactions=True, performs
     bidirectional stepwise selection. Otherwise only performs backwards selection.
