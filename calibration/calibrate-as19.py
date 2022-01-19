@@ -925,31 +925,37 @@ def plot_posterior_sle_pdf(
     del fig
 
 
-def plot_histograms(out_filename, df):
+def plot_histograms(
+    out_filename,
+    df,
+    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
+):
 
     fig, axs = plt.subplots(4, 4, figsize=[6.2, 4.4])
     fig.subplots_adjust(hspace=0.5, wspace=0.4)
 
-    f = sns.histplot(
+    sns.histplot(
         data=df,
         x="GCM",
         hue="Ensemble",
+        hue_order=ensembles,
         common_norm=False,
         palette=palette_dict.values(),
         bins=[-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
         stat="density",
         multiple="dodge",
-        linewidth=0.5,
+        linewidth=0.25,
+        legend=False,
         ax=axs[0, 0],
     )
-    f.get_legend().set_bbox_to_anchor([1, -2])
     f = sns.kdeplot(
         data=df,
         x="PRS",
         hue="Ensemble",
+        hue_order=ensembles,
         common_grid=False,
         common_norm=False,
-        palette=ts_median_palette_dict.values(),
+        palette=palette_dict.values(),
         linewidth=0.75,
         ax=axs[1, 0],
     )
@@ -958,9 +964,10 @@ def plot_histograms(out_filename, df):
         data=df,
         x="FICE",
         hue="Ensemble",
+        hue_order=ensembles,
         common_grid=False,
         common_norm=False,
-        palette=ts_median_palette_dict.values(),
+        palette=palette_dict.values(),
         linewidth=0.75,
         ax=axs[0, 1],
         legend=False,
@@ -969,9 +976,10 @@ def plot_histograms(out_filename, df):
         data=df,
         x="FSNOW",
         hue="Ensemble",
+        hue_order=ensembles,
         common_grid=False,
         common_norm=False,
-        palette=ts_median_palette_dict.values(),
+        palette=palette_dict.values(),
         linewidth=0.75,
         ax=axs[1, 1],
         legend=False,
@@ -980,10 +988,11 @@ def plot_histograms(out_filename, df):
         data=df,
         x="RFR",
         hue="Ensemble",
+        hue_order=ensembles,
         common_grid=False,
         common_norm=False,
-        palette=ts_median_palette_dict.values(),
-        linewidth=0.5,
+        palette=palette_dict.values(),
+        linewidth=0.75,
         ax=axs[2, 1],
         legend=False,
     )
@@ -991,12 +1000,13 @@ def plot_histograms(out_filename, df):
         data=df,
         x="OCM",
         hue="Ensemble",
+        hue_order=ensembles,
         common_norm=False,
         palette=palette_dict.values(),
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        linewidth=0.5,
+        linewidth=0.25,
         ax=axs[0, 2],
         legend=False,
     )
@@ -1004,12 +1014,13 @@ def plot_histograms(out_filename, df):
         data=df,
         x="OCS",
         hue="Ensemble",
+        hue_order=ensembles,
         common_norm=False,
         palette=palette_dict.values(),
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        linewidth=0.5,
+        linewidth=0.25,
         ax=axs[1, 2],
         legend=False,
     )
@@ -1017,12 +1028,13 @@ def plot_histograms(out_filename, df):
         data=df,
         x="TCT",
         hue="Ensemble",
+        hue_order=ensembles,
         common_norm=False,
         palette=palette_dict.values(),
         bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
         stat="density",
         multiple="dodge",
-        linewidth=0.5,
+        linewidth=0.25,
         ax=axs[2, 2],
         legend=False,
     )
@@ -1030,9 +1042,10 @@ def plot_histograms(out_filename, df):
         data=df,
         x="VCM",
         hue="Ensemble",
+        hue_order=ensembles,
         common_grid=False,
         common_norm=False,
-        palette=ts_median_palette_dict.values(),
+        palette=palette_dict.values(),
         linewidth=0.75,
         ax=axs[3, 2],
         legend=False,
@@ -1041,10 +1054,11 @@ def plot_histograms(out_filename, df):
         data=df,
         x="SIAE",
         hue="Ensemble",
+        hue_order=ensembles,
         common_grid=False,
         common_norm=False,
-        palette=ts_median_palette_dict.values(),
-        linewidth=0.5,
+        palette=palette_dict.values(),
+        linewidth=0.75,
         ax=axs[0, 3],
         legend=False,
     )
@@ -1052,9 +1066,10 @@ def plot_histograms(out_filename, df):
         data=df,
         x="PPQ",
         hue="Ensemble",
+        hue_order=ensembles,
         common_grid=False,
         common_norm=False,
-        palette=ts_median_palette_dict.values(),
+        palette=palette_dict.values(),
         linewidth=0.75,
         ax=axs[1, 3],
         legend=False,
@@ -1259,10 +1274,10 @@ rcp_col_dict = {26: "#003466", 45: "#5492CD", 85: "#990002"}
 rcp_shade_col_dict = {26: "#4393C3", 45: "#92C5DE", 85: "#F4A582"}
 rcp_dict = {26: "RCP 2.6", 45: "RCP 4.5", 85: "RCP 8.5"}
 palette_dict = {
-    "AS19": "0.70",
-    "Flow Calib.": "0.8",
-    "Mass Calib.": "#fee6ce",
-    "Flow+Mass Calib.": "0.60",
+    "AS19": "#c51b8a",
+    "Flow Calib.": "#31a354",
+    "Mass Calib.": "#2c7fb8",
+    "Flow+Mass Calib.": "0.0",
 }
 ts_fill_palette_dict = {
     "AS19": "0.80",
@@ -1271,8 +1286,8 @@ ts_fill_palette_dict = {
     "Flow+Mass Calib.": "0.60",
 }
 ts_median_palette_dict = {
-    "AS19": "0.50",
-    "Flow Calib.": "0.25",
+    "AS19": "0.6",
+    "Flow Calib.": "0.3",
     "Mass Calib.": "#e6550d",
     "Flow+Mass Calib.": "0.0",
 }
@@ -1374,6 +1389,8 @@ if __name__ == "__main__":
     all_2100_df = all_df[(all_df["Year"] == year)]
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
     q_df = make_quantile_df(all_2100_df, quantiles)
+
+    plot_histograms("hist.pdf", all_2100_df)
 
     plot_partitioning(
         "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
