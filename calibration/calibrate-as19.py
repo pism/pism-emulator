@@ -1383,6 +1383,7 @@ if __name__ == "__main__":
         )
         .drop_duplicates(subset=None, keep="first", inplace=False)
         .reset_index()
+        .astype({"Ensemble": str})
     )
 
     year = 2100
