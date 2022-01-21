@@ -1233,7 +1233,7 @@ def make_quantile_table(q_df):
     table_footer = """
     \hline
     \end{tabular}
-    \caption{tab:sle}
+    \label{tab:sle}
     \end{table}
     """
 
@@ -1391,7 +1391,7 @@ if __name__ == "__main__":
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
     q_df = make_quantile_df(all_2100_df, quantiles)
 
-    plot_histograms("hist.pdf", all_2100_df)
+    plot_histograms("marginal_posteriors_all.pdf", all_2100_df)
 
     plot_partitioning(
         "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
@@ -1559,7 +1559,7 @@ if __name__ == "__main__":
     )
     plot_posterior_sle_pdf(f"sle_pdf_calibrated_{year}.pdf", all_df, year=year)
 
-    # make_quantile_table(q_df)
+    make_quantile_table(q_df)
 
     q_df["90%"] = q_df[0.95] - q_df[0.05]
     q_df["68%"] = q_df[0.84] - q_df[0.16]
