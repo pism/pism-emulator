@@ -167,7 +167,14 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print("sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(i, acc, local_data[0].item()))
-                print(" ".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
+                print(
+                    " ".join(
+                        [
+                            f"{i}: {(j * dataset.X_std + dataset.X_mean):.3f}\n"
+                            for i, j in zip(dataset.X_keys, X.data.cpu().numpy())
+                        ]
+                    )
+                )
                 print("===============================================")
 
             if i % save_interval == 0:
@@ -179,6 +186,10 @@ class MALASampler(object):
                     open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"),
                     X_posterior.astype("float32"),
                 )
+                df = pd.DataFrame(
+                    data=X_posterior.astype("float32") * dataset.X_std + dataset.X_mean, columns=Dataset.X_keys
+                )
+                df.to_csv(posterior_dir + "X_posterior_model_{0:03d}.csv".format(model_index), compression="infer")
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 

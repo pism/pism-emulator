@@ -8,9 +8,8 @@ import re
 import sys
 from pathlib import Path
 
-from setuptools import find_packages, setup
+from setuptools import setup, find_packages
 
-# load version form _version.py
 
 with open(str(Path(".", "VERSION").absolute())) as version_file:
     version = version_file.read().strip()
