@@ -204,7 +204,10 @@ if __name__ == "__main__":
     parser.add_argument("--model_index", type=str, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
-    parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g9000m.nc")
+    parser.add_argument(
+        "--target_file",
+        default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+    )
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
