@@ -62,7 +62,7 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
-                print("".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
+                print("".join([f"{key}: {(val * std + mean):.3f}\n" for key, val, std, mean in zip(dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean)]))
                 print("===============================================")
         return X
 
@@ -170,8 +170,8 @@ class MALASampler(object):
                 print(
                     " ".join(
                         [
-                            f"{i}: {(j * dataset.X_std + dataset.X_mean):.3f}\n"
-                            for i, j in zip(dataset.X_keys, X.data.cpu().numpy())
+                            f"{key}: {(val * std + mean):.3f}\n"
+                            for key, val, std, mean in zip(dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean)
                         ]
                     )
                 )
@@ -187,7 +187,7 @@ class MALASampler(object):
                     X_posterior.astype("float32"),
                 )
                 df = pd.DataFrame(
-                    data=X_posterior.astype("float32") * dataset.X_std + dataset.X_mean, columns=Dataset.X_keys
+                    data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy(), columns=dataset.X_keys
                 )
                 df.to_csv(posterior_dir + "X_posterior_model_{0:03d}.csv".format(model_index), compression="infer")
         X_posterior = torch.stack(m_vars).cpu().numpy()
