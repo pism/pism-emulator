@@ -62,7 +62,16 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
-                print("".join([f"{key}: {(val * std + mean):.3f}\n" for key, val, std, mean in zip(dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean)]))
+                print(
+                    "".join(
+                        [
+                            f"{key}: {(val * std + mean):.3f}\n"
+                            for key, val, std, mean in zip(
+                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                            )
+                        ]
+                    )
+                )
                 print("===============================================")
         return X
 
@@ -171,7 +180,9 @@ class MALASampler(object):
                     " ".join(
                         [
                             f"{key}: {(val * std + mean):.3f}\n"
-                            for key, val, std, mean in zip(dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean)
+                            for key, val, std, mean in zip(
+                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                            )
                         ]
                     )
                 )
@@ -179,17 +190,18 @@ class MALASampler(object):
 
             if i % save_interval == 0:
                 print("///////////////////////////////////////////////")
-                print("Saving samples for model {0:03d}".format(model_index))
+                print("Saving samples for model {0}".format(model_index))
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
                 np.save(
-                    open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"),
+                    open(posterior_dir + "X_posterior_model_{0}.npy".format(model_index), "wb"),
                     X_posterior.astype("float32"),
                 )
                 df = pd.DataFrame(
-                    data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy(), columns=dataset.X_keys
+                    data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy(),
+                    columns=dataset.X_keys,
                 )
-                df.to_csv(posterior_dir + "X_posterior_model_{0:03d}.csv".format(model_index), compression="infer")
+                df.to_csv(posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index), compression="infer")
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
