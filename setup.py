@@ -3,16 +3,13 @@
 
 # pylint: skip-file
 
-import os
-import re
-import sys
 from pathlib import Path
-
-from setuptools import setup, find_packages
-
+from setuptools import setup
 
 with open(str(Path(".", "VERSION").absolute())) as version_file:
     version = version_file.read().strip()
+
+packages = ["pismemulator"]
 
 # Dependencies of pism-emulator
 requirements = [
@@ -24,19 +21,17 @@ requirements = [
     "pandas>=0.18.1",
     "pathlib",
     "matplotlib>=2.2.2",
+    "openpyxl>=3.0.0",
     "seaborn>=0.8",
     "xarray",
     "torch",
     "pytorch-lightning",
 ]
 
-packages = find_packages(".")
-
-
 setup(
     name="pismemulator",
     version=version,
-    author="Andy Aschwanden, Douglas C Brinkerhoff, Rachel S Chen",
+    author="Andy Aschwanden, Douglas C Brinkerhoff",
     author_email="andy.aschwanden@gmail.com",
     description=("Emulators for PISM"),
     license="GPL 3.0",
@@ -49,7 +44,6 @@ setup(
     },
     packages=packages,
     install_requires=requirements,
-    include_package_data=True,
     classifiers=[
         "License :: OSI Approved :: Apache Software License",
         "Natural Language :: English",

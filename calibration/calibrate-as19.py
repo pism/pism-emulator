@@ -1367,6 +1367,12 @@ if __name__ == "__main__":
     # Bayesian calibration: resampling
     as19_resampled = resample_ensemble_by_data(observed, as19, rcps)
     as19_calib_resampled = resample_ensemble_by_data(observed, calib, rcps)
+    as19_calib_resampled_100 = resample_ensemble_by_data(
+        observed, calib, rcps, n_samples=100
+    )
+    as19_calib_resampled_2500 = resample_ensemble_by_data(
+        observed, calib, rcps, n_samples=2500
+    )
 
     as19["Ensemble"] = "AS19"
     calib["Ensemble"] = "Flow Calib."
