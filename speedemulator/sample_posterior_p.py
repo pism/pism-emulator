@@ -62,7 +62,16 @@ class MALASampler(object):
             if i % print_interval == 0:
                 print("===============================================")
                 print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
-                print("".join([f"{i}: {(10**j):.3f}\n" for i, j in zip(dataset.X_keys, X.data.cpu().numpy())]))
+                print(
+                    "".join(
+                        [
+                            f"{key}: {(val * std + mean):.3f}\n"
+                            for key, val, std, mean in zip(
+                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                            )
+                        ]
+                    )
+                )
                 print("===============================================")
         return X
 
@@ -170,8 +179,10 @@ class MALASampler(object):
                 print(
                     " ".join(
                         [
-                            f"{i}: {(j * dataset.X_std + dataset.X_mean):.3f}\n"
-                            for i, j in zip(dataset.X_keys, X.data.cpu().numpy())
+                            f"{key}: {(val * std + mean):.3f}\n"
+                            for key, val, std, mean in zip(
+                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                            )
                         ]
                     )
                 )
@@ -179,17 +190,18 @@ class MALASampler(object):
 
             if i % save_interval == 0:
                 print("///////////////////////////////////////////////")
-                print("Saving samples for model {0:03d}".format(model_index))
+                print("Saving samples for model {0}".format(model_index))
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
                 np.save(
-                    open(posterior_dir + "X_posterior_model_{0:03d}.npy".format(model_index), "wb"),
+                    open(posterior_dir + "X_posterior_model_{0}.npy".format(model_index), "wb"),
                     X_posterior.astype("float32"),
                 )
                 df = pd.DataFrame(
-                    data=X_posterior.astype("float32") * dataset.X_std + dataset.X_mean, columns=Dataset.X_keys
+                    data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy(),
+                    columns=dataset.X_keys,
                 )
-                df.to_csv(posterior_dir + "X_posterior_model_{0:03d}.csv".format(model_index), compression="infer")
+                df.to_csv(posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index), compression="infer")
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
@@ -198,13 +210,16 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--data_dir", default="../data/speeds_v2")
+    parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=str, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
-    parser.add_argument("--target_file", default="../data/validation/greenland_vel_mosaic250_v1_g1800m.nc")
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
+    parser.add_argument(
+        "--target_file",
+        default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+    )
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
