@@ -54,7 +54,9 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_posterior_samples", type=int, default=1000000)
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument(
+        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
+    )
     parser.add_argument(
         "--posterior_file",
         help="Posterior file in CSV format. If not given, posterior will be calculated from npy files.",
@@ -83,7 +85,11 @@ if __name__ == "__main__":
 
     alpha_b = 3.0
     beta_b = 3.0
-    X_prior = beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters)) * (X_max - X_min) + X_min
+    X_prior = (
+        beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters))
+        * (X_max - X_min)
+        + X_min
+    )
     X_hat = X_prior
 
     color_post_0 = "#00B25F"
@@ -102,14 +108,21 @@ if __name__ == "__main__":
             print(f"Loading {m_file}")
             X_p = np.load(open(m_file, "rb")) * X_std + X_mean
             model = m_file.name.split("_")[-1].split(".")[0]
-            df = pd.DataFrame(data=X_p.astype("float32"), columns=X_keys)
+            df = pd.DataFrame(
+                data=X_p.astype("float32") * X_std + X_mean,
+                columns=X_keys,
+            )
+            df.to_csv(
+                join(p, "X_posterior_model_{0}.csv.gz".format(model)),
+                compression="infer",
+            )
+
             df["Model"] = int(model)
             X_list.append(df)
 
         X_posterior_file = f"{emulator_dir}/X_posterior.csv.gz"
-        print(f"Merging posteriors into dataframe and save to {X_posterior_file}")
+        print(f"Merging posteriors into dataframe")
         df = pd.concat(X_list)
-        df.to_csv(X_posterior_file, compression="infer")
 
     X_posterior = df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
@@ -143,9 +156,23 @@ if __name__ == "__main__":
         X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
         X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-        ax.plot(b, X_hat_hist, color=color_prior, linewidth=0.8, label="Prior", linestyle="dashed")
+        ax.plot(
+            b,
+            X_hat_hist,
+            color=color_prior,
+            linewidth=0.8,
+            label="Prior",
+            linestyle="dashed",
+        )
 
-        ax.plot(b, X_posterior_hist, color=color_posterior, linewidth=0.8, linestyle="solid", label="Posterior")
+        ax.plot(
+            b,
+            X_posterior_hist,
+            color=color_posterior,
+            linewidth=0.8,
+            linestyle="solid",
+            label="Posterior",
+        )
         if i == 0:
             legend = ax.legend(loc="upper left")
             legend.get_frame().set_linewidth(0.0)
@@ -162,7 +189,13 @@ if __name__ == "__main__":
             if i > j:
 
                 axs[i, j].scatter(
-                    X_posterior[:, j], X_posterior[:, i], c="k", s=0.5, alpha=0.05, label="Posterior", rasterized=True
+                    X_posterior[:, j],
+                    X_posterior[:, i],
+                    c="k",
+                    s=0.5,
+                    alpha=0.05,
+                    label="Posterior",
+                    rasterized=True,
                 )
                 min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
                 max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
@@ -177,7 +210,8 @@ if __name__ == "__main__":
 
             elif i < j:
                 patch_upper = Polygon(
-                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]), facecolor=plt.cm.seismic(Cn_0[i, j])
+                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]),
+                    facecolor=plt.cm.seismic(Cn_0[i, j]),
                 )
                 axs[i, j].add_patch(patch_upper)
                 if C_0[i, j] > -0.5:
@@ -206,14 +240,38 @@ if __name__ == "__main__":
                 for m_model in all_models:
                     m_df = df[df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
-                    X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
-                    axs[i, j].plot(b, X_model_posterior_hist, color="0.5", linewidth=0.2, linestyle="solid", alpha=0.5)
+                    X_model_posterior_hist = np.histogram(
+                        X_model_posterior[:, i], bins, density=True
+                    )[0]
+                    axs[i, j].plot(
+                        b,
+                        X_model_posterior_hist,
+                        color="0.5",
+                        linewidth=0.2,
+                        linestyle="solid",
+                        alpha=0.5,
+                    )
 
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-                axs[i, j].plot(b, X_hat_hist, color=color_prior, linewidth=0.5 * lw, label="Prior", linestyle="dashed")
+                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[
+                    0
+                ]
+                axs[i, j].plot(
+                    b,
+                    X_hat_hist,
+                    color=color_prior,
+                    linewidth=0.5 * lw,
+                    label="Prior",
+                    linestyle="dashed",
+                )
 
                 axs[i, j].plot(
-                    b, X_posterior_hist, color="black", linewidth=lw, linestyle="solid", label="Posterior", alpha=0.7
+                    b,
+                    X_posterior_hist,
+                    color="black",
+                    linewidth=lw,
+                    linestyle="solid",
+                    label="Posterior",
+                    alpha=0.7,
                 )
 
                 if i == 1:

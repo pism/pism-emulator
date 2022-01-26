@@ -5,8 +5,6 @@ from argparse import ArgumentParser
 import numpy as np
 import os
 from os.path import join
-from scipy.special import gamma
-from scipy.stats import beta
 
 from pathlib import Path
 
@@ -53,7 +51,9 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
+    parser.add_argument(
+        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
+    )
 
     args = parser.parse_args()
 
@@ -126,9 +126,23 @@ if __name__ == "__main__":
         X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
         X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-        ax.plot(b, X_hat_hist, color=color_prior, linewidth=0.8, label="Prior", linestyle="dashed")
+        ax.plot(
+            b,
+            X_hat_hist,
+            color=color_prior,
+            linewidth=0.8,
+            label="Prior",
+            linestyle="dashed",
+        )
 
-        ax.plot(b, X_posterior_hist, color=color_posterior, linewidth=0.8, linestyle="solid", label="Posterior")
+        ax.plot(
+            b,
+            X_posterior_hist,
+            color=color_posterior,
+            linewidth=0.8,
+            linestyle="solid",
+            label="Posterior",
+        )
         if i == 0:
             legend = ax.legend(loc="upper left")
             legend.get_frame().set_linewidth(0.0)
@@ -145,7 +159,13 @@ if __name__ == "__main__":
             if i > j:
 
                 axs[i, j].scatter(
-                    X_posterior[:, j], X_posterior[:, i], c="k", s=0.5, alpha=0.05, label="Posterior", rasterized=True
+                    X_posterior[:, j],
+                    X_posterior[:, i],
+                    c="k",
+                    s=0.5,
+                    alpha=0.05,
+                    label="Posterior",
+                    rasterized=True,
                 )
                 min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
                 max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
@@ -160,7 +180,8 @@ if __name__ == "__main__":
 
             elif i < j:
                 patch_upper = Polygon(
-                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]), facecolor=plt.cm.seismic(Cn_0[i, j])
+                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]),
+                    facecolor=plt.cm.seismic(Cn_0[i, j]),
                 )
                 axs[i, j].add_patch(patch_upper)
                 if C_0[i, j] > -0.5:
@@ -189,14 +210,38 @@ if __name__ == "__main__":
                 for m_model in all_models:
                     m_df = df[df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
-                    X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
-                    axs[i, j].plot(b, X_model_posterior_hist, color="0.5", linewidth=0.2, linestyle="solid", alpha=0.5)
+                    X_model_posterior_hist = np.histogram(
+                        X_model_posterior[:, i], bins, density=True
+                    )[0]
+                    axs[i, j].plot(
+                        b,
+                        X_model_posterior_hist,
+                        color="0.5",
+                        linewidth=0.2,
+                        linestyle="solid",
+                        alpha=0.5,
+                    )
 
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-                axs[i, j].plot(b, X_hat_hist, color=color_prior, linewidth=0.5 * lw, label="Prior", linestyle="dashed")
+                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[
+                    0
+                ]
+                axs[i, j].plot(
+                    b,
+                    X_hat_hist,
+                    color=color_prior,
+                    linewidth=0.5 * lw,
+                    label="Prior",
+                    linestyle="dashed",
+                )
 
                 axs[i, j].plot(
-                    b, X_posterior_hist, color="black", linewidth=lw, linestyle="solid", label="Posterior", alpha=0.7
+                    b,
+                    X_posterior_hist,
+                    color="black",
+                    linewidth=lw,
+                    linestyle="solid",
+                    label="Posterior",
+                    alpha=0.7,
                 )
 
                 if i == 1:
