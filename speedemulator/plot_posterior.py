@@ -54,14 +54,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_posterior_samples", type=int, default=1000000)
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
-    )
-    parser.add_argument(
-        "--posterior_file",
-        help="Posterior file in CSV format. If not given, posterior will be calculated from npy files.",
-        default=None,
-    )
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
 
     args = parser.parse_args()
 
@@ -78,18 +71,14 @@ if __name__ == "__main__":
 
     n_parameters = X.shape[1]
 
-    X_min = X.min(axis=0) - 1e-3
-    X_max = X.max(axis=0) + 1e-3
+    X_min = X.min(axis=0)
+    X_max = X.max(axis=0)
     # Eq 52
     # this is 2.0 in the paper
 
     alpha_b = 3.0
     beta_b = 3.0
-    X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters))
-        * (X_max - X_min)
-        + X_min
-    )
+    X_prior = beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters)) * (X_max - X_min) + X_min
     X_hat = X_prior
 
     color_post_0 = "#00B25F"
@@ -99,30 +88,27 @@ if __name__ == "__main__":
     color_ensemble = "#BA9B00"
     color_other = "#20484E0"
 
-    if args.posterior_file:
-        df = pd.read_csv(args.posterior_file).drop(columns=["Unnamed: 0"])
-    else:
-        X_list = []
-        p = Path(f"{emulator_dir}/posterior_samples/")
-        for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
-            print(f"Loading {m_file}")
-            X_p = np.load(open(m_file, "rb")) * X_std + X_mean
-            model = m_file.name.split("_")[-1].split(".")[0]
-            df = pd.DataFrame(
-                data=X_p.astype("float32") * X_std + X_mean,
-                columns=X_keys,
-            )
-            df.to_csv(
-                join(p, "X_posterior_model_{0}.csv.gz".format(model)),
-                compression="infer",
-            )
+    X_list = []
+    p = Path(f"{emulator_dir}/posterior_samples/")
+    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
+        print(f"Loading {m_file}")
+        X_p = np.load(open(m_file, "rb")) * X_std + X_mean
+        model = m_file.name.split("_")[-1].split(".")[0]
+        df = pd.DataFrame(
+            data=X_p.astype("float32"),
+            columns=X_keys,
+        )
+        df.to_csv(
+            join(p, "X_posterior_model_{0}.csv.gz".format(model)),
+            compression="infer",
+        )
 
-            df["Model"] = int(model)
-            X_list.append(df)
+        df["Model"] = int(model)
+        X_list.append(df)
 
-        X_posterior_file = f"{emulator_dir}/X_posterior.csv.gz"
-        print(f"Merging posteriors into dataframe")
-        df = pd.concat(X_list)
+    X_posterior_file = f"{emulator_dir}/X_posterior.csv.gz"
+    print(f"Merging posteriors into dataframe")
+    df = pd.concat(X_list)
 
     X_posterior = df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
@@ -240,9 +226,7 @@ if __name__ == "__main__":
                 for m_model in all_models:
                     m_df = df[df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
-                    X_model_posterior_hist = np.histogram(
-                        X_model_posterior[:, i], bins, density=True
-                    )[0]
+                    X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
                     axs[i, j].plot(
                         b,
                         X_model_posterior_hist,
@@ -252,9 +236,7 @@ if __name__ == "__main__":
                         alpha=0.5,
                     )
 
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[
-                    0
-                ]
+                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
                 axs[i, j].plot(
                     b,
                     X_hat_hist,
