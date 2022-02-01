@@ -13,6 +13,7 @@ import pylab as plt
 
 from matplotlib.ticker import NullFormatter
 from matplotlib.patches import Polygon
+import seaborn as sns
 
 from pismemulator.utils import param_keys_dict as keys_dict
 
@@ -78,17 +79,16 @@ if __name__ == "__main__":
     X_list = []
     p = Path(f"{emulator_dir}/posterior_samples/")
     for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
-        if m < 5:
-            print(f"Loading {m_file}")
-            df = pd.read_csv(m_file)
-            if "Unnamed: 0" in df.columns:
-                df.drop(columns=["Unnamed: 0"], inplace=True)
-            model = m_file.name.split("_")[-1].split(".")[0]
-            df["Model"] = int(model)
-            X_list.append(df)
+        print(f"Loading {m_file}")
+        df = pd.read_csv(m_file)
+        if "Unnamed: 0" in df.columns:
+            df.drop(columns=["Unnamed: 0"], inplace=True)
+        model = m_file.name.split("_")[-1].split(".")[0]
+        df["Model"] = int(model)
+        X_list.append(df)
 
     print(f"Merging posteriors into dataframe")
-    posoterior_df = pd.concat(X_list)
+    posterior_df = pd.concat(X_list)
 
     X_posterior = posterior_df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
@@ -157,9 +157,9 @@ if __name__ == "__main__":
                 axs[i, j].scatter(
                     X_posterior[:, j],
                     X_posterior[:, i],
-                    c="k",
-                    s=0.5,
-                    alpha=0.05,
+                    c="#31a354",
+                    s=0.25,
+                    alpha=0.01,
                     label="Posterior",
                     rasterized=True,
                 )
@@ -202,15 +202,15 @@ if __name__ == "__main__":
                 X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
                 b = 0.5 * (b[1:] + b[:-1])
                 lw = 1
-                all_models = df["Model"].unique()
+                all_models = posterior_df["Model"].unique()
                 for m_model in all_models:
-                    m_df = df[df["Model"] == m_model].drop(columns=["Model"])
+                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
                     X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
                     axs[i, j].plot(
                         b,
                         X_model_posterior_hist,
-                        color="0.5",
+                        color="#31a354",
                         linewidth=0.2,
                         linestyle="solid",
                         alpha=0.5,
@@ -236,10 +236,10 @@ if __name__ == "__main__":
                     alpha=0.7,
                 )
 
-                if i == 1:
-                    legend = axs[i, j].legend(fontsize=6, loc="lower left")
-                    legend.get_frame().set_linewidth(0.0)
-                    legend.get_frame().set_alpha(0.0)
+                # if i == 1:
+                #     legend = axs[i, j].legend(fontsize=6, loc="lower left")
+                #     legend.get_frame().set_linewidth(0.0)
+                #     legend.get_frame().set_alpha(0.0)
 
                 axs[i, j].set_xlim(min_val, max_val)
 
@@ -270,8 +270,8 @@ if __name__ == "__main__":
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.tick_params(axis="both", which="both", length=0)
 
-    fig.subplots_adjust(hspace=0.025, wspace=0.025)
-    fig.tight_layout()
+    # fig.subplots_adjust(hspace=0.025, wspace=0.025)
+    # fig.tight_layout()
     fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
 
     Prior = pd.DataFrame(data=X_prior, columns=X_keys).sample(frac=0.1)
@@ -280,33 +280,33 @@ if __name__ == "__main__":
     Posterior["Type"] = "Posterior"
     PP = pd.concat([Prior, Posterior])
 
-    from scipy.stats import pearsonr
+    # from scipy.stats import pearsonr
 
-    def corrfunc(x, y, **kwds):
-        cmap = kwds["cmap"]
-        norm = kwds["norm"]
-        ax = plt.gca()
-        ax.tick_params(bottom=False, top=False, left=False, right=False)
-        sns.despine(ax=ax, bottom=True, top=True, left=True, right=True)
-        r, _ = pearsonr(x, y)
-        facecolor = cmap(norm(r))
-        ax.set_facecolor(facecolor)
-        lightness = (max(facecolor[:3]) + min(facecolor[:3])) / 2
-        ax.annotate(
-            f"r={r:.2f}",
-            xy=(0.5, 0.5),
-            xycoords=ax.transAxes,
-            color="white" if lightness < 0.7 else "black",
-            size=6,
-            ha="center",
-            va="center",
-        )
+    # def corrfunc(x, y, **kwds):
+    #     cmap = kwds["cmap"]
+    #     norm = kwds["norm"]
+    #     ax = plt.gca()
+    #     ax.tick_params(bottom=False, top=False, left=False, right=False)
+    #     sns.despine(ax=ax, bottom=True, top=True, left=True, right=True)
+    #     r, _ = pearsonr(x, y)
+    #     facecolor = cmap(norm(r))
+    #     ax.set_facecolor(facecolor)
+    #     lightness = (max(facecolor[:3]) + min(facecolor[:3])) / 2
+    #     ax.annotate(
+    #         f"r={r:.2f}",
+    #         xy=(0.5, 0.5),
+    #         xycoords=ax.transAxes,
+    #         color="white" if lightness < 0.7 else "black",
+    #         size=6,
+    #         ha="center",
+    #         va="center",
+    #     )
 
-    g = sns.PairGrid(Posterior.reset_index(), hue="Model", diag_sharey=False)
-    g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
-    g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
-    g.map_diag(sns.kdeplot, lw=0.1)
-    g.savefig(f"{emulator_dir}/seaborn_test.pdf")
+    # g = sns.PairGrid(Posterior.reset_index(), hue="Model", diag_sharey=False)
+    # g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
+    # g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
+    # g.map_diag(sns.kdeplot, lw=0.1)
+    # g.savefig(f"{emulator_dir}/seaborn_test.pdf")
 
 # #!/bin/env python3
 
