@@ -295,7 +295,7 @@ if __name__ == "__main__":
     # nu: float
     # gamma
     # sigma_hat
-    U_target = dataset.Y_target
+    U_target = dataset.Y_target.to(device)
 
     mala = MALASampler(e, emulator_dir=emulator_dir)
     X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
