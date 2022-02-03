@@ -27,7 +27,6 @@ from scipy.stats import dirichlet
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
-    LearningRateMonitor,
     ModelCheckpoint,
     EarlyStopping,
 )

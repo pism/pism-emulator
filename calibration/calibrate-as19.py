@@ -28,9 +28,7 @@ def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):
     from matplotlib.patheffects import withStroke
 
     prop = dict(size=size, weight="bold")
-    at = AnchoredText(
-        title, loc=loc, prop=prop, pad=0.0, borderpad=0.5, frameon=False, **kwargs
-    )
+    at = AnchoredText(title, loc=loc, prop=prop, pad=0.0, borderpad=0.5, frameon=False, **kwargs)
     ax.add_artist(at)
     return at
 
@@ -234,9 +232,7 @@ def plot_projection(
     if simulated is not None:
         for r, rcp in enumerate(rcps):
             legend_handles = []
-            sim = simulated[
-                (simulated["Ensemble"] == ensemble) & (simulated["RCP"] == rcp)
-            ]
+            sim = simulated[(simulated["Ensemble"] == ensemble) & (simulated["RCP"] == rcp)]
             g = sim.groupby(by="Year")["SLE (cm)"]
             sim_median = g.quantile(0.50)
 
@@ -396,6 +392,7 @@ def plot_partitioning(
     quantiles=[0.05, 0.95],
     sigma=2,
     simulated_ctrl=None,
+    xlims=[2010, 2020],
 ):
 
     ncol = 0
@@ -502,7 +499,7 @@ def plot_partitioning(
     for k, (v, u) in enumerate(zip(["a", "b"], ["", ""])):
         add_inner_title(axs[k], f"{v}) {u}")
 
-    axs[-1].set_xlim(2008, 2020)
+    axs[-1].set_xlim(xlims)
     axs[-1].set_xlabel("Year")
     axs[1].set_ylim(-750, 750)
     axs[0].set_ylim(-1500, 0)
@@ -576,9 +573,7 @@ def plot_posterior_sle_pdfs(
                 m_color = color_tint(rcp_col_dict[rcp], alpha)
                 lw = 0.25
 
-                axs[(k * 2), y].vlines(
-                    s_df[[0.5]].values[0][0], e, e + 1, colors="k", lw=1
-                )
+                axs[(k * 2), y].vlines(s_df[[0.5]].values[0][0], e, e + 1, colors="k", lw=1)
 
                 rect1 = plt.Rectangle(
                     (s_df[[0.05]].values[0][0], e + 0.4),
@@ -648,18 +643,12 @@ def plot_posterior_sle_pdfs(
                         )
 
         if observed is not None:
-            obs = observed[
-                (observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)
-            ]
+            obs = observed[(observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)]
             obs_mean = obs["SLE (cm)"].mean()
             obs_std = obs["SLE uncertainty (cm)"].mean()
             axs[(k * 2) + 1, 0].axvline(obs_mean, c="k", lw=0.5)
-            axs[(k * 2) + 1, 0].axvline(
-                obs_mean - 2 * obs_std, c="k", lw=0.5, ls="dotted"
-            )
-            axs[(k * 2) + 1, 0].axvline(
-                obs_mean + 2 * obs_std, c="k", lw=0.5, ls="dotted"
-            )
+            axs[(k * 2) + 1, 0].axvline(obs_mean - 2 * obs_std, c="k", lw=0.5, ls="dotted")
+            axs[(k * 2) + 1, 0].axvline(obs_mean + 2 * obs_std, c="k", lw=0.5, ls="dotted")
 
     for k, rcp in enumerate(rcps):
         add_inner_title(axs[k * 2 + 1, 0], rcp_dict[rcp])
@@ -706,12 +695,8 @@ def plot_posterior_sle_pdfs(
     axs[-1, 0].add_artist(legend_1)
 
     if observed is not None:
-        l_obs_mean = Line2D(
-            [], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean"
-        )
-        l_obs_std = Line2D(
-            [], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$"
-        )
+        l_obs_mean = Line2D([], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean")
+        l_obs_std = Line2D([], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$")
         legend_2 = axs[-3, 0].legend(
             handles=[l_obs_mean, l_obs_std],
             loc="lower left",
@@ -832,9 +817,7 @@ def plot_posterior_sle_pdf(
 
             if (k == 0) and (e == 0):
                 for pctl in [0.05, 0.16, 0.5, 0.84, 0.95]:
-                    axs[0].text(
-                        s_df[[pctl]].values[0][0], -1.5, int(pctl * 100), ha="center"
-                    )
+                    axs[0].text(s_df[[pctl]].values[0][0], -1.5, int(pctl * 100), ha="center")
 
             axs[(k * 2)].set_ylabel(None)
             axs[(k * 2)].axes.xaxis.set_visible(False)
@@ -850,9 +833,7 @@ def plot_posterior_sle_pdf(
             axs[k * 2 + 1].legend().remove()
 
         if observed is not None:
-            obs = observed[
-                (observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)
-            ]
+            obs = observed[(observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)]
             obs_mean = obs["SLE (cm)"].mean()
             obs_std = obs["SLE uncertainty (cm)"].mean()
             axs[(k * 2) + 1].axvline(obs_mean, c="k", lw=0.5)
@@ -906,12 +887,8 @@ def plot_posterior_sle_pdf(
     axs[-1].add_artist(legend_1)
 
     if observed is not None:
-        l_obs_mean = Line2D(
-            [], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean"
-        )
-        l_obs_std = Line2D(
-            [], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$"
-        )
+        l_obs_mean = Line2D([], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean")
+        l_obs_std = Line2D([], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$")
         legend_2 = axs[-3].legend(
             handles=[l_obs_mean, l_obs_std],
             loc="lower left",
@@ -1129,22 +1106,14 @@ def resample_ensemble_by_data(
 
     """
 
-    observed_calib_time = (observed["Year"] >= calibration_start) & (
-        observed["Year"] <= calibration_end
-    )
+    observed_calib_time = (observed["Year"] >= calibration_start) & (observed["Year"] <= calibration_end)
     observed_calib_period = observed[observed_calib_time]
     # print(observed_calib_period)
     # Should we interpolate the simulations at observed time?
-    observed_interp_mean = interp1d(
-        observed_calib_period["Year"], observed_calib_period[m_var]
-    )
-    observed_interp_std = interp1d(
-        observed_calib_period["Year"], observed_calib_period[m_var_std]
-    )
+    observed_interp_mean = interp1d(observed_calib_period["Year"], observed_calib_period[m_var])
+    observed_interp_std = interp1d(observed_calib_period["Year"], observed_calib_period[m_var_std])
 
-    simulated_calib_time = (simulated["Year"] >= calibration_start) & (
-        simulated["Year"] <= calibration_end
-    )
+    simulated_calib_time = (simulated["Year"] >= calibration_start) & (simulated["Year"] <= calibration_end)
     simulated_calib_period = simulated[simulated_calib_time]
 
     resampled_list = []
@@ -1154,17 +1123,16 @@ def resample_ensemble_by_data(
         evals = []
         for i in experiments:
             exp_ = simulated_calib_period[
-                (simulated_calib_period["Experiment"] == i)
-                & (simulated_calib_period["RCP"] == rcp)
+                (simulated_calib_period["Experiment"] == i) & (simulated_calib_period["RCP"] == rcp)
             ]
             log_like = 0.0
             for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
                 try:
                     observed_mass = observed_interp_mean(year)
                     observed_std = observed_interp_std(year) * fudge_factor
-                    log_like -= 0.5 * (
-                        (exp_mass - observed_mass) / observed_std
-                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std ** 2)
+                    log_like -= 0.5 * ((exp_mass - observed_mass) / observed_std) ** 2 + 0.5 * np.log(
+                        2 * np.pi * observed_std ** 2
+                    )
                 except ValueError:
                     pass
             if log_like != 0:
@@ -1180,9 +1148,7 @@ def resample_ensemble_by_data(
         resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
         new_frame = []
         for i in resampled_experiments:
-            new_frame.append(
-                simulated[(simulated["Experiment"] == i) & (simulated["RCP"] == rcp)]
-            )
+            new_frame.append(simulated[(simulated["Experiment"] == i) & (simulated["RCP"] == rcp)])
         simulated_resampled = pd.concat(new_frame)
         resampled_list.append(simulated_resampled)
 
@@ -1208,9 +1174,7 @@ def make_quantile_table(q_df):
     f = "".join([f"& \multicolumn{{2}}{{l}}{{{ens}}}" for ens in ensembles])
     ls.append(f"{f} \\\\ \n")
     ls.append("\cline{2-9} \\\\ \n")
-    f = "& {:.0f}th [{:.0f}th, {:.0f}th] & [{:.0f}th, {:.0f}th] ".format(
-        *(np.array(quantiles) * 100)
-    )
+    f = "& {:.0f}th [{:.0f}th, {:.0f}th] & [{:.0f}th, {:.0f}th] ".format(*(np.array(quantiles) * 100))
     g = f * len(ensembles)
     ls.append(f" {g} \\\\ \n")
     q_str = "& percentiles " * len(ensembles) * 2
@@ -1223,9 +1187,7 @@ def make_quantile_table(q_df):
         a = q_df[q_df["RCP"] == rcp]
         f = "& ".join(
             [
-                "{:.0f} [{:.0f}, {:.0f}] & [{:.0f}, {:.0f} ]".format(
-                    *a[a["Ensemble"] == ens].values[0][2::]
-                )
+                "{:.0f} [{:.0f}, {:.0f}] & [{:.0f}, {:.0f} ]".format(*a[a["Ensemble"] == ens].values[0][2::])
                 for ens in ensembles
             ]
         )
@@ -1243,18 +1205,12 @@ def make_quantile_table(q_df):
 
 def make_quantile_df(df, quantiles):
     q_dfs = [
-        df.groupby(by=["RCP", "Ensemble"])["SLE (cm)"]
-        .quantile(q)
-        .reset_index()
-        .rename(columns={"SLE (cm)": q})
+        df.groupby(by=["RCP", "Ensemble"])["SLE (cm)"].quantile(q).reset_index().rename(columns={"SLE (cm)": q})
         for q in quantiles
     ]
     q_df = reduce(lambda df1, df2: pd.merge(df1, df2, on=["RCP", "Ensemble"]), q_dfs)
     a_dfs = [
-        df.groupby(by=["Ensemble"])["SLE (cm)"]
-        .quantile(q)
-        .reset_index()
-        .rename(columns={"SLE (cm)": q})
+        df.groupby(by=["Ensemble"])["SLE (cm)"].quantile(q).reset_index().rename(columns={"SLE (cm)": q})
         for q in quantiles
     ]
     a_df = reduce(lambda df1, df2: pd.merge(df1, df2, on=["Ensemble"]), a_dfs)
@@ -1399,9 +1355,7 @@ if __name__ == "__main__":
 
     plot_histograms("marginal_posteriors_all.pdf", all_2100_df)
 
-    plot_partitioning(
-        "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
-    )
+    plot_partitioning("historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f)
     plot_partitioning(
         "historical_partitioning_flow.pdf",
         simulated=all_df,
@@ -1490,9 +1444,7 @@ if __name__ == "__main__":
     )
 
     year = 2020
-    plot_posterior_sle_pdf(
-        f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"]
-    )
+    plot_posterior_sle_pdf(f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"])
     plot_posterior_sle_pdf(
         f"sle_pdf_w_obs_as19_{year}.pdf",
         all_df,
@@ -1554,9 +1506,7 @@ if __name__ == "__main__":
         observed=observed,
     )
     year = 2100
-    plot_posterior_sle_pdf(
-        f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"]
-    )
+    plot_posterior_sle_pdf(f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"])
     plot_posterior_sle_pdf(
         f"sle_pdf_as19flow_{year}.pdf",
         all_df,
@@ -1571,19 +1521,11 @@ if __name__ == "__main__":
     q_df["68%"] = q_df[0.84] - q_df[0.16]
     q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][
-        ["90%", "68%", 0.5]
-    ].reset_index(drop=True) - q_df[q_df["Ensemble"] == "AS19"][
-        ["90%", "68%", 0.5]
-    ].reset_index(
-        drop=True
-    )
+    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][["90%", "68%", 0.5]].reset_index(drop=True) - q_df[
+        q_df["Ensemble"] == "AS19"
+    ][["90%", "68%", 0.5]].reset_index(drop=True)
 
-    q_rel = (
-        q_abs
-        / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True)
-        * 100
-    )
+    q_rel = q_abs / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True) * 100
 
     q_abs["RCP"] = rcpss
     q_rel["RCP"] = rcpss
