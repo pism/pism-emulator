@@ -10,13 +10,10 @@ from scipy.special import gamma
 from scipy.stats import beta
 
 import torch
-import torch.multiprocessing as mp
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset
 
 import pandas as pd
-import pylab as plt
-import seaborn as sns
 
 
 class MALASampler(object):
@@ -24,7 +21,9 @@ class MALASampler(object):
     MALA Sampler
     """
 
-    def __init__(self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01, emulator_dir="./emulator"):
+    def __init__(
+        self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01, emulator_dir="./emulator"
+    ):
         super().__init__()
         self.model = model.eval()
         self.alpha = alpha
@@ -67,7 +66,10 @@ class MALASampler(object):
                         [
                             f"{key}: {(val * std + mean):.3f}\n"
                             for key, val, std, mean in zip(
-                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                                dataset.X_keys,
+                                X.data.cpu().numpy(),
+                                dataset.X_std,
+                                dataset.X_mean,
                             )
                         ]
                     )
@@ -85,17 +87,24 @@ class MALASampler(object):
             - np.log(np.sqrt(np.pi * nu) * sigma_hat)
             - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
         )
-        L2 = torch.sum((self.alpha_b - 1) * torch.log(X_bar) + (self.beta_b - 1) * torch.log(1 - X_bar))
+        L2 = torch.sum(
+            (self.alpha_b - 1) * torch.log(X_bar)
+            + (self.beta_b - 1) * torch.log(1 - X_bar)
+        )
 
         return -(self.alpha * L1 + L2)
 
-    def get_log_like_gradient_and_hessian(self, X, Y_target, X_min, X_max, eps=1e-2, compute_hessian=False):
+    def get_log_like_gradient_and_hessian(
+        self, X, Y_target, X_min, X_max, eps=1e-2, compute_hessian=False
+    ):
 
         X_bar = (X - X_min) / (X_max - X_min)
         log_pi = self.V(X, Y_target, X_bar)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            H = torch.stack([torch.autograd.grad(e, X, retain_graph=True)[0] for e in g])
+            H = torch.stack(
+                [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
+            )
             lamda, Q = torch.eig(H, eigenvectors=True)
             lamda_prime = torch.sqrt(lamda[:, 0] ** 2 + eps)
             lamda_prime_inv = 1.0 / torch.sqrt(lamda[:, 0] ** 2 + eps)
@@ -117,14 +126,18 @@ class MALASampler(object):
         if local_data is not None:
             pass
         else:
-            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, X_min, X_max, compute_hessian=True)
+            local_data = self.get_log_like_gradient_and_hessian(
+                X, Y_target, X_min, X_max, compute_hessian=True
+            )
 
         log_pi, g, H, Hinv, log_det_Hinv = local_data
 
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
 
-        log_pi_ = self.get_log_like_gradient_and_hessian(X_, Y_target, X_min, X_max, compute_hessian=False)
+        log_pi_ = self.get_log_like_gradient_and_hessian(
+            X_, Y_target, X_min, X_max, compute_hessian=False
+        )
 
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
@@ -134,7 +147,9 @@ class MALASampler(object):
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
             X.data = X_.data
-            local_data = self.get_log_like_gradient_and_hessian(X, Y_target, X_min, X_max, compute_hessian=True)
+            local_data = self.get_log_like_gradient_and_hessian(
+                X, Y_target, X_min, X_max, compute_hessian=True
+            )
             s = 1
         else:
             s = 0
@@ -156,7 +171,11 @@ class MALASampler(object):
     ):
         print("***********************************************")
         print("***********************************************")
-        print("Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(model_index))
+        print(
+            "Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(
+                model_index
+            )
+        )
         print("***********************************************")
         print("***********************************************")
 
@@ -169,19 +188,28 @@ class MALASampler(object):
         acc = acc_target
         print(n_iters)
         for i in range(n_iters):
-            X, local_data, s = self.MALA_step(X, Y_target, X_min, X_max, h, local_data=local_data)
+            X, local_data, s = self.MALA_step(
+                X, Y_target, X_min, X_max, h, local_data=local_data
+            )
             m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
             if i % print_interval == 0:
                 print("===============================================")
-                print("sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(i, acc, local_data[0].item()))
+                print(
+                    "sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(
+                        i, acc, local_data[0].item()
+                    )
+                )
                 print(
                     " ".join(
                         [
                             f"{key}: {(val * std + mean):.3f}\n"
                             for key, val, std, mean in zip(
-                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                                dataset.X_keys,
+                                X.data.cpu().numpy(),
+                                dataset.X_std,
+                                dataset.X_mean,
                             )
                         ]
                     )
@@ -194,14 +222,21 @@ class MALASampler(object):
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
                 np.save(
-                    open(posterior_dir + "X_posterior_model_{0}.npy".format(model_index), "wb"),
+                    open(
+                        posterior_dir + "X_posterior_model_{0}.npy".format(model_index),
+                        "wb",
+                    ),
                     X_posterior.astype("float32"),
                 )
                 df = pd.DataFrame(
-                    data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy(),
+                    data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy()
+                    + dataset.X_mean.cpu().numpy(),
                     columns=dataset.X_keys,
                 )
-                df.to_csv(posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index), compression="infer")
+                df.to_csv(
+                    posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
+                    compression="infer",
+                )
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
@@ -215,7 +250,9 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=str, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
+    parser.add_argument(
+        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
+    )
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
@@ -280,8 +317,14 @@ if __name__ == "__main__":
     # this is 2.0 in the paper
     alpha_b = 3.0
     beta_b = 3.0
-    X_prior = beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters)) * (X_max - X_min) + X_min
-    X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device)
+    X_prior = (
+        beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters))
+        * (X_max - X_min)
+        + X_min
+    )
+    X_0 = torch.tensor(
+        X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
+    )
     # This is required for
     # X_bar = (X - X_min) / (X_max - X_min)
     # to work

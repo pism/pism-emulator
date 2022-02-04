@@ -27,9 +27,7 @@ from scipy.stats import dirichlet
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
-    LearningRateMonitor,
     ModelCheckpoint,
-    EarlyStopping,
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule

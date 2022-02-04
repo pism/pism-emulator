@@ -3,11 +3,11 @@
 # Copyright (C) 2020-21 Andy Aschwanden, Douglas J. Brinkerhoff
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+import matplotlib
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib import colors
 import numpy as np
-import os
 import pylab as plt
 import pandas as pd
 import seaborn as sns
@@ -17,6 +17,7 @@ from itertools import cycle
 from pismemulator.utils import load_imbie, load_imbie_csv
 from scipy.interpolate import interp1d
 
+matplotlib.use("agg")
 
 def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):
     """
@@ -25,7 +26,6 @@ def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):
     from http://matplotlib.sourceforge.net/examples/axes_grid/demo_axes_grid2.html
     """
     from matplotlib.offsetbox import AnchoredText
-    from matplotlib.patheffects import withStroke
 
     prop = dict(size=size, weight="bold")
     at = AnchoredText(
@@ -68,7 +68,6 @@ def toDecimalYear(date):
     """
 
     from datetime import datetime
-    import time
 
     year = date.year
     startOfThisYear = datetime(year=year, month=1, day=1)
@@ -201,6 +200,7 @@ def plot_historical(
     ax_sle.set_ylim(-np.array(ylims) * gt2cmSLE)
 
     fig.savefig(out_filename, bbox_inches="tight")
+    plt.close(fig)
 
 
 def plot_projection(
@@ -249,7 +249,6 @@ def plot_projection(
             )
             legend_handles.append(l_es_median[0])
 
-            credibility_interval = int(np.round((quantiles[-1] - quantiles[0]) * 100))
             sim_low = g.quantile(quantiles[0])
             sim_high = g.quantile(quantiles[-1])
             ci = ax.fill_between(
@@ -386,6 +385,7 @@ def plot_projection(
             axs[a].axes.yaxis.set_visible(False)
 
     fig.savefig(out_filename, bbox_inches="tight")
+    plt.close(fig)
 
 
 def plot_partitioning(
@@ -508,7 +508,7 @@ def plot_partitioning(
     axs[0].set_ylim(-1500, 0)
 
     fig.savefig(out_filename, bbox_inches="tight")
-    del fig
+    plt.close(fig)
 
 
 def plot_posterior_sle_pdfs(
@@ -722,7 +722,7 @@ def plot_posterior_sle_pdfs(
 
     fig.tight_layout()
     fig.savefig(out_filename)
-    del fig
+    plt.close(fig)
 
 
 def plot_posterior_sle_pdf(
@@ -922,6 +922,7 @@ def plot_posterior_sle_pdf(
 
     fig.tight_layout()
     fig.savefig(out_filename)
+    plt.close(fig)
     del fig
 
 
@@ -1085,6 +1086,7 @@ def plot_histograms(
     axs[3, 3].set_axis_off()
 
     fig.savefig(out_filename)
+    plt.close(fig)
 
 
 def load_df(respone_file, samples_file):
