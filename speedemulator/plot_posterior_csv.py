@@ -13,6 +13,7 @@ import pylab as plt
 
 from matplotlib.ticker import NullFormatter
 from matplotlib.patches import Polygon
+import seaborn as sns
 
 from pismemulator.utils import param_keys_dict as keys_dict
 
@@ -51,9 +52,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
-    )
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
 
     args = parser.parse_args()
 
@@ -62,17 +61,13 @@ if __name__ == "__main__":
 
     samples = pd.read_csv(samples_file).drop(columns=["id"])
 
-    X = samples.values
-    X_mean = X.mean(axis=0)
-    X_std = X.std(axis=0)
+    X_prior = samples.values
     X_keys = samples.keys()
 
-    n_parameters = X.shape[1]
+    n_parameters = X_prior.shape[1]
 
-    X_min = X.min(axis=0) - 1e-3
-    X_max = X.max(axis=0) + 1e-3
-    # Eq 52
-    # this is 2.0 in the paper
+    X_min = X_prior.min(axis=0) - 1e-3
+    X_max = X_prior.max(axis=0) + 1e-3
 
     color_post_0 = "#00B25F"
     color_post_1 = "#132DD6"
@@ -92,21 +87,22 @@ if __name__ == "__main__":
         df["Model"] = int(model)
         X_list.append(df)
 
-    df = pd.concat(X_list)
+    print(f"Merging posteriors into dataframe")
+    posterior_df = pd.concat(X_list)
 
-    X_posterior = df.drop(columns=["Model"]).values
+    X_posterior = posterior_df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
     fig, axs = plt.subplots(ncols=int(n_parameters / 2), nrows=2, figsize=(6.2, 2.5))
     for i, ax in enumerate(fig.axes):
-        min_val = min(X[:, i].min(), X_posterior[:, i].min())
-        max_val = max(X[:, i].max(), X_posterior[:, i].max())
+        min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
+        max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
         bins = np.linspace(min_val, max_val, 30)
-        X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
+        X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
         X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-        ax.plot(b, X_hat_hist, color=color_prior, linewidth=0.8, label="Prior")
+        ax.plot(b, X_prior_hist, color=color_prior, linewidth=0.8, label="Prior")
 
         if i == 0:
             legend = ax.legend(loc="upper left")
@@ -120,15 +116,15 @@ if __name__ == "__main__":
 
     fig, axs = plt.subplots(ncols=int(n_parameters / 2), nrows=2, figsize=(6.2, 2.5))
     for i, ax in enumerate(fig.axes):
-        min_val = min(X[:, i].min(), X_posterior[:, i].min())
-        max_val = max(X[:, i].max(), X_posterior[:, i].max())
+        min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
+        max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
         bins = np.linspace(min_val, max_val, 30)
-        X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
+        X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
         X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
         ax.plot(
             b,
-            X_hat_hist,
+            X_prior_hist,
             color=color_prior,
             linewidth=0.8,
             label="Prior",
@@ -161,22 +157,22 @@ if __name__ == "__main__":
                 axs[i, j].scatter(
                     X_posterior[:, j],
                     X_posterior[:, i],
-                    c="k",
-                    s=0.5,
-                    alpha=0.05,
+                    c="#31a354",
+                    s=0.25,
+                    alpha=0.01,
                     label="Posterior",
                     rasterized=True,
                 )
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
+                min_val = X_posterior[:, i].min()
+                max_val = X_posterior[:, i].max()
                 bins_y = np.linspace(min_val, max_val, 30)
 
-                min_val = min(X_hat[:, j].min(), X_posterior[:, j].min())
-                max_val = max(X_hat[:, j].max(), X_posterior[:, j].max())
+                min_val = X_posterior[:, j].min()
+                max_val = X_posterior[:, j].max()
                 bins_x = np.linspace(min_val, max_val, 30)
 
-                axs[i, j].set_xlim(X_hat[:, j].min(), X_hat[:, j].max())
-                axs[i, j].set_ylim(X_hat[:, i].min(), X_hat[:, i].max())
+                axs[i, j].set_xlim(X_prior[:, j].min(), X_prior[:, j].max())
+                axs[i, j].set_ylim(X_prior[:, i].min(), X_prior[:, i].max())
 
             elif i < j:
                 patch_upper = Polygon(
@@ -200,34 +196,30 @@ if __name__ == "__main__":
                 )
 
             elif i == j:
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
+                min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
+                max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
                 bins = np.linspace(min_val, max_val, 30)
-                X_hat_hist, b = np.histogram(X_hat[:, i], bins, density=True)
+                X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
                 b = 0.5 * (b[1:] + b[:-1])
                 lw = 1
-                all_models = df["Model"].unique()
+                all_models = posterior_df["Model"].unique()
                 for m_model in all_models:
-                    m_df = df[df["Model"] == m_model].drop(columns=["Model"])
+                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
-                    X_model_posterior_hist = np.histogram(
-                        X_model_posterior[:, i], bins, density=True
-                    )[0]
+                    X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
                     axs[i, j].plot(
                         b,
                         X_model_posterior_hist,
-                        color="0.5",
+                        color="#31a354",
                         linewidth=0.2,
                         linestyle="solid",
                         alpha=0.5,
                     )
 
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[
-                    0
-                ]
+                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
                 axs[i, j].plot(
                     b,
-                    X_hat_hist,
+                    X_prior_hist,
                     color=color_prior,
                     linewidth=0.5 * lw,
                     label="Prior",
@@ -244,10 +236,10 @@ if __name__ == "__main__":
                     alpha=0.7,
                 )
 
-                if i == 1:
-                    legend = axs[i, j].legend(fontsize=6, loc="lower left")
-                    legend.get_frame().set_linewidth(0.0)
-                    legend.get_frame().set_alpha(0.0)
+                # if i == 1:
+                #     legend = axs[i, j].legend(fontsize=6, loc="lower left")
+                #     legend.get_frame().set_linewidth(0.0)
+                #     legend.get_frame().set_alpha(0.0)
 
                 axs[i, j].set_xlim(min_val, max_val)
 
@@ -278,15 +270,15 @@ if __name__ == "__main__":
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.tick_params(axis="both", which="both", length=0)
 
-    fig.subplots_adjust(hspace=0.05, wspace=0.05)
-    fig.tight_layout()
+    # fig.subplots_adjust(hspace=0.025, wspace=0.025)
+    # fig.tight_layout()
     fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
 
-    # Prior = pd.DataFrame(data=X_hat, columns=dataset.X_keys).sample(frac=0.1)
-    # Prior["Type"] = "Pior"
-    # Posterior = pd.DataFrame(data=X_posterior, columns=dataset.X_keys).sample(frac=0.1)
-    # Posterior["Type"] = "Posterior"
-    # PP = pd.concat([Prior, Posterior])
+    Prior = pd.DataFrame(data=X_prior, columns=X_keys).sample(frac=0.1)
+    Prior["Type"] = "Prior"
+    Posterior = pd.DataFrame(data=X_posterior, columns=X_keys).sample(frac=0.1)
+    Posterior["Type"] = "Posterior"
+    PP = pd.concat([Prior, Posterior])
 
     # from scipy.stats import pearsonr
 
@@ -310,12 +302,11 @@ if __name__ == "__main__":
     #         va="center",
     #     )
 
-    # g = sns.PairGrid(PP, hue="Type", diag_sharey=False)
+    # g = sns.PairGrid(Posterior.reset_index(), hue="Model", diag_sharey=False)
     # g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
     # g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
-    # g.map_diag(sns.kdeplot, lw=1)
+    # g.map_diag(sns.kdeplot, lw=0.1)
     # g.savefig(f"{emulator_dir}/seaborn_test.pdf")
-
 
 # #!/bin/env python3
 

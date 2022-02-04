@@ -2,7 +2,6 @@
 
 from argparse import ArgumentParser
 
-from glob import glob
 import numpy as np
 import os
 from os.path import join
@@ -19,6 +18,8 @@ import pandas as pd
 class MALASampler(object):
     """
     MALA Sampler
+
+    Author: Douglas C Brinkerhoff, University of Montana
     """
 
     def __init__(
@@ -41,7 +42,7 @@ class MALASampler(object):
         alphas = np.logspace(-4, 0, 11)
         # Find MAP point
         for i in range(n_iters):
-            log_pi, g, H, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+            log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
                 X, Y_target, X_min, X_max, compute_hessian=True
             )
             p = Hinv @ -g
@@ -130,7 +131,7 @@ class MALASampler(object):
                 X, Y_target, X_min, X_max, compute_hessian=True
             )
 
-        log_pi, g, H, Hinv, log_det_Hinv = local_data
+        log_pi, _, H, Hinv, log_det_Hinv = local_data
 
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
@@ -250,6 +251,7 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=str, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
+    parser.add_argument("--num_iterations", type=int, default=100000)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
     )
@@ -268,6 +270,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     model_index = args.model_index
     n_posterior_samples = args.num_posterior_samples
+    n_iters = args.num_iterations
     samples_file = args.samples_file
     target_file = args.target_file
     thinning_factor = args.thinning_factor
@@ -280,10 +283,9 @@ if __name__ == "__main__":
     )
 
     X = dataset.X
-    F = dataset.Y
-    n_grid_points = dataset.n_grid_points
+    X_min = X.cpu().numpy().min(axis=0) - 1e-3
+    X_max = X.cpu().numpy().max(axis=0) + 1e-3
     n_parameters = dataset.n_parameters
-    n_samples = dataset.n_samples
 
     torch.manual_seed(0)
     np.random.seed(0)
@@ -311,8 +313,6 @@ if __name__ == "__main__":
     K = point_area * rho
     sigma_hat = np.sqrt(sigma ** 2 / K ** 2)
 
-    X_min = X.cpu().numpy().min(axis=0) - 1e-3
-    X_max = X.cpu().numpy().max(axis=0) + 1e-3
     # Eq 52
     # this is 2.0 in the paper
     alpha_b = 3.0
@@ -338,7 +338,7 @@ if __name__ == "__main__":
     # nu: float
     # gamma
     # sigma_hat
-    U_target = dataset.Y_target
+    U_target = dataset.Y_target.to(device)
 
     mala = MALASampler(e, emulator_dir=emulator_dir)
     X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
@@ -346,7 +346,7 @@ if __name__ == "__main__":
     X_posterior = mala.MALA(
         X_map,
         U_target,
-        n_iters=n_posterior_samples,
+        n_iters=n_iters,
         model_index=int(model_index),
         save_interval=1000,
         print_interval=100,
