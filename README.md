@@ -4,13 +4,15 @@
 
 ## Introduction
 
-pism-emulator is the codebase for the two-step Bayesian calibration process proposed by Aschwanden and Brinkerhoff [1]. The goal is to condition ensemble predictions of Greenland's contribution to future sea-level on contemporary [surface speeds](https://nsidc.org/data/nsidc-0478) and [cumulative mass loss](http://imbie.org) 
+pism-emulator is the codebase for the two-step Bayesian calibration process proposed by Aschwanden and Brinkerhoff [1]. The goal is to condition ensemble predictions of Greenland's contribution to future sea-level on contemporary [surface speeds](https://nsidc.org/data/nsidc-0478) and [cumulative mass loss](http://imbie.org).
 
 ## Methods
 
 1. We first calibrate ice dynamics parameters using artificial neural network to act as a surrogate for the ice flow model, which provides a mapping from ice flow parameters to surface speeds at a fraction of PISM's computational cost. This method also provides us the means to employ efficient statistical methods that rely on the gradients of model outputs with respect to its input. We then find the joint marginal distributions given surface speed observations [Metropolis-adjusted Langevin algorithm](https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm), a Markov-chain Monte Carlo Method.
 
 2. In the second step, we use Bayesian calibration, also known as [Importance Sampling](https://en.wikipedia.org/wiki/Importance_sampling) to condition ensemble members on observations of cumulative mass change.
+
+![The first six eigen-glaciers](https://github.com/pism/pism-emulator/blob/master/images/eigenglaciers.png)
 
 ## Procedure
 
