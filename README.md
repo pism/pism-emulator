@@ -8,11 +8,13 @@ pism-emulator is the codebase for the two-step Bayesian calibration process prop
 
 ## Methods
 
-1. We first calibrate ice dynamics parameters using artificial neural network to act as a surrogate for the ice flow model, which provides a mapping from ice flow parameters to surface speeds at a fraction of PISM's computational cost. This method also provides us the means to employ efficient statistical methods that rely on the gradients of model outputs with respect to its input. We then find the joint marginal distributions given surface speed observations [Metropolis-adjusted Langevin algorithm](https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm), a Markov-chain Monte Carlo Method.
+1. We first calibrate ice dynamics parameters using artificial neural network to act as a surrogate for the ice flow model, which provides a mapping from ice flow parameters to surface speeds at a fraction of PISM's computational cost. This method also provides us the means to employ efficient statistical methods that rely on the gradients of model outputs with respect to its input. We then find the joint marginal distributions given surface speed observations [Metropolis-adjusted Langevin algorithm](https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm) (MALA), a Markov-chain Monte Carlo Method. Both the surrogate model and the MALA sampler are implemented in [PyTorch](https://pytorch.org) and [PyTorch-Lightning](https://www.pytorchlightning.ai) and can be run on GPUs.
 
 2. In the second step, we use Bayesian calibration, also known as [Importance Sampling](https://en.wikipedia.org/wiki/Importance_sampling) to condition ensemble members on observations of cumulative mass change.
 
 ![The first six eigen-glaciers](https://github.com/pism/pism-emulator/blob/master/images/eigenglaciers.png)
+
+![PISM vs Emulator](https://github.com/pism/pism-emulator/blob/master/images/speed_emulator_train.png)
 
 ## Procedure
 
