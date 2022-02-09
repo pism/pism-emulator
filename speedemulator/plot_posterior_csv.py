@@ -53,10 +53,12 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
+    parser.add_argument("--fraction", type=float, default=1.0)
 
     args = parser.parse_args()
 
     emulator_dir = args.emulator_dir
+    frac = args.fraction
     samples_file = args.samples_file
 
     samples = pd.read_csv(samples_file).drop(columns=["id"])
@@ -90,7 +92,7 @@ if __name__ == "__main__":
     print(f"Merging posteriors into dataframe")
     posterior_df = pd.concat(X_list)
 
-    X_posterior = posterior_df.drop(columns=["Model"]).values
+    X_posterior = posterior_df.sample(frac=frac).drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
@@ -112,6 +114,8 @@ if __name__ == "__main__":
         ax.set_xlabel(keys_dict[m_key])
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
     fig.tight_layout()
+    figfile = f"{emulator_dir}/prior.pdf"
+    print(f"Saving figure to {figfile}")
     fig.savefig(f"{emulator_dir}/prior.pdf")
 
     fig, axs = plt.subplots(ncols=int(n_parameters / 2), nrows=2, figsize=(6.2, 2.5))
@@ -147,7 +151,9 @@ if __name__ == "__main__":
         ax.set_xlabel(keys_dict[m_key])
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
     fig.tight_layout()
-    fig.savefig(f"{emulator_dir}/prior_posterior.pdf")
+    figfile = f"{emulator_dir}/prior_posterior.pdf"
+    print(f"Saving figure to {figfile}")
+    fig.savefig(f"{emulator_dir}/prior.pdf")
 
     fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(6.2, 6.2))
     for i in range(n_parameters):
@@ -272,6 +278,8 @@ if __name__ == "__main__":
 
     # fig.subplots_adjust(hspace=0.025, wspace=0.025)
     # fig.tight_layout()
+    figfile = f"{emulator_dir}/speed_emulator_posterior.pdf"
+    print(f"Saving figure to {figfile}")
     fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
 
     Prior = pd.DataFrame(data=X_prior, columns=X_keys).sample(frac=0.1)

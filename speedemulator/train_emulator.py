@@ -91,6 +91,7 @@ if __name__ == "__main__":
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
+        os.makedirs(os.path.join(emulator_dir, "emulator"))
 
     print(f"Training model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
@@ -139,6 +140,6 @@ if __name__ == "__main__":
         val_loader = data_loader.val_loader
 
     trainer.fit(e, train_loader, val_loader)
-    torch.save(e.state_dict(), f"{emulator_dir}/emulator_{model_index}.h5")
+    torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
 
     plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
