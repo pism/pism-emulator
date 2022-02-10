@@ -143,6 +143,15 @@ if __name__ == "__main__":
             linestyle="solid",
             label="Posterior",
         )
+        ax.histplot(
+            X_posterior[:, i],
+            bins,
+            density=True
+            color=color_posterior,
+            linewidth=0.8,
+            linestyle="solid",
+            label="Posterior",
+        )
         if i == 0:
             legend = ax.legend(loc="upper left")
             legend.get_frame().set_linewidth(0.0)
