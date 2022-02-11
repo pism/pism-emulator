@@ -48,15 +48,14 @@ params = {
 }
 
 gris_calib_distributions = {
-    "SIAE": uniform(
-        loc=1.0, scale=3.0
-    ),  # uniform between 1 and 4    AS16 best value: 1.25
-    "SSAN": uniform(
-        loc=3.0, scale=0.5
-    ),  # uniform between 3 and 3.5  AS16 best value: 3.25
-    "PPQ": uniform(loc=0.25, scale=0.7),  # uniform between 0.25 and 0.95
-    "TEFO": uniform(loc=0.015, scale=0.035),  # uniform between 0.015 and 0.040
-    "PHIMIN": uniform(loc=10.0, scale=20.0),  # uniform between  15 and 30
+    "SIAE": uniform(loc=1.0, scale=3.0),  # uniform between 1 and 4    AS16 best value: 1.25
+    "SSAN": uniform(loc=3.0, scale=0.5),  # uniform between 3 and 3.5  AS16 best value: 3.25
+    "PPQ": truncnorm(
+        -0.35 / 0.2, 0.35 / 0.2, loc=0.6, scale=0.2
+    ),  # truncated norm with center 0.6 (AS16 best value), Brinkerhoff 2020 has ~0.5, we could use a uniform distribution, or truncnorm centered aroun 0.5?
+    "TEFO": uniform(loc=0.005, scale=0.025),  # uniform between 0.005 and 0.03
+    "PHIMIN": uniform(loc=5.0, scale=15.0),  # uniform between  5 and 20
+    "PHIMAX": uniform(loc=40.0, scale=5.0),  # uniform between 40 and 45
     "ZMIN": uniform(loc=-1000, scale=1000),  # uniform between -1000 and 0
     "ZMAX": uniform(loc=0, scale=1000),  # uniform between 0 and 1000
 }
@@ -82,9 +81,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--prior_distribution", choices=["ant", "gris"], default="gris")
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
-    )
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument("--fraction", type=float, default=1.0)
 
     args = parser.parse_args()
@@ -157,33 +154,34 @@ if __name__ == "__main__":
 
     fig, axs = plt.subplots(ncols=int(n_parameters / 2), nrows=2, figsize=(6.2, 2.5))
     for i, ax in enumerate(fig.axes):
+        m_key = df.drop(columns=["Model"]).keys()[i]
         min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
         max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
         bins = np.linspace(min_val, max_val, 30)
+        x = np.linspace(min_val, max_val, 1000)
         X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
         X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-        ax.plot(
+        d = prior_dists[m_key]
+        D = d.pdf(x) / (2 * d.pdf(x).max())
+        ax.plot(x, D, color=color_prior, lw=1, label="Prior")
+
+        X_pr_hist = X_prior_hist / (2 * X_prior_hist.max())
+        ax.bar(
             b,
-            X_prior_hist,
+            X_pr_hist,
+            width=np.diff(bins),
             color=color_prior,
             linewidth=0.8,
-            label="Prior",
+            alpha=0.35,
+            label="Prior (Sampled))",
             linestyle="dashed",
         )
 
+        X_po_hist = X_posterior_hist / X_posterior_hist.max()
         ax.plot(
             b,
-            X_posterior_hist,
-            color=color_posterior,
-            linewidth=0.8,
-            linestyle="solid",
-            label="Posterior",
-        )
-        ax.histplot(
-            X_posterior[:, i],
-            bins,
-            density=True,
+            X_po_hist,
             color=color_posterior,
             linewidth=0.8,
             linestyle="solid",
@@ -193,13 +191,12 @@ if __name__ == "__main__":
             legend = ax.legend(loc="upper left")
             legend.get_frame().set_linewidth(0.0)
         legend.get_frame().set_alpha(0.0)
-        m_key = df.drop(columns=["Model"]).keys()[i]
         ax.set_xlabel(keys_dict[m_key])
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
     fig.tight_layout()
     figfile = f"{emulator_dir}/prior_posterior.pdf"
     print(f"Saving figure to {figfile}")
-    fig.savefig(f"{emulator_dir}/prior.pdf")
+    fig.savefig(f"{emulator_dir}/prior_posterior.pdf")
 
     fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(6.2, 6.2))
     for i in range(n_parameters):
@@ -256,13 +253,9 @@ if __name__ == "__main__":
                 lw = 1
                 all_models = posterior_df["Model"].unique()
                 for m_model in all_models:
-                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(
-                        columns=["Model"]
-                    )
+                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
-                    X_model_posterior_hist = np.histogram(
-                        X_model_posterior[:, i], bins, density=True
-                    )[0]
+                    X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
                     axs[i, j].plot(
                         b,
                         X_model_posterior_hist,
@@ -272,9 +265,7 @@ if __name__ == "__main__":
                         alpha=0.5,
                     )
 
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[
-                    0
-                ]
+                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
                 axs[i, j].plot(
                     b,
                     X_prior_hist,

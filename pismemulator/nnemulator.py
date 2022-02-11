@@ -36,6 +36,128 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from pismemulator.metrics import AbsoluteError, absolute_error
 
+    #     self.fc_final = nn.Linear(100, 1)
+    #     self.sigmoid = nn.Sigmoid()
+
+    # def forward(self, inputs):
+    #     for fc in self.fc:
+    #         inputs = fc(inputs)
+
+    #     outputs = self.fc_final(inputs)
+
+class MLNNEmulator(pl.LightningModule):
+    def __init__(
+        self,
+        n_parameters,
+        n_eigenglaciers,
+        V_hat,
+        F_mean,
+        area,
+        hparams,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.save_hyperparameters(hparams)
+        n_hidden = self.hparams.n_hidden_1
+
+        # Inputs to hidden layer linear transformation
+        self.l_first = nn.Linear(n_parameters, n_hidden_1)
+        self.norm = nn.LayerNorm(n_hidden_1)
+        self.dropout = nn.Dropout(p=0.0)        
+
+        self.fc = nn.ModuleList(
+            [nn.Linear(d*100, (d-1)*100) for d in range(2, 8).__reversed__()]
+        )
+        self.l_last = nn.Linear(n_hidden_4, n_eigenglaciers)
+
+        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
+        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
+
+        self.register_buffer("area", area)
+
+        self.train_ae = AbsoluteError()
+        self.test_ae = AbsoluteError()
+
+    def forward(self, x, add_mean=False):
+        # Pass the input tensor through each of our operations
+
+        a_1 = self.l_first(x)
+        a_1 = self.norm_1(a_1)
+        a_1 = self.dropout_1(a_1)
+        z_1 = torch.relu(a_1)
+
+        for 
+        a_2 = self.layer(z_1)
+        a_2 = self.norm(a_2)
+        a_2 = self.dropout(a_2)
+        z_2 = torch.relu(a_2) + z_1
+
+        z_last = self.l_last(z_4)
+        if add_mean:
+            F_pred = z_last @ self.V_hat.T + self.F_mean
+        else:
+            F_pred = z_last @ self.V_hat.T
+
+        return F_pred
+
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group("NNEmulator")
+        parser.add_argument("--batch_size", type=int, default=128)
+        parser.add_argument("--n_hidden_1", type=int, default=128)
+        parser.add_argument("--n_hidden_2", type=int, default=128)
+        parser.add_argument("--n_hidden_3", type=int, default=128)
+        parser.add_argument("--n_hidden_4", type=int, default=128)
+        parser.add_argument("--learning_rate", type=float, default=0.01)
+
+        return parent_parser
+
+    def criterion_ae(self, F_pred, F_obs, omegas, area):
+        instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
+        return torch.sum(instance_misfit * omegas.squeeze())
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        # This is an approximation to Doug's version:
+        scheduler = {
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+        }
+
+        return [optimizer], [scheduler]
+
+    def training_step(self, batch, batch_idx):
+        x, f, o, _ = batch
+        f_pred = self.forward(x)
+        loss = absolute_error(f_pred, f, o, self.area)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+
+        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
+
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
+
+    def validation_epoch_end(self, outputs):
+
+        self.log(
+            "train_loss",
+            self.train_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 class NNEmulator(pl.LightningModule):
     def __init__(
