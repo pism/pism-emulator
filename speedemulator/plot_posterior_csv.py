@@ -259,7 +259,7 @@ if __name__ == "__main__":
                     axs[i, j].plot(
                         b,
                         X_model_posterior_hist,
-                        color="#31a354",
+                        color="0.5",
                         linewidth=0.2,
                         linestyle="solid",
                         alpha=0.5,
