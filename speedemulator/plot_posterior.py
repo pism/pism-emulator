@@ -53,7 +53,9 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument(
+        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
+    )
     parser.add_argument("--fraction", default=1.0)
 
     args = parser.parse_args()
@@ -70,6 +72,12 @@ if __name__ == "__main__":
 
     X_min = X.min(axis=0)
     X_max = X.max(axis=0)
+
+    alpha_b = 3.0
+    beta_b = 3.0
+    X_prior = (
+        beta.rvs(alpha_b, beta_b, size=(10000, X.shape[1])) * (X_max - X_min) + X_min
+    )
 
     color_post_0 = "#00B25F"
     color_post_1 = "#132DD6"
@@ -216,7 +224,9 @@ if __name__ == "__main__":
                 for m_model in all_models:
                     m_df = df[df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
-                    X_model_posterior_hist = np.histogram(X_model_posterior[:, i], bins, density=True)[0]
+                    X_model_posterior_hist = np.histogram(
+                        X_model_posterior[:, i], bins, density=True
+                    )[0]
                     axs[i, j].plot(
                         b,
                         X_model_posterior_hist,
@@ -226,7 +236,9 @@ if __name__ == "__main__":
                         alpha=0.5,
                     )
 
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
+                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[
+                    0
+                ]
                 axs[i, j].plot(
                     b,
                     X_hat_hist,
