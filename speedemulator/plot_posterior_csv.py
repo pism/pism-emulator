@@ -13,6 +13,8 @@ import pylab as plt
 
 from matplotlib.ticker import NullFormatter
 from matplotlib.patches import Polygon
+from matplotlib.lines import Line2D
+
 import seaborn as sns
 
 from scipy.stats import beta, gaussian_kde
@@ -50,9 +52,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
-    )
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument("--fraction", type=float, default=1.0)
 
     args = parser.parse_args()
@@ -76,10 +76,7 @@ if __name__ == "__main__":
 
     alpha_b = 3.0
     beta_b = 3.0
-    X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(n_samples, n_parameters)) * (X_max - X_min)
-        + X_min
-    )
+    X_prior = beta.rvs(alpha_b, beta_b, size=(n_samples, n_parameters)) * (X_max - X_min) + X_min
 
     color_post_0 = "#00B25F"
     color_post_1 = "#132DD6"
@@ -112,30 +109,24 @@ if __name__ == "__main__":
         m_key = posterior_df.drop(columns=["Model"]).keys()[i]
         min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
         max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
-        bins = np.linspace(min_val, max_val, 1000)
+        bins = np.linspace(min_val, max_val, 30)
         X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
-        b = 0.5 * (b[1:] + b[:-1])
-        X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
+        X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
         all_models = posterior_df["Model"].unique()
         for m_model in all_models:
-            m_df = posterior_df[posterior_df["Model"] == m_model].drop(
-                columns=["Model"]
-            )
+            m_df = posterior_df[posterior_df["Model"] == m_model].drop(columns=["Model"])
             X_model_posterior = m_df.values
-            X_model_posterior_hist = np.histogram(
-                X_model_posterior[:, i], bins, density=True
-            )[0]
+            X_model_posterior_hist, _ = np.histogram(X_model_posterior[:, i], bins, density=True)
             ax.plot(
                 b,
-                X_model_posterior_hist,
+                X_model_posterior_hist * 0.5,
                 color="0.5",
                 linewidth=lw * 0.25,
                 linestyle="solid",
                 alpha=0.5,
             )
 
-        X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
         ax.plot(
             b,
             X_prior_hist,
@@ -165,7 +156,7 @@ if __name__ == "__main__":
     print(f"Saving figure to {figfile}")
     fig.savefig(f"{emulator_dir}/prior_posterior.pdf")
 
-    fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(6.2, 6.2))
+    fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(5.4, 5.6))
     fig.subplots_adjust(hspace=0.0, wspace=0.0)
     for i in range(n_parameters):
         for j in range(n_parameters):
@@ -232,9 +223,7 @@ if __name__ == "__main__":
                 max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
                 bins = np.linspace(min_val, max_val, 30)
                 X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
-                X_posterior_hist, _ = np.histogram(
-                    X_posterior[:, i], bins, density=True
-                )
+                X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
                 b = 0.5 * (b[1:] + b[:-1])
                 axs[i, j].plot(
                     b,
@@ -247,13 +236,9 @@ if __name__ == "__main__":
 
                 all_models = posterior_df["Model"].unique()
                 for k, m_model in enumerate(all_models):
-                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(
-                        columns=["Model"]
-                    )
+                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(columns=["Model"])
                     X_model_posterior = m_df.values
-                    X_model_posterior_hist, _ = np.histogram(
-                        X_model_posterior[:, i], bins, density=True
-                    )
+                    X_model_posterior_hist, _ = np.histogram(X_model_posterior[:, i], bins, density=True)
                     if k == 0:
                         axs[i, j].plot(
                             b,
@@ -282,11 +267,6 @@ if __name__ == "__main__":
                     linestyle="solid",
                     label="Posterior",
                 )
-
-                # if i == 1:
-                #     legend = axs[i, j].legend(fontsize=6, loc="lower left")
-                #     legend.get_frame().set_linewidth(0.0)
-                #     legend.get_frame().set_alpha(0.0)
 
                 axs[i, j].set_xlim(min_val, max_val)
 
@@ -317,7 +297,14 @@ if __name__ == "__main__":
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.tick_params(axis="both", which="both", length=0)
 
-    fig.tight_layout()
+    l_prior = Line2D([], [], c=color_prior, lw=lw, ls="solid", label="Prior")
+    l_post = Line2D([], [], c="k", lw=lw, ls="solid", label="Posterior")
+    l_post_b = Line2D([], [], c="0.25", lw=lw * 0.25, ls="solid", label="Posterior (BayesBag)")
+
+    legend = fig.legend(handles=[l_prior, l_post, l_post_b], bbox_to_anchor=(0.3, 0.955))
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+
     figfile = f"{emulator_dir}/speed_emulator_posterior.pdf"
     print(f"Saving figure to {figfile}")
     fig.savefig(figfile)

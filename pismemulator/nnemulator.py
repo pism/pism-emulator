@@ -16,6 +16,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+from collections import OrderedDict
 from glob import glob
 import numpy as np
 import pandas as pd
@@ -36,14 +37,15 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from pismemulator.metrics import AbsoluteError, absolute_error
 
-    #     self.fc_final = nn.Linear(100, 1)
-    #     self.sigmoid = nn.Sigmoid()
+#     self.fc_final = nn.Linear(100, 1)
+#     self.sigmoid = nn.Sigmoid()
 
-    # def forward(self, inputs):
-    #     for fc in self.fc:
-    #         inputs = fc(inputs)
+# def forward(self, inputs):
+#     for fc in self.fc:
+#         inputs = fc(inputs)
 
-    #     outputs = self.fc_final(inputs)
+#     outputs = self.fc_final(inputs)
+
 
 class MLNNEmulator(pl.LightningModule):
     def __init__(
@@ -59,17 +61,26 @@ class MLNNEmulator(pl.LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters(hparams)
+        n_layers = self.hparams.n_layers
         n_hidden = self.hparams.n_hidden_1
 
         # Inputs to hidden layer linear transformation
-        self.l_first = nn.Linear(n_parameters, n_hidden_1)
-        self.norm = nn.LayerNorm(n_hidden_1)
-        self.dropout = nn.Dropout(p=0.0)        
+        self.l_first = nn.Linear(n_parameters, n_hidden)
+        self.norm = nn.LayerNorm(n_hidden)
+        self.dropout = nn.Dropout(p=0.0)
 
-        self.fc = nn.ModuleList(
-            [nn.Linear(d*100, (d-1)*100) for d in range(2, 8).__reversed__()]
+        model = nn.Sequential(
+            OrderedDict(
+                [
+                    ("Linear", nn.Linear(n_hidden, n_hidden)),
+                    ("LayerNorm", nn.LayerNorm(n_hidden)),
+                    ("Dropout", nn.Dropout(p=0.1)),
+                    ("relu", nn.ReLU()),
+                ]
+            )
         )
-        self.l_last = nn.Linear(n_hidden_4, n_eigenglaciers)
+        self.dnn = nn.ModuleList([model for n in range(n_layers - 2)])
+        self.l_last = nn.Linear(n_hidden, n_eigenglaciers)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
@@ -82,16 +93,13 @@ class MLNNEmulator(pl.LightningModule):
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
 
-        a_1 = self.l_first(x)
-        a_1 = self.norm_1(a_1)
-        a_1 = self.dropout_1(a_1)
-        z_1 = torch.relu(a_1)
+        a = self.l_first(x)
+        a = self.norm_1(a)
+        a = self.dropout_1(a)
+        z = torch.relu(a)
 
-        for 
-        a_2 = self.layer(z_1)
-        a_2 = self.norm(a_2)
-        a_2 = self.dropout(a_2)
-        z_2 = torch.relu(a_2) + z_1
+        for dnn in self.dnn:
+            inputs = dnn(z)
 
         z_last = self.l_last(z_4)
         if add_mean:
@@ -158,6 +166,7 @@ class MLNNEmulator(pl.LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
+
 
 class NNEmulator(pl.LightningModule):
     def __init__(
