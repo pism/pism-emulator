@@ -37,17 +37,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from pismemulator.metrics import AbsoluteError, absolute_error
 
-#     self.fc_final = nn.Linear(100, 1)
-#     self.sigmoid = nn.Sigmoid()
 
-# def forward(self, inputs):
-#     for fc in self.fc:
-#         inputs = fc(inputs)
-
-#     outputs = self.fc_final(inputs)
-
-
-class MLNNEmulator(pl.LightningModule):
+class DNNEmulator(pl.LightningModule):
     def __init__(
         self,
         n_parameters,
@@ -94,14 +85,16 @@ class MLNNEmulator(pl.LightningModule):
         # Pass the input tensor through each of our operations
 
         a = self.l_first(x)
-        a = self.norm_1(a)
-        a = self.dropout_1(a)
+        a = self.norm(a)
+        a = self.dropout(a)
         z = torch.relu(a)
 
         for dnn in self.dnn:
-            inputs = dnn(z)
+            a = dnn(z)
+            z = torch.relu(a) + z
 
-        z_last = self.l_last(z_4)
+        z_last = self.l_last(z)
+
         if add_mean:
             F_pred = z_last @ self.V_hat.T + self.F_mean
         else:
@@ -126,7 +119,9 @@ class MLNNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
@@ -258,7 +253,9 @@ class NNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
@@ -372,9 +369,9 @@ class PISMDataset(torch.utils.data.Dataset):
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-            by=identifier_name
-        )
+        samples = pd.read_csv(
+            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+        ).sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -397,7 +394,11 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
+        _, ny, nx = (
+            ds0.variables["velsurf_mag"]
+            .values[:, ::thinning_factor, ::thinning_factor]
+            .shape
+        )
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -410,7 +411,9 @@ class PISMDataset(torch.utils.data.Dataset):
             ds = xr.open_dataset(m_file)
             data = np.squeeze(
                 np.nan_to_num(
-                    ds.variables[training_var].values[:, ::thinning_factor, ::thinning_factor],
+                    ds.variables[training_var].values[
+                        :, ::thinning_factor, ::thinning_factor
+                    ],
                     epsilon,
                 )
             )
@@ -484,7 +487,9 @@ class PISMDataModule(pl.LightningDataModule):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
 
-        training_data, val_data = train_test_split(all_data, train_size=self.train_size, random_state=0)
+        training_data, val_data = train_test_split(
+            all_data, train_size=self.train_size, random_state=0
+        )
         self.training_data = training_data
         self.test_data = training_data
 
@@ -532,7 +537,12 @@ class PISMDataModule(pl.LightningDataModule):
 
     def get_eigenglaciers(self, **kwargs):
         print("Generating eigenglaciers")
-        defaultKwargs = {"cutoff": 1.0, "q": 100, "svd_lowrank": True, "eigenvalues": False}
+        defaultKwargs = {
+            "cutoff": 1.0,
+            "q": 100,
+            "svd_lowrank": True,
+            "eigenvalues": False,
+        }
         kwargs = {**defaultKwargs, **kwargs}
         F = self.F
         omegas = self.omegas
@@ -549,7 +559,9 @@ class PISMDataModule(pl.LightningDataModule):
             lamda, V = torch.eig(S, eigenvectors=True)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"])
+        cutoff_index = torch.sum(
+            torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"]
+        )
         print(f"...using the first {cutoff_index} eigen values")
         lamda_truncated = lamda.detach()[:cutoff_index]
         V = V.detach()[:, :cutoff_index]

@@ -39,8 +39,13 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
-    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
-    parser.add_argument("--validation_samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
+    parser.add_argument(
+        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
+    )
+    parser.add_argument(
+        "--validation_samples_file",
+        default="../data/samples/velocity_calibration_samples_100.csv",
+    )
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
@@ -105,7 +110,9 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
         e.eval()
 
-        plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=True)
+        plot_validation(
+            e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=True
+        )
 
         for idx in range(len(data_loader.all_data)):
             (
