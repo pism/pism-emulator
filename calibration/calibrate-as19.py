@@ -937,9 +937,9 @@ def plot_histograms(
     fig, axs = plt.subplots(
         5,
         4,
-        figsize=[6.2, 5.2],
+        figsize=[5.2, 6.2],
     )
-    fig.subplots_adjust(hspace=0.1, wspace=0.05)
+    fig.subplots_adjust(hspace=0.05, wspace=0.025)
 
     cmap = sns.color_palette(palette, n_colors=3)
 
@@ -1209,9 +1209,9 @@ def plot_histograms(
         1.05,
         "$\mathbf{m}_{\mathrm{flow}}$",
         transform=axs[0, 0].transAxes,
-        size=10,
+        size=8,
     )
-    axs[2, 0].text(0, 1.05, "$\mathbf{m}_{*}$", transform=axs[2, 0].transAxes, size=10)
+    axs[2, 0].text(0, 1.05, "$\mathbf{m}_{*}$", transform=axs[2, 0].transAxes, size=8)
     for ax in axs.flatten():
         ax.get_yaxis().set_visible(False)
         key = ax.get_xlabel()
