@@ -931,25 +931,26 @@ def plot_histograms(
     out_filename,
     df,
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    palette="GnBu",
+    palette="cividis",
 ):
 
     fig, axs = plt.subplots(
         5,
         4,
-        figsize=[5.2, 6.2],
+        figsize=[4.8, 5.2],
     )
-    fig.subplots_adjust(hspace=0.05, wspace=0.025)
+    fig.subplots_adjust(hspace=1.25, wspace=0.0)
 
     cmap = sns.color_palette(palette, n_colors=3)
 
+    xmin, xmax = 1, 4
     sns.histplot(
         data=df,
         x="SIAE",
         hue="Ensemble",
         hue_order=ensembles,
         common_norm=False,
-        bins=np.linspace(1, 4, 16),
+        bins=np.linspace(xmin, xmax, 16),
         palette=palette,
         stat="density",
         multiple="dodge",
@@ -957,6 +958,8 @@ def plot_histograms(
         ax=axs[0, 0],
         legend=False,
     )
+    # axs[0, 0].set_xlim(xmin, xmax)
+    xmin, xmax = 0.1, 0.9
     sns.histplot(
         data=df,
         x="PPQ",
@@ -964,14 +967,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(0.2, 0.8, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[0, 1],
         legend=False,
     )
+    # axs[0, 1].set_xlim(xmin, xmax)
 
+    xmin, xmax = 0.005, 0.035
     sns.histplot(
         data=df,
         x="TEFO",
@@ -979,14 +984,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(0.005, 0.030, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[0, 2],
         legend=False,
     )
+    # axs[0, 2].set_xlim(xmin, xmax)
 
+    xmin, xmax = 3.0, 3.5
     sns.histplot(
         data=df,
         x="SSAN",
@@ -994,14 +1001,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(3.0, 3.5, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[0, 3],
         legend=False,
     )
+    # axs[0, 3].set_xlim(xmin, xmax)
 
+    xmin, xmax = -1000, 0
     sns.histplot(
         data=df,
         x="ZMIN",
@@ -1009,13 +1018,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(-1000, 0, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[1, 0],
         legend=False,
     )
+    # axs[1, 0].set_xlim(xmin, xmax)
+
+    xmin, xmax = 0, 1000
     sns.histplot(
         data=df,
         x="ZMAX",
@@ -1023,13 +1035,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(0, 1000, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[1, 1],
         legend=False,
     )
+    # axs[1, 1].set_xlim(xmin, xmax)
+
+    xmin, xmax = 5, 15
     sns.histplot(
         data=df,
         x="PHIMIN",
@@ -1037,13 +1052,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(5, 15, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[1, 2],
         legend=False,
     )
+    # axs[1, 2].set_xlim(xmin, xmax)
+
+    xmin, xmax = 40, 45
     sns.histplot(
         data=df,
         x="PHIMAX",
@@ -1051,13 +1069,14 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(40, 45, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[1, 3],
         legend=False,
     )
+    # axs[1, 3].set_xlim(xmin, xmax)
 
     sns.histplot(
         data=df,
@@ -1073,6 +1092,8 @@ def plot_histograms(
         legend=False,
         ax=axs[2, 0],
     )
+
+    xmin, xmax = 5, 7
     sns.histplot(
         data=df,
         x="PRS",
@@ -1080,13 +1101,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(5, 7, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[2, 1],
         legend=False,
     )
+    # axs[2, 1].set_xlim(xmin, xmax)
+
+    xmin, xmax = 4, 12
     sns.histplot(
         data=df,
         x="FICE",
@@ -1094,13 +1118,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(4, 12, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[2, 2],
         legend=False,
     )
+    # axs[2, 2].set_xlim(xmin, xmax)
+
+    xmin, xmax = 2, 6
     sns.histplot(
         data=df,
         x="FSNOW",
@@ -1108,13 +1135,16 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(2, 6, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[2, 3],
         legend=False,
     )
+    # axs[2, 3].set_xlim(xmin, xmax)
+
+    xmin, xmax = 0.2, 0.8
     sns.histplot(
         data=df,
         x="RFR",
@@ -1122,13 +1152,15 @@ def plot_histograms(
         hue_order=ensembles,
         common_norm=False,
         palette=palette,
-        bins=np.linspace(0.2, 0.8, 16),
+        bins=np.linspace(xmin, xmax, 16),
         stat="density",
         multiple="dodge",
         linewidth=0.25,
         ax=axs[3, 0],
         legend=False,
     )
+    # axs[3, 0].set_xlim(xmin, xmax)
+
     sns.histplot(
         data=df,
         x="OCM",
@@ -1143,6 +1175,7 @@ def plot_histograms(
         ax=axs[3, 1],
         legend=False,
     )
+
     sns.histplot(
         data=df,
         x="OCS",
@@ -1196,7 +1229,7 @@ def plot_histograms(
         for k, ens in enumerate(ensembles)
     ]
 
-    legend_1 = axs[4, 1].legend(handles=handles, loc="lower left", title="Ensemble")
+    legend_1 = axs[4, 1].legend(handles=handles, loc="lower left")
     legend_1.get_frame().set_linewidth(0.0)
     legend_1.get_frame().set_alpha(0.0)
 
@@ -1211,14 +1244,18 @@ def plot_histograms(
         transform=axs[0, 0].transAxes,
         size=8,
     )
-    axs[2, 0].text(0, 1.05, "$\mathbf{m}_{*}$", transform=axs[2, 0].transAxes, size=8)
+    axs[2, 0].text(0, 1.05, "$\mathbf{m}^{*}$", transform=axs[2, 0].transAxes, size=8)
     for ax in axs.flatten():
+        ticklabels = ax.get_xticklabels()
+        for tick in ticklabels:
+            tick.set_rotation(30)
+
         ax.get_yaxis().set_visible(False)
         key = ax.get_xlabel()
         if key != "":
             ax.set_xlabel(keys_dict[key])
 
-    fig.tight_layout()
+    # fig.tight_layout()
     fig.savefig(out_filename)
     plt.close(fig)
 
@@ -1536,63 +1573,11 @@ if __name__ == "__main__":
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
     q_df = make_quantile_df(all_2100_df, quantiles)
 
-    plot_prior_histograms("calibrated_priors_hists.pdf", as19_resampled)
     plot_histograms("marginal_posteriors_all.pdf", all_2100_df)
 
     plot_partitioning(
         "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
     )
-    plot_partitioning(
-        "historical_partitioning_flow.pdf",
-        simulated=all_df,
-        observed=observed_f,
-        ensembles=["AS19", "Flow Calib."],
-    )
-    plot_partitioning(
-        "historical_partitioning_mass.pdf",
-        simulated=all_df,
-        observed=observed_f,
-        ensembles=["AS19", "Mass Calib."],
-    )
-    # plot_projection(
-    #     "projection_as19.pdf",
-    #     simulated=all_df,
-    #     ensemble="AS19",
-    #     quantiles=[0.05, 0.16, 0.84, 0.95],
-    # )
-    # plot_projection(
-    #     "projection_flow.pdf",
-    #     simulated=all_df,
-    #     ensemble="Flow Calib.",
-    #     quantiles=[0.05, 0.16, 0.84, 0.95],
-    # )
-    # plot_projection(
-    #     "projection_calibrated.pdf",
-    #     simulated=all_df,
-    #     ensemble="Flow+Mass Calib.",
-    #     quantiles=[0.05, 0.16, 0.84, 0.95],
-    # )
-    # plot_projection(
-    #     "projection_as19_bars.pdf",
-    #     simulated=all_df,
-    #     ensemble="AS19",
-    #     quantiles=[0.05, 0.16, 0.84, 0.95],
-    #     bars=["AS19"],
-    # )
-    # plot_projection(
-    #     "projection_flow_bars.pdf",
-    #     simulated=all_df,
-    #     ensemble="Flow Calib.",
-    #     quantiles=[0.05, 0.16, 0.84, 0.95],
-    #     bars=["AS19", "Flow Calib."],
-    # )
-    # plot_projection(
-    #     "projection_calibrated_bars.pdf",
-    #     simulated=all_df,
-    #     ensemble="Flow+Mass Calib.",
-    #     quantiles=[0.05, 0.16, 0.84, 0.95],
-    #     bars=["Flow+Mass Calib."],
-    # )
 
     years = [2020, 2100]
     plot_posterior_sle_pdfs(
@@ -1601,105 +1586,6 @@ if __name__ == "__main__":
         observed=observed,
         years=years,
     )
-    # plot_posterior_sle_pdfs(
-    #     f"sle_pdf_as19_w_obs_{years[0]}_{years[1]}.pdf",
-    #     all_df,
-    #     observed=observed,
-    #     years=years,
-    #     ensembles=["AS19"],
-    # )
-    # plot_posterior_sle_pdfs(
-    #     f"sle_pdf_w_obs_as19flow_{years[0]}_{years[1]}.pdf",
-    #     all_df,
-    #     observed=observed,
-    #     years=years,
-    #     ensembles=["AS19", "Flow Calib."],
-    # )
-    # plot_posterior_sle_pdfs(
-    #     f"sle_pdf_w_obs_as19massflow_{years[0]}_{years[1]}.pdf",
-    #     all_df,
-    #     observed=observed,
-    #     years=years,
-    #     ensembles=["AS19", "Mass Calib.", "Flow+Mass Calib."],
-    # )
-    # plot_posterior_sle_pdfs(
-    #     f"sle_pdf_w_obs_calibrated_{years[0]}_{years[1]}.pdf",
-    #     all_df,
-    #     observed=observed,
-    #     years=years,
-    # )
-
-    # year = 2020
-    # plot_posterior_sle_pdf(f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"])
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_as19_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     observed=observed,
-    #     ensembles=["AS19"],
-    # )
-
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_as19flow_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     ensembles=["AS19", "Flow Calib."],
-    #     observed=observed,
-    # )
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_as19mass_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     observed=observed,
-    #     ensembles=["AS19", "Mass Calib.", "Flow+Mass Calib."],
-    # )
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_calibrated_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     observed=observed,
-    # )
-    # year = 2020
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_scaled_as19_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     ensembles=["AS19"],
-    #     ylim=[0, 2.5],
-    #     observed=observed,
-    # )
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_scaled_as19flow_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     ensembles=["AS19", "Flow Calib."],
-    #     ylim=[0, 2.5],
-    #     observed=observed,
-    # )
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_scaled_as19mass_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     ylim=[0, 2.5],
-    #     observed=observed,
-    #     ensembles=["AS19", "Mass Calib.", "Flow+Mass Calib."],
-    # )
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_w_obs_scaled_calibrated_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     ylim=[0, 2.5],
-    #     observed=observed,
-    # )
-    # year = 2100
-    # plot_posterior_sle_pdf(f"sle_pdf_as19_{year}.pdf", all_df, year=year, ensembles=["AS19"])
-    # plot_posterior_sle_pdf(
-    #     f"sle_pdf_as19flow_{year}.pdf",
-    #     all_df,
-    #     year=year,
-    #     ensembles=["AS19", "Flow Calib."],
-    # )
-    # plot_posterior_sle_pdf(f"sle_pdf_calibrated_{year}.pdf", all_df, year=year)
 
     make_quantile_table(q_df, quantiles=quantiles)
 

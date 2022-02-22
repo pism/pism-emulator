@@ -132,14 +132,6 @@ if __name__ == "__main__":
         area,
         hparams,
     )
-    de = DNNEmulator(
-        n_parameters,
-        n_eigenglaciers,
-        V_hat,
-        F_mean,
-        area,
-        hparams,
-    )
     trainer = pl.Trainer.from_argparse_args(
         args,
         callbacks=callbacks,
@@ -154,8 +146,7 @@ if __name__ == "__main__":
         train_loader = data_loader.train_loader
         val_loader = data_loader.val_loader
 
-    trainer.fit(de, train_loader, val_loader)
     trainer.fit(e, train_loader, val_loader)
-    # torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
+    torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
 
-    # plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)
+    plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir)

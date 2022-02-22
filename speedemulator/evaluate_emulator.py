@@ -40,11 +40,8 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
     parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
-    )
-    parser.add_argument(
-        "--validation_samples_file",
-        default="../data/samples/velocity_calibration_samples_100.csv",
+        "--samples_file",
+        default="../data/samples/velocity_calibration_samples_20_lhs.csv",
     )
     parser.add_argument(
         "--target_file",
@@ -72,13 +69,12 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=1,
-        threshold=1e6,
     )
     X = dataset.X
     F = dataset.Y
     n_samples = dataset.n_samples
 
-    for model_index in range(1, num_models):
+    for model_index in range(0, num_models):
         print(f"Loading emulator {model_index}")
         np.random.seed(model_index)
 
@@ -97,7 +93,7 @@ if __name__ == "__main__":
         data_loader.setup(stage="fit")
         F_mean = data_loader.F_mean
 
-        emulator_file = join(emulator_dir, "emulator_{0:03d}.h5".format(model_index))
+        emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
         state_dict = torch.load(emulator_file)
         e = NNEmulator(
             state_dict["l_1.weight"].shape[1],
