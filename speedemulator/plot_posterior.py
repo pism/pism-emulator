@@ -5,8 +5,6 @@ from argparse import ArgumentParser
 import numpy as np
 import os
 from os.path import join
-from scipy.special import gamma
-from scipy.stats import beta
 
 from pathlib import Path
 
@@ -15,16 +13,18 @@ import pylab as plt
 
 from matplotlib.ticker import NullFormatter
 from matplotlib.patches import Polygon
+from matplotlib.lines import Line2D
+
+import seaborn as sns
+
+from scipy.stats import beta, gaussian_kde
 
 from pismemulator.utils import param_keys_dict as keys_dict
 
 fontsize = 6
-lw = 0.65
+lw = 1.0
 aspect_ratio = 1
 markersize = 2
-fig_width = 6.2  # inch
-fig_height = aspect_ratio * fig_width  # inch
-fig_size = [fig_width, fig_height]
 
 params = {
     "backend": "ps",
@@ -43,7 +43,6 @@ params = {
     "legend.fontsize": fontsize,
     "lines.markersize": markersize,
     "font.size": fontsize,
-    "figure.figsize": fig_size,
 }
 
 plt.rcParams.update(params)
@@ -53,31 +52,31 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
-    )
-    parser.add_argument("--fraction", default=1.0)
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
+    parser.add_argument("--fraction", type=float, default=1.0)
 
     args = parser.parse_args()
+
     emulator_dir = args.emulator_dir
+    frac = args.fraction
     samples_file = args.samples_file
 
+    print("Loading prior samples\n")
     samples = pd.read_csv(samples_file).drop(columns=["id"])
+
     X = samples.values
-    X_mean = X.mean(axis=0)
-    X_std = X.std(axis=0)
+    X_mean = samples.mean(axis=0)
+    X_std = samples.std(axis=0)
     X_keys = samples.keys()
 
-    n_parameters = X.shape[1]
+    n_samples, n_parameters = X.shape
 
-    X_min = X.min(axis=0)
-    X_max = X.max(axis=0)
+    X_min = (((X.min(axis=0) - X_mean) / X_std - 1e-3) * X_std + X_mean).values
+    X_max = (((X.max(axis=0) - X_mean) / X_std + 1e-3) * X_std + X_mean).values
 
     alpha_b = 3.0
     beta_b = 3.0
-    X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(10000, X.shape[1])) * (X_max - X_min) + X_min
-    )
+    X_prior = beta.rvs(alpha_b, beta_b, size=(n_samples, n_parameters)) * (X_max - X_min) + X_min
 
     color_post_0 = "#00B25F"
     color_post_1 = "#132DD6"
@@ -88,86 +87,77 @@ if __name__ == "__main__":
 
     X_list = []
     p = Path(f"{emulator_dir}/posterior_samples/")
-    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.npy"))):
-        print(f"Loading {m_file}")
-        X_p = np.load(open(m_file, "rb")) * X_std + X_mean
+    print("Loading posterior samples\n")
+    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
+        print(f"  -- {m_file}")
+        df = pd.read_csv(m_file).sample(frac=frac)
+        if "Unnamed: 0" in df.columns:
+            df.drop(columns=["Unnamed: 0"], inplace=True)
         model = m_file.name.split("_")[-1].split(".")[0]
-        df = pd.DataFrame(
-            data=X_p.astype("float32"),
-            columns=X_keys,
-        )
-        df.to_csv(
-            join(p, "X_posterior_model_{0}.csv.gz".format(model)),
-            compression="infer",
-        )
-
         df["Model"] = int(model)
         X_list.append(df)
 
-    X_posterior_file = f"{emulator_dir}/X_posterior.csv.gz"
     print(f"Merging posteriors into dataframe")
-    df = pd.concat(X_list)
+    posterior_df = pd.concat(X_list)
 
-    X_posterior = df.sample(frac=frac).drop(columns=["Model"]).values
+    X_posterior = posterior_df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
 
     fig, axs = plt.subplots(ncols=int(n_parameters / 2), nrows=2, figsize=(6.2, 2.5))
     for i, ax in enumerate(fig.axes):
-        min_val = min(X[:, i].min(), X_posterior[:, i].min())
-        max_val = max(X[:, i].max(), X_posterior[:, i].max())
+        m_key = posterior_df.drop(columns=["Model"]).keys()[i]
+        min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
+        max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
         bins = np.linspace(min_val, max_val, 30)
-        X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
+        X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
+        X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
         b = 0.5 * (b[1:] + b[:-1])
-        X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
-        ax.plot(b, X_hat_hist, color=color_prior, linewidth=0.8, label="Prior")
+        all_models = posterior_df["Model"].unique()
+        for m_model in all_models:
+            m_df = posterior_df[posterior_df["Model"] == m_model].drop(columns=["Model"])
+            X_model_posterior = m_df.values
+            X_model_posterior_hist, _ = np.histogram(X_model_posterior[:, i], bins, density=True)
+            ax.plot(
+                b,
+                X_model_posterior_hist * 0.5,
+                color="0.5",
+                linewidth=lw * 0.25,
+                linestyle="solid",
+                alpha=0.5,
+            )
 
-        if i == 0:
-            legend = ax.legend(loc="upper left")
-            legend.get_frame().set_linewidth(0.0)
-        legend.get_frame().set_alpha(0.0)
-        m_key = df.drop(columns=["Model"]).keys()[i]
-        ax.set_xlabel(keys_dict[m_key])
-    fig.subplots_adjust(hspace=0.05, wspace=0.05)
-    fig.tight_layout()
-    fig.savefig(f"{emulator_dir}/prior.pdf")
-
-    fig, axs = plt.subplots(ncols=int(n_parameters / 2), nrows=2, figsize=(6.2, 2.5))
-    for i, ax in enumerate(fig.axes):
-        min_val = min(X[:, i].min(), X_posterior[:, i].min())
-        max_val = max(X[:, i].max(), X_posterior[:, i].max())
-        bins = np.linspace(min_val, max_val, 30)
-        X_hat_hist, b = np.histogram(X[:, i], bins, density=True)
-        b = 0.5 * (b[1:] + b[:-1])
-        X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[0]
         ax.plot(
             b,
-            X_hat_hist,
+            X_prior_hist,
             color=color_prior,
-            linewidth=0.8,
+            linewidth=lw,
             label="Prior",
             linestyle="dashed",
         )
-
         ax.plot(
             b,
             X_posterior_hist,
-            color=color_posterior,
-            linewidth=0.8,
+            color="black",
+            linewidth=lw,
             linestyle="solid",
             label="Posterior",
         )
+
         if i == 0:
             legend = ax.legend(loc="upper left")
             legend.get_frame().set_linewidth(0.0)
         legend.get_frame().set_alpha(0.0)
-        m_key = df.drop(columns=["Model"]).keys()[i]
         ax.set_xlabel(keys_dict[m_key])
+
     fig.subplots_adjust(hspace=0.05, wspace=0.05)
     fig.tight_layout()
+    figfile = f"{emulator_dir}/prior_posterior.pdf"
+    print(f"Saving figure to {figfile}")
     fig.savefig(f"{emulator_dir}/prior_posterior.pdf")
 
-    fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(6.2, 6.2))
+    fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(5.4, 5.6))
+    fig.subplots_adjust(hspace=0.0, wspace=0.0)
     for i in range(n_parameters):
         for j in range(n_parameters):
             if i > j:
@@ -175,22 +165,37 @@ if __name__ == "__main__":
                 axs[i, j].scatter(
                     X_posterior[:, j],
                     X_posterior[:, i],
-                    c="k",
-                    s=0.5,
-                    alpha=0.05,
+                    c="#31a354",
+                    s=0.05,
+                    alpha=0.01,
                     label="Posterior",
                     rasterized=True,
                 )
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
+
+                min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
+                max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
                 bins_y = np.linspace(min_val, max_val, 30)
 
-                min_val = min(X_hat[:, j].min(), X_posterior[:, j].min())
-                max_val = max(X_hat[:, j].max(), X_posterior[:, j].max())
+                min_val = min(X_prior[:, j].min(), X_posterior[:, j].min())
+                max_val = max(X_prior[:, j].max(), X_posterior[:, j].max())
                 bins_x = np.linspace(min_val, max_val, 30)
 
-                axs[i, j].set_xlim(X_hat[:, j].min(), X_hat[:, j].max())
-                axs[i, j].set_ylim(X_hat[:, i].min(), X_hat[:, i].max())
+                v = gaussian_kde(X_posterior[:, [j, i]].T)
+                bx = 0.5 * (bins_x[1:] + bins_x[:-1])
+                by = 0.5 * (bins_y[1:] + bins_y[:-1])
+                Bx, By = np.meshgrid(bx, by)
+
+                axs[i, j].contour(
+                    Bx,
+                    By,
+                    v(np.vstack((Bx.ravel(), By.ravel()))).reshape(Bx.shape),
+                    7,
+                    linewidths=0.5,
+                    colors="black",
+                )
+
+                axs[i, j].set_xlim(X_prior[:, j].min(), X_prior[:, j].max())
+                axs[i, j].set_ylim(X_prior[:, i].min(), X_prior[:, i].max())
 
             elif i < j:
                 patch_upper = Polygon(
@@ -214,39 +219,45 @@ if __name__ == "__main__":
                 )
 
             elif i == j:
-                min_val = min(X_hat[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_hat[:, i].max(), X_posterior[:, i].max())
+                min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
+                max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
                 bins = np.linspace(min_val, max_val, 30)
-                X_hat_hist, b = np.histogram(X_hat[:, i], bins, density=True)
+                X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
+                X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
                 b = 0.5 * (b[1:] + b[:-1])
-                lw = 1
-                all_models = df["Model"].unique()
-                for m_model in all_models:
-                    m_df = df[df["Model"] == m_model].drop(columns=["Model"])
-                    X_model_posterior = m_df.values
-                    X_model_posterior_hist = np.histogram(
-                        X_model_posterior[:, i], bins, density=True
-                    )[0]
-                    axs[i, j].plot(
-                        b,
-                        X_model_posterior_hist,
-                        color="0.5",
-                        linewidth=0.2,
-                        linestyle="solid",
-                        alpha=0.5,
-                    )
-
-                X_posterior_hist = np.histogram(X_posterior[:, i], bins, density=True)[
-                    0
-                ]
                 axs[i, j].plot(
                     b,
-                    X_hat_hist,
+                    X_prior_hist,
                     color=color_prior,
-                    linewidth=0.5 * lw,
+                    linewidth=lw,
                     label="Prior",
-                    linestyle="dashed",
+                    linestyle="solid",
                 )
+
+                all_models = posterior_df["Model"].unique()
+                for k, m_model in enumerate(all_models):
+                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(columns=["Model"])
+                    X_model_posterior = m_df.values
+                    X_model_posterior_hist, _ = np.histogram(X_model_posterior[:, i], bins, density=True)
+                    if k == 0:
+                        axs[i, j].plot(
+                            b,
+                            X_model_posterior_hist * 0.5,
+                            color="0.5",
+                            linewidth=lw * 0.25,
+                            linestyle="solid",
+                            alpha=0.5,
+                            label="Posterior (BayesBag)",
+                        )
+                    else:
+                        axs[i, j].plot(
+                            b,
+                            X_model_posterior_hist * 0.5,
+                            color="0.5",
+                            linewidth=lw * 0.25,
+                            linestyle="solid",
+                            alpha=0.5,
+                        )
 
                 axs[i, j].plot(
                     b,
@@ -255,13 +266,7 @@ if __name__ == "__main__":
                     linewidth=lw,
                     linestyle="solid",
                     label="Posterior",
-                    alpha=0.7,
                 )
-
-                if i == 1:
-                    legend = axs[i, j].legend(fontsize=6, loc="lower left")
-                    legend.get_frame().set_linewidth(0.0)
-                    legend.get_frame().set_alpha(0.0)
 
                 axs[i, j].set_xlim(min_val, max_val)
 
@@ -292,40 +297,14 @@ if __name__ == "__main__":
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.tick_params(axis="both", which="both", length=0)
 
-    fig.subplots_adjust(hspace=0.05, wspace=0.05)
-    fig.tight_layout()
-    fig.savefig(f"{emulator_dir}/speed_emulator_posterior.pdf")
+    l_prior = Line2D([], [], c=color_prior, lw=lw, ls="solid", label="Prior")
+    l_post = Line2D([], [], c="k", lw=lw, ls="solid", label="Posterior")
+    l_post_b = Line2D([], [], c="0.25", lw=lw * 0.25, ls="solid", label="Posterior (BayesBag)")
 
-    # Prior = pd.DataFrame(data=X_hat, columns=dataset.X_keys).sample(frac=0.1)
-    # Prior["Type"] = "Pior"
-    # Posterior = pd.DataFrame(data=X_posterior, columns=dataset.X_keys).sample(frac=0.1)
-    # Posterior["Type"] = "Posterior"
-    # PP = pd.concat([Prior, Posterior])
+    legend = fig.legend(handles=[l_prior, l_post, l_post_b], bbox_to_anchor=(0.3, 0.955))
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
 
-    # from scipy.stats import pearsonr
-
-    # def corrfunc(x, y, **kwds):
-    #     cmap = kwds["cmap"]
-    #     norm = kwds["norm"]
-    #     ax = plt.gca()
-    #     ax.tick_params(bottom=False, top=False, left=False, right=False)
-    #     sns.despine(ax=ax, bottom=True, top=True, left=True, right=True)
-    #     r, _ = pearsonr(x, y)
-    #     facecolor = cmap(norm(r))
-    #     ax.set_facecolor(facecolor)
-    #     lightness = (max(facecolor[:3]) + min(facecolor[:3])) / 2
-    #     ax.annotate(
-    #         f"r={r:.2f}",
-    #         xy=(0.5, 0.5),
-    #         xycoords=ax.transAxes,
-    #         color="white" if lightness < 0.7 else "black",
-    #         size=6,
-    #         ha="center",
-    #         va="center",
-    #     )
-
-    # g = sns.PairGrid(PP, hue="Type", diag_sharey=False)
-    # g.map_lower(sns.scatterplot, alpha=0.3, edgecolor="none")
-    # g.map_upper(corrfunc, cmap=sns.color_palette("coolwarm", as_cmap=True), norm=plt.Normalize(vmin=-1, vmax=1))
-    # g.map_diag(sns.kdeplot, lw=1)
-    # g.savefig(f"{emulator_dir}/seaborn_test.pdf")
+    figfile = f"{emulator_dir}/speed_emulator_posterior.pdf"
+    print(f"Saving figure to {figfile}")
+    fig.savefig(figfile)
