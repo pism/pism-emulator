@@ -18,7 +18,7 @@ pism-emulator is the codebase for the two-step Bayesian calibration process prop
 
 ## Minimal Example
 
-No need to download large data sets. A low-resolution working example is provides as a notebook [`minimal_example.ipynb`](https://github.com/pism/pism-emulator/blob/master/notebooks/minimal_example.ipyng)
+No need to download large data sets. A low-resolution working example is provided as a notebook [`minimal_example.ipynb`](https://github.com/pism/pism-emulator/blob/master/notebooks/minimal_example.ipyng)
 
 ## Procedure
 

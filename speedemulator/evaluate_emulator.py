@@ -45,7 +45,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--target_file",
-        default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+        default="..//test_data/greenland_vel_mosaic250_v1_g9000m.nc",
     )
     parser.add_argument("--train_size", type=float, default=1.0)
     parser.add_argument("--thinning_factor", type=int, default=1)
@@ -89,7 +89,7 @@ if __name__ == "__main__":
             omegas_0,
         )
 
-        data_loader.prepare_data(q=19)
+        data_loader.prepare_data(q=16)
         data_loader.setup(stage="fit")
         F_mean = data_loader.F_mean
 

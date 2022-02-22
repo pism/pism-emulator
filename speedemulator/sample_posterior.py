@@ -9,7 +9,6 @@ from scipy.special import gamma
 from scipy.stats import beta
 
 import torch
-from torch.multiprocessing import Pool
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset
 
@@ -66,7 +65,10 @@ class MALASampler(object):
                         [
                             f"{key}: {(val * std + mean):.3f}\n"
                             for key, val, std, mean in zip(
-                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                                dataset.X_keys,
+                                X.data.cpu().numpy(),
+                                dataset.X_std,
+                                dataset.X_mean,
                             )
                         ]
                     )
@@ -180,7 +182,10 @@ class MALASampler(object):
                         [
                             f"{key}: {(val * std + mean):.3f}\n"
                             for key, val, std, mean in zip(
-                                dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean
+                                dataset.X_keys,
+                                X.data.cpu().numpy(),
+                                dataset.X_std,
+                                dataset.X_mean,
                             )
                         ]
                     )
@@ -193,14 +198,20 @@ class MALASampler(object):
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
                 np.save(
-                    open(posterior_dir + "X_posterior_model_{0}.npy".format(model_index), "wb"),
+                    open(
+                        posterior_dir + "X_posterior_model_{0}.npy".format(model_index),
+                        "wb",
+                    ),
                     X_posterior.astype("float32"),
                 )
                 df = pd.DataFrame(
                     data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy() + dataset.X_mean.cpu().numpy(),
                     columns=dataset.X_keys,
                 )
-                df.to_csv(posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index), compression="infer")
+                df.to_csv(
+                    posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
+                    compression="infer",
+                )
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
@@ -212,8 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--num_processes", type=int, default=8)
+    parser.add_argument("--model_index", type=str, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--num_iterations", type=int, default=100000)
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_50.csv")
@@ -230,9 +240,9 @@ if __name__ == "__main__":
     data_dir = args.data_dir
     device = args.device
     emulator_dir = args.emulator_dir
+    model_index = args.model_index
     n_posterior_samples = args.num_posterior_samples
     n_iters = args.num_iterations
-    n_models = args.num_models
     samples_file = args.samples_file
     target_file = args.target_file
     thinning_factor = args.thinning_factor
@@ -251,11 +261,8 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     np.random.seed(0)
+    emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
 
-    with Pool(processes=num_processes) as p:
-        results = p.map(sample_mp, range(n_models))
-
-    emulator_file = join(emulator_dir, f"emulator_{model_index}.h5")
     state_dict = torch.load(emulator_file)
     e = NNEmulator(
         state_dict["l_1.weight"].shape[1],
