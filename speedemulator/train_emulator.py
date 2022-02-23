@@ -47,7 +47,7 @@ if __name__ == "__main__":
     parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument(
         "--target_file",
-        default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
     parser.add_argument("--train_size", type=float, default=1.0)
     parser.add_argument("--thinning_factor", type=int, default=1)

@@ -305,7 +305,7 @@ class PISMDataset(torch.utils.data.Dataset):
         normalize_x=True,
         log_y=True,
         threshold=100e3,
-        epsilon=1e-10,
+        epsilon=0,
         return_numpy=False,
     ):
         self.data_dir = data_dir
@@ -337,14 +337,16 @@ class PISMDataset(torch.utils.data.Dataset):
         mask = data.isnull()
         data = np.nan_to_num(
             data.values[::thinning_factor, ::thinning_factor],
-            epsilon,
+            nan=epsilon,
         )
         mask = mask[::thinning_factor, ::thinning_factor].values
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
+        self.grid_resolution = grid_resolution
         ds.close()
 
         idx = (mask == False).nonzero()
         data = data[idx]
+
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
         if not return_numpy:
@@ -352,7 +354,6 @@ class PISMDataset(torch.utils.data.Dataset):
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d
         self.mask_2d = mask
-        self.grid_resolution = grid_resolution
         self.sparse_idx_2d = idx
         self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
 
@@ -390,7 +391,12 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = ds0.variables["velsurf_mag"].values[:, ::thinning_factor, ::thinning_factor].shape
+        _, ny, nx = (
+            ds0.variables["velsurf_mag"]
+            .values[:, ::thinning_factor, ::thinning_factor]
+            .shape
+        )
+
         ds0.close()
         self.nx = nx
         self.ny = ny
@@ -403,8 +409,10 @@ class PISMDataset(torch.utils.data.Dataset):
             ds = xr.open_dataset(m_file)
             data = np.squeeze(
                 np.nan_to_num(
-                    ds.variables[training_var].values[:, ::thinning_factor, ::thinning_factor],
-                    epsilon,
+                    ds.variables[training_var].values[
+                        :, ::thinning_factor, ::thinning_factor
+                    ],
+                    nan=epsilon,
                 )
             )
             response[idx, :] = data[self.sparse_idx_2d].flatten()
