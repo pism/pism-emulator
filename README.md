@@ -14,7 +14,7 @@ pism-emulator is the codebase for the two-step Bayesian calibration process prop
 
 ## Basic usage: Bayesian calibration
 
-To perform the Bayesian calibration and reporduce the probability plots from the manuscript, run `python calibrate-as19.py` in `calibration`. No need to download additional data.
+To perform the Bayesian calibration and reproduce the probability plots from the manuscript, run `python calibrate-as19.py` in `calibration`. No need to download additional data or install the repository.
 
 ## Installation
 

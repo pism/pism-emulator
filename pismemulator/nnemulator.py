@@ -345,6 +345,7 @@ class PISMDataset(torch.utils.data.Dataset):
         )
         mask = mask[::thinning_factor, ::thinning_factor].values
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
+        self.grid_resolution = grid_resolution
         ds.close()
 
         idx = (mask == False).nonzero()
@@ -357,7 +358,6 @@ class PISMDataset(torch.utils.data.Dataset):
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d
         self.mask_2d = mask
-        self.grid_resolution = grid_resolution
         self.sparse_idx_2d = idx
         self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
 
@@ -400,6 +400,7 @@ class PISMDataset(torch.utils.data.Dataset):
             .values[:, ::thinning_factor, ::thinning_factor]
             .shape
         )
+
         ds0.close()
         self.nx = nx
         self.ny = ny
