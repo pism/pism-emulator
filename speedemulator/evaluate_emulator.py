@@ -45,7 +45,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--target_file",
-        default="..//test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc",
     )
     parser.add_argument("--train_size", type=float, default=1.0)
     parser.add_argument("--thinning_factor", type=int, default=1)
@@ -69,6 +69,7 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=1,
+        threshold=1e7,
     )
     X = dataset.X
     F = dataset.Y
@@ -106,9 +107,7 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
         e.eval()
 
-        plot_validation(
-            e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=True
-        )
+        plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=True)
 
         for idx in range(len(data_loader.all_data)):
             (
@@ -118,9 +117,8 @@ if __name__ == "__main__":
                 _,
             ) = data_loader.all_data[idx]
 
-            X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
+            print(X_val)
             F_val = (F_val + F_mean).detach().numpy()
-            # F_val = (F_val).detach().numpy()
             F_pred = e(X_val, add_mean=True).detach().numpy()
 
             F_val_2d = np.zeros((dataset.ny, dataset.nx))

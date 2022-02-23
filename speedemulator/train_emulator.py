@@ -30,7 +30,7 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
 )
 from pytorch_lightning.loggers import TensorBoardLogger
-from pismemulator.nnemulator import DNNEmulator, NNEmulator, PISMDataset, PISMDataModule
+from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
 from pismemulator.utils import plot_eigenglaciers, plot_validation
 
 
@@ -44,9 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--n_layers", type=int, default=5)
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
-    )
+    parser.add_argument("--samples_file", default="../data/samples/velocity_calibration_samples_100.csv")
     parser.add_argument(
         "--target_file",
         default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
@@ -104,9 +102,7 @@ if __name__ == "__main__":
     if train_size == 1.0:
         data_loader = PISMDataModule(X, F, omegas, omegas_0, num_workers=num_workers)
     else:
-        data_loader = PISMDataModule(
-            X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers
-        )
+        data_loader = PISMDataModule(X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers)
 
     data_loader.prepare_data()
     data_loader.setup(stage="fit")
@@ -118,9 +114,7 @@ if __name__ == "__main__":
     plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir)
 
     if checkpoint:
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
-        )
+        checkpoint_callback = ModelCheckpoint(dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}")
         callbacks.append(checkpoint_callback)
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
 
