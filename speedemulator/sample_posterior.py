@@ -249,7 +249,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--model_index", type=str, default=0)
+    parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--num_iterations", type=int, default=100000)
     parser.add_argument(
@@ -257,7 +257,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--target_file",
-        default="../tests/test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
     parser.add_argument("--thinning_factor", type=int, default=1)
 
@@ -297,7 +297,7 @@ if __name__ == "__main__":
         state_dict["V_hat"].shape[1],
         state_dict["V_hat"],
         state_dict["F_mean"],
-        dataset.normed_area,
+        state_dict["area"],
         hparams,
     )
     e.load_state_dict(state_dict)

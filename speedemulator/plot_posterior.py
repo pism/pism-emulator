@@ -55,7 +55,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
-    parser.add_argument("--fraction", type=float, default=1.0)
+    parser.add_argument("--fraction", type=float, default=0.1)
 
     args = parser.parse_args()
 

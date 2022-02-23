@@ -117,7 +117,6 @@ if __name__ == "__main__":
                 _,
             ) = data_loader.all_data[idx]
 
-            print(X_val)
             F_val = (F_val + F_mean).detach().numpy()
             F_pred = e(X_val, add_mean=True).detach().numpy()
 
