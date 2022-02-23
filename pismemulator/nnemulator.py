@@ -309,7 +309,7 @@ class PISMDataset(torch.utils.data.Dataset):
         normalize_x=True,
         log_y=True,
         threshold=100e3,
-        epsilon=1e-10,
+        epsilon=0,
         return_numpy=False,
     ):
         self.data_dir = data_dir
@@ -341,7 +341,7 @@ class PISMDataset(torch.utils.data.Dataset):
         mask = data.isnull()
         data = np.nan_to_num(
             data.values[::thinning_factor, ::thinning_factor],
-            epsilon,
+            nan=epsilon,
         )
         mask = mask[::thinning_factor, ::thinning_factor].values
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
@@ -349,6 +349,7 @@ class PISMDataset(torch.utils.data.Dataset):
 
         idx = (mask == False).nonzero()
         data = data[idx]
+
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
         if not return_numpy:
@@ -414,7 +415,7 @@ class PISMDataset(torch.utils.data.Dataset):
                     ds.variables[training_var].values[
                         :, ::thinning_factor, ::thinning_factor
                     ],
-                    epsilon,
+                    nan=epsilon,
                 )
             )
             response[idx, :] = data[self.sparse_idx_2d].flatten()
