@@ -26,10 +26,9 @@ To perform the Bayesian calibration and reproduce the probability plots from the
 
 ## Procedure
 
-![The first six eigen-glaciers](https://github.com/pism/pism-emulator/blob/master/images/eigenglaciers.png)
+![The first six eigen-glaciers](https://github.com/pism/pism-emulator/blob/main/images/eigenglaciers.png)
 
-![PISM vs Emulator](https://github.com/pism/pism-emulator/blob/master/images/speed_emulator_train.png)
-
+![PISM vs Emulator](https://github.com/pism/pism-emulator/blob/main/images/speed_emulator_train.png)
 
 The two-step Bayesian calibration requires requires running the high-fidelity ice sheet model twice, first to create the training data, and second to perform the calibrated projections. Below we lay out the steps required to reproduce the results.
 
