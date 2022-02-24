@@ -119,7 +119,9 @@ class DNNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
@@ -251,7 +253,9 @@ class NNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
@@ -300,6 +304,7 @@ class PISMDataset(torch.utils.data.Dataset):
         samples_file="path/to/file",
         target_file=None,
         target_var="velsurf_mag",
+        target_error_var="velsurf_mag_error",
         training_var="velsurf_mag",
         thinning_factor=1,
         normalize_x=True,
@@ -312,6 +317,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.samples_file = samples_file
         self.target_file = target_file
         self.target_var = target_var
+        self.target_error_var = target_error_var
         self.thinning_factor = thinning_factor
         self.threshold = threshold
         self.training_var = training_var
@@ -339,6 +345,15 @@ class PISMDataset(torch.utils.data.Dataset):
             data.values[::thinning_factor, ::thinning_factor],
             nan=epsilon,
         )
+        self.target_has_error = False
+        if self.target_error_var in ds.variables:
+            data_error = ds.variables[self.target_error_var].squeeze()
+            data_error = np.nan_to_num(
+                data_error.values[::thinning_factor, ::thinning_factor],
+                nan=epsilon,
+            )
+            self.target_has_error = True
+
         mask = mask[::thinning_factor, ::thinning_factor].values
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         self.grid_resolution = grid_resolution
@@ -353,6 +368,14 @@ class PISMDataset(torch.utils.data.Dataset):
             Y_target = torch.from_numpy(Y_target)
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d
+        if self.target_has_error:
+            Y_target_error_2d = data_error
+            Y_target_error = np.array(data_error.flatten(), dtype=np.float32)
+            if not return_numpy:
+                Y_target_error = torch.from_numpy(Y_target_error)
+
+            self.Y_target_error = Y_target_error
+            self.Y_target_error_2d = Y_target_error_2d
         self.mask_2d = mask
         self.sparse_idx_2d = idx
         self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
@@ -366,9 +389,9 @@ class PISMDataset(torch.utils.data.Dataset):
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-            by=identifier_name
-        )
+        samples = pd.read_csv(
+            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+        ).sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -485,7 +508,9 @@ class PISMDataModule(pl.LightningDataModule):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
 
-        training_data, val_data = train_test_split(all_data, train_size=self.train_size, random_state=0)
+        training_data, val_data = train_test_split(
+            all_data, train_size=self.train_size, random_state=0
+        )
         self.training_data = training_data
         self.test_data = training_data
 
@@ -555,7 +580,9 @@ class PISMDataModule(pl.LightningDataModule):
             lamda, V = torch.eig(S, eigenvectors=True)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"])
+        cutoff_index = torch.sum(
+            torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"]
+        )
         print(f"...using the first {cutoff_index} eigen values")
         lamda_truncated = lamda.detach()[:cutoff_index]
         V = V.detach()[:, :cutoff_index]
