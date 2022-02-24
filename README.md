@@ -1,6 +1,6 @@
 # pism-emulator
 
-[![License: GPL-3.0](https://img.shields.io:/github/license/pism/pism-emulator)](https://opensource.org/licenses/GPL-3.0)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6257002.svg)]( https://doi.org/10.5281/zenodo.6257002) [![License: GPL-3.0](https://img.shields.io:/github/license/pism/pism-emulator)](https://opensource.org/licenses/GPL-3.0)
 
 ## Introduction
 
@@ -49,8 +49,6 @@ The two-step Bayesian calibration requires requires running the high-fidelity ic
 ## Minimal Example
 
 No need to download large data sets. A low-resolution working example is provided as a notebook [`minimal_example.ipynb`](https://github.com/pism/pism-emulator/blob/master/notebooks/minimal_example.ipyng)
-
-
 
 ## References
 
