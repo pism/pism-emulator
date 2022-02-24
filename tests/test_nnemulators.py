@@ -40,27 +40,27 @@ def test_dataset():
     dataset = PISMDataset(
         data_dir="training_data",
         samples_file="../data/samples/velocity_calibration_samples_100.csv",
-        target_file="test_data/greenland_vel_mosaic250_v1_g9000m.nc",
+        target_file="test_data/test_vel_g9000m.nc",
         thinning_factor=1,
     )
 
     X = dataset.X.detach().numpy()
     Y = dataset.Y.detach().numpy()
 
-    with np.load("training_samples.npz") as data:
+    with np.load("test_samples.npz") as data:
         X_true = data["arr_0"]
-    with np.load("training_responses.npz") as data:
+    with np.load("test_responses.npz") as data:
         Y_true = data["arr_0"]
-    with np.load("training_areas.npz") as data:
+    with np.load("test_areas.npz") as data:
         normed_area_true = data["arr_0"]
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
     normed_area = dataset.normed_area
 
-    assert_equal(n_grid_points, 53504)
+    assert_equal(n_grid_points, 26237)
     assert_equal(n_parameters, 8)
-    assert_equal(n_samples, 499)
+    assert_equal(n_samples, 482)
     assert_array_almost_equal(X, X_true, decimal=4)
     assert_array_almost_equal(Y, Y_true, decimal=4)
     assert_array_almost_equal(normed_area, normed_area_true, decimal=4)
