@@ -304,6 +304,8 @@ class PISMDataset(torch.utils.data.Dataset):
         samples_file="path/to/file",
         target_file=None,
         target_var="velsurf_mag",
+        target_corr_threshold=25.0,
+        target_corr_var="thickness",
         target_error_var="velsurf_mag_error",
         training_var="velsurf_mag",
         thinning_factor=1,
@@ -317,6 +319,8 @@ class PISMDataset(torch.utils.data.Dataset):
         self.samples_file = samples_file
         self.target_file = target_file
         self.target_var = target_var
+        self.target_corr_threshold = target_corr_threshold
+        self.target_corr_var = target_corr_var
         self.target_error_var = target_error_var
         self.thinning_factor = thinning_factor
         self.threshold = threshold
@@ -354,14 +358,23 @@ class PISMDataset(torch.utils.data.Dataset):
             )
             self.target_has_error = True
 
+        self.target_has_corr = False
+        if self.target_corr_var in ds.variables:
+            data_corr = ds.variables[self.target_corr_var].squeeze()
+            data_corr = np.nan_to_num(
+                data_corr.values[::thinning_factor, ::thinning_factor],
+                nan=epsilon,
+            )
+            mask = mask.where(data_corr < self.target_corr_threshold, True)
+            self.target_has_corr = True
         mask = mask[::thinning_factor, ::thinning_factor].values
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         self.grid_resolution = grid_resolution
         ds.close()
 
         idx = (mask == False).nonzero()
+        
         data = data[idx]
-
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
         if not return_numpy:
@@ -369,6 +382,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d
         if self.target_has_error:
+            data_error = data_error[idx]
             Y_target_error_2d = data_error
             Y_target_error = np.array(data_error.flatten(), dtype=np.float32)
             if not return_numpy:
@@ -376,6 +390,15 @@ class PISMDataset(torch.utils.data.Dataset):
 
             self.Y_target_error = Y_target_error
             self.Y_target_error_2d = Y_target_error_2d
+        if self.target_has_corr:
+            data_corr = data_corr[idx]
+            Y_target_corr_2d = data_corr
+            Y_target_corr = np.array(data_corr.flatten(), dtype=np.float32)
+            if not return_numpy:
+                Y_target_corr = torch.from_numpy(Y_target_corr)
+
+            self.Y_target_corr = Y_target_corr
+            self.Y_target_corr_2d = Y_target_corr_2d
         self.mask_2d = mask
         self.sparse_idx_2d = idx
         self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
@@ -441,6 +464,8 @@ class PISMDataset(torch.utils.data.Dataset):
             response[idx, :] = data[self.sparse_idx_2d].flatten()
             ds.close()
 
+            
+        print(self.sparse_idx_2d)
         p = response.max(axis=1) < self.threshold
         if self.log_y:
             response = np.log10(response)

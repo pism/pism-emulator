@@ -280,6 +280,7 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
+        target_corr_threshold=0,
     )
 
     X = dataset.X
@@ -307,12 +308,22 @@ if __name__ == "__main__":
 
     nu = 1.0
 
-    sigma = 10
+    if dataset.target_has_error:
+        sigma = dataset.Y_target_error
+        sigma[sigma < 10] = 10
+    else:
+        sigma = 10
+
     rho = 1.0 / (1e4 ** 2)
     point_area = (dataset.grid_resolution * thinning_factor) ** 2
     K = point_area * rho
     sigma_hat = np.sqrt(sigma ** 2 / K ** 2)
 
+    l_model = 1e4  #4*torch.sqrt(H.unsqueeze(1) @ H.unsqueeze(0))
+#Sigma_obs = sigma2*torch.eye(U_obs.shape[0]*U_obs.shape[1],device=device)
+#Sigma_flow = sigma_flow2*(1 + D**2/(2*alpha_cov*l_model**2))**-alpha_cov
+#Sigma = Sigma_obs# + Sigma_flow
+    
     # Eq 52
     # this is 2.0 in the paper
     alpha_b = 3.0
