@@ -365,7 +365,7 @@ class PISMDataset(torch.utils.data.Dataset):
                 data_corr.values[::thinning_factor, ::thinning_factor],
                 nan=epsilon,
             )
-            mask = mask.where(data_corr < self.target_corr_threshold, True)
+            mask = mask.where(data_corr >= self.target_corr_threshold, True)
             self.target_has_corr = True
         mask = mask[::thinning_factor, ::thinning_factor].values
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
@@ -373,7 +373,7 @@ class PISMDataset(torch.utils.data.Dataset):
         ds.close()
 
         idx = (mask == False).nonzero()
-        
+
         data = data[idx]
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
@@ -411,6 +411,8 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
+        # glob can return duplicates, which must be removed
+        training_files = list(OrderedDict.fromkeys(training_files))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
         samples = pd.read_csv(
             self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
@@ -464,7 +466,6 @@ class PISMDataset(torch.utils.data.Dataset):
             response[idx, :] = data[self.sparse_idx_2d].flatten()
             ds.close()
 
-            
         print(self.sparse_idx_2d)
         p = response.max(axis=1) < self.threshold
         if self.log_y:
@@ -598,7 +599,7 @@ class PISMDataModule(pl.LightningDataModule):
         if kwargs["svd_lowrank"]:
             Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
             U, S, V = torch.svd_lowrank(Z @ F_bar, q=kwargs["q"])
-            lamda = S ** 2 / (n_grid_points)
+            lamda = S**2 / (n_grid_points)
         else:
             S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
