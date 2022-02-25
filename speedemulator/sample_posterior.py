@@ -106,7 +106,8 @@ class MALASampler(object):
             H = torch.stack(
                 [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
             )
-            lamda, Q = torch.eig(H, eigenvectors=True)
+            lamda, Q = torch.linalg.eig(H)
+            lamda, Q = lamda.type(torch.float), Q.type(torch.float)
             lamda_prime = torch.sqrt(lamda[:, 0] ** 2 + eps)
             lamda_prime_inv = 1.0 / torch.sqrt(lamda[:, 0] ** 2 + eps)
             H = Q @ torch.diag(lamda_prime) @ Q.T
@@ -314,16 +315,11 @@ if __name__ == "__main__":
     else:
         sigma = 10
 
-    rho = 1.0 / (1e4 ** 2)
+    rho = 1.0 / (1e4**2)
     point_area = (dataset.grid_resolution * thinning_factor) ** 2
     K = point_area * rho
-    sigma_hat = np.sqrt(sigma ** 2 / K ** 2)
+    sigma_hat = np.sqrt(sigma**2 / K**2)
 
-    l_model = 1e4  #4*torch.sqrt(H.unsqueeze(1) @ H.unsqueeze(0))
-#Sigma_obs = sigma2*torch.eye(U_obs.shape[0]*U_obs.shape[1],device=device)
-#Sigma_flow = sigma_flow2*(1 + D**2/(2*alpha_cov*l_model**2))**-alpha_cov
-#Sigma = Sigma_obs# + Sigma_flow
-    
     # Eq 52
     # this is 2.0 in the paper
     alpha_b = 3.0

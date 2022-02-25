@@ -415,8 +415,8 @@ class PISMDataset(torch.utils.data.Dataset):
         training_files = list(OrderedDict.fromkeys(training_files))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
         samples = pd.read_csv(
-            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-        ).sort_values(by=identifier_name)
+            self.samples_file, delimiter=","skipinitialspace=True
+        ).squeeze("columns").sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
