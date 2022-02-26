@@ -41,11 +41,11 @@ from pismemulator.metrics import AbsoluteError, absolute_error
 class DNNEmulator(pl.LightningModule):
     def __init__(
         self,
-        n_parameters,
-        n_eigenglaciers,
-        V_hat,
-        F_mean,
-        area,
+        n_parameters: int,
+        n_eigenglaciers: int,
+        V_hat: Tensor,
+        F_mean: Tensor,
+        area: Tensor,
         hparams,
         *args,
         **kwargs,
@@ -53,7 +53,9 @@ class DNNEmulator(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters(hparams)
         n_layers = self.hparams.n_layers
-        n_hidden = self.hparams.n_hidden_1
+        n_hidden = self.hparams.n_hidden
+
+        isinstance(n_hidden, (list, int, np.ndarray))
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden)
@@ -106,10 +108,7 @@ class DNNEmulator(pl.LightningModule):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("NNEmulator")
         parser.add_argument("--batch_size", type=int, default=128)
-        parser.add_argument("--n_hidden_1", type=int, default=128)
-        parser.add_argument("--n_hidden_2", type=int, default=128)
-        parser.add_argument("--n_hidden_3", type=int, default=128)
-        parser.add_argument("--n_hidden_4", type=int, default=128)
+        parser.add_argument("--n_hidden", default=128)
         parser.add_argument("--learning_rate", type=float, default=0.01)
 
         return parent_parser
