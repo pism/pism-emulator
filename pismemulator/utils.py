@@ -61,6 +61,10 @@ param_keys_dict = {
     "z_min": "$z_{\mathrm{min}}$",
     "z_max": "$z_{\mathrm{max}}$",
     "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$",
+    "SIAe": "$E_{\mathrm{SIA}}$",
+    "SSAe": "$E_{\mathrm{SSA}}$",
+    'topg_to_phi_base': "$b_{\mathrm{base}}$",
+    'topg_to_phi_range': "$b_{\mathrm{range}}$",
 }
 
 
