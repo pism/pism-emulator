@@ -55,24 +55,23 @@ class DNNEmulator(pl.LightningModule):
         n_layers = self.hparams.n_layers
         n_hidden = self.hparams.n_hidden
 
-        isinstance(n_hidden, (list, int, np.ndarray))
+        assert isinstance(n_hidden, (list, int, np.ndarray)), f"{n_hidden} is not  (list, int, np.ndarray)"
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden)
         self.norm = nn.LayerNorm(n_hidden)
         self.dropout = nn.Dropout(p=0.0)
 
-        model = nn.Sequential(
-            OrderedDict(
-                [
-                    ("Linear", nn.Linear(n_hidden, n_hidden)),
-                    ("LayerNorm", nn.LayerNorm(n_hidden)),
-                    ("Dropout", nn.Dropout(p=0.1)),
-                    ("relu", nn.ReLU()),
-                ]
-            )
-        )
-        self.dnn = nn.ModuleList([model for n in range(n_layers - 2)])
+        models = []
+        for  n in range(n_layers - 2):
+            models.append(nn.Sequential(
+                OrderedDict(
+                    [
+                        ("Linear", nn.Linear(n_hidden[n], n_hidden[n+1])),
+                        ("LayerNorm", nn.LayerNorm(n_hidden)),
+                        ("Dropout", nn.Dropout(p=0.1)),
+                    ]))))
+        self.dnn = nn.ModuleList(models)
         self.l_last = nn.Linear(n_hidden, n_eigenglaciers)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
@@ -414,7 +413,7 @@ class PISMDataset(torch.utils.data.Dataset):
         training_files = list(OrderedDict.fromkeys(training_files))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
         samples = pd.read_csv(
-            self.samples_file, delimiter=","skipinitialspace=True
+            self.samples_file, delimiter=",", skipinitialspace=True
         ).squeeze("columns").sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
