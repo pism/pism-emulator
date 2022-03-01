@@ -17,6 +17,7 @@ from pismemulator.utils import load_imbie, load_imbie_csv
 from pismemulator.utils import param_keys_dict as keys_dict
 
 from scipy.interpolate import interp1d
+from scipy.stats import beta
 
 
 def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):
@@ -930,9 +931,63 @@ def plot_posterior_sle_pdf(
 def plot_histograms(
     out_filename,
     df,
+    X_prior=None,
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     palette="cividis",
 ):
+    m_flow_keys = [
+        "SIAE",
+        "PPQ",
+        "TEFO",
+        "SSAN",
+        "ZMIN",
+        "ZMAX",
+        "PHIMIN",
+        "PHIMAX",
+    ]
+
+    m_star_keys = ["GCM", "RFR", "FICE", "FSNOW", "PRS", "OCM", "OCS", "TCT", "VCM"]
+
+    p_dict = {
+        "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 16)},
+        "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 16)},
+        "TEFO": {"axs": [0, 2], "bins": np.linspace(0.005, 0.035, 16)},
+        "SSAN": {"axs": [0, 3], "bins": np.linspace(3.0, 3.5, 16)},
+        "ZMIN": {"axs": [1, 0], "bins": np.linspace(-1000, 0, 16)},
+        "ZMAX": {"axs": [1, 1], "bins": np.linspace(0, 1000, 16)},
+        "PHIMIN": {"axs": [1, 2], "bins": np.linspace(5, 15, 16)},
+        "PHIMAX": {"axs": [1, 3], "bins": np.linspace(40, 45, 11)},
+        "GCM": {
+            "axs": [2, 0],
+            "bins": [-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
+        },
+        "PRS": {"axs": [2, 1], "bins": np.linspace(5, 7, 16)},
+        "FICE": {"axs": [2, 2], "bins": np.linspace(4, 12, 16)},
+        "FSNOW": {"axs": [2, 3], "bins": np.linspace(2, 6, 16)},
+        "RFR": {"axs": [3, 0], "bins": np.linspace(0.2, 0.8, 16)},
+        "OCM": {"axs": [3, 1], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
+        "OCS": {"axs": [3, 2], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
+        "TCT": {"axs": [3, 3], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
+        "VCM": {"axs": [4, 0], "bins": np.linspace(0.75, 1.25, 16)},
+    }
+
+    if X_prior is not None:
+        X = X_prior[m_flow_keys]
+        X_mean = X.mean(axis=0)
+        X_std = X.std(axis=0)
+        X_keys = X_prior.keys()
+
+        n_samples, n_parameters = X.shape
+
+        X_min = (((X.min(axis=0) - X_mean) / X_std - 1e-3) * X_std + X_mean).values
+        X_max = (((X.max(axis=0) - X_mean) / X_std + 1e-3) * X_std + X_mean).values
+
+        alpha_b = 3.0
+        beta_b = 3.0
+        X_prior_b = (
+            beta.rvs(alpha_b, beta_b, size=(100000, n_parameters)) * (X_max - X_min)
+            + X_min
+        )
 
     fig, axs = plt.subplots(
         5,
@@ -943,281 +998,55 @@ def plot_histograms(
 
     cmap = sns.color_palette(palette, n_colors=3)
 
-    xmin, xmax = 1, 4
-    sns.histplot(
-        data=df,
-        x="SIAE",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        bins=np.linspace(xmin, xmax, 16),
-        palette=palette,
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 0],
-        legend=False,
-    )
-    # axs[0, 0].set_xlim(xmin, xmax)
-    xmin, xmax = 0.1, 0.9
-    sns.histplot(
-        data=df,
-        x="PPQ",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 1],
-        legend=False,
-    )
-    # axs[0, 1].set_xlim(xmin, xmax)
+    for key in p_dict.keys():
+        m_axs = p_dict[key]["axs"]
+        m_bins = p_dict[key]["bins"]
+        sns.histplot(
+            data=df,
+            x=key,
+            hue="Ensemble",
+            hue_order=ensembles,
+            common_norm=False,
+            bins=m_bins,
+            palette=palette,
+            stat="density",
+            multiple="dodge",
+            linewidth=0.25,
+            ax=axs[m_axs[0], m_axs[1]],
+            legend=False,
+        )
+        sns.kdeplot(
+            data=df,
+            x=key,
+            hue="Ensemble",
+            hue_order=ensembles,
+            clip=[m_bins[0], m_bins[-1]],
+            common_norm=False,
+            palette=palette,
+            linewidth=lw,
+            ax=axs[m_axs[0], m_axs[1]],
+            legend=False,
+        )
+        if (X_prior_b is not None) and (key in m_flow_keys):
+            X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_flow_keys)
+            X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
+            b = 0.5 * (b[1:] + b[:-1])
 
-    xmin, xmax = 0.005, 0.035
-    sns.histplot(
-        data=df,
-        x="TEFO",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 2],
-        legend=False,
-    )
-    # axs[0, 2].set_xlim(xmin, xmax)
-
-    xmin, xmax = 3.0, 3.5
-    sns.histplot(
-        data=df,
-        x="SSAN",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 3],
-        legend=False,
-    )
-    # axs[0, 3].set_xlim(xmin, xmax)
-
-    xmin, xmax = -1000, 0
-    sns.histplot(
-        data=df,
-        x="ZMIN",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 0],
-        legend=False,
-    )
-    # axs[1, 0].set_xlim(xmin, xmax)
-
-    xmin, xmax = 0, 1000
-    sns.histplot(
-        data=df,
-        x="ZMAX",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 1],
-        legend=False,
-    )
-    # axs[1, 1].set_xlim(xmin, xmax)
-
-    xmin, xmax = 5, 15
-    sns.histplot(
-        data=df,
-        x="PHIMIN",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 2],
-        legend=False,
-    )
-    # axs[1, 2].set_xlim(xmin, xmax)
-
-    xmin, xmax = 40, 45
-    sns.histplot(
-        data=df,
-        x="PHIMAX",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 3],
-        legend=False,
-    )
-    # axs[1, 3].set_xlim(xmin, xmax)
-
-    sns.histplot(
-        data=df,
-        x="GCM",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        legend=False,
-        ax=axs[2, 0],
-    )
-
-    xmin, xmax = 5, 7
-    sns.histplot(
-        data=df,
-        x="PRS",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[2, 1],
-        legend=False,
-    )
-    # axs[2, 1].set_xlim(xmin, xmax)
-
-    xmin, xmax = 4, 12
-    sns.histplot(
-        data=df,
-        x="FICE",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[2, 2],
-        legend=False,
-    )
-    # axs[2, 2].set_xlim(xmin, xmax)
-
-    xmin, xmax = 2, 6
-    sns.histplot(
-        data=df,
-        x="FSNOW",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[2, 3],
-        legend=False,
-    )
-    # axs[2, 3].set_xlim(xmin, xmax)
-
-    xmin, xmax = 0.2, 0.8
-    sns.histplot(
-        data=df,
-        x="RFR",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 0],
-        legend=False,
-    )
-    # axs[3, 0].set_xlim(xmin, xmax)
-
-    sns.histplot(
-        data=df,
-        x="OCM",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 1],
-        legend=False,
-    )
-
-    sns.histplot(
-        data=df,
-        x="OCS",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 2],
-        legend=False,
-    )
-    sns.histplot(
-        data=df,
-        x="TCT",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 3],
-        legend=False,
-    )
-    sns.histplot(
-        data=df,
-        x="VCM",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(0.75, 1.25, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[4, 0],
-        legend=False,
-    )
+            axs[m_axs[0], m_axs[1]].plot(
+                b,
+                X_prior_hist,
+                color="k",
+                linewidth=lw,
+                linestyle="solid",
+            )
+        if (X_prior_b is not None) and (key in m_star_keys):
+            axs[m_axs[0], m_axs[1]].plot(
+                [0, 1],
+                [0.5, 0.5],
+                color="k",
+                lw=lw,
+                transform=axs[m_axs[0], m_axs[1]].transAxes,
+            )
 
     handles = [
         Patch(
@@ -1228,8 +1057,22 @@ def plot_histograms(
         )
         for k, ens in enumerate(ensembles)
     ]
+    if X_prior_b is not None:
+        l_p = Line2D(
+            [],
+            [],
+            c="k",
+            lw=lw,
+            ls="solid",
+            label="Prior($\mathbf{m}$)",
+        )
 
-    legend_1 = axs[4, 1].legend(handles=handles, loc="lower left")
+        handles.append(l_p)
+    legend_1 = axs[4, 1].legend(
+        handles=handles,
+        loc="lower left",
+        bbox_to_anchor=(0, -0.2),
+    )
     legend_1.get_frame().set_linewidth(0.0)
     legend_1.get_frame().set_alpha(0.0)
 
@@ -1265,13 +1108,16 @@ def plot_prior_histograms(out_filename, df):
     return None
 
 
-def load_df(respone_file, samples_file):
+def load_df(respone_file, samples_file, return_samples=False):
 
     response = pd.read_csv(respone_file)
     response["SLE (cm)"] = -response["Mass (Gt)"] / 362.5 / 10
     response = response.astype({"RCP": int})
     samples = pd.read_csv(samples_file).rename(columns={"id": "Experiment"})
-    return pd.merge(response, samples, on="Experiment")
+    if return_samples:
+        return pd.merge(response, samples, on="Experiment"), samples
+    else:
+        return pd.merge(response, samples, on="Experiment")
 
 
 def resample_ensemble_by_data(
@@ -1342,7 +1188,7 @@ def resample_ensemble_by_data(
                     observed_std = observed_interp_std(year) * fudge_factor
                     log_like -= 0.5 * (
                         (exp_mass - observed_mass) / observed_std
-                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std ** 2)
+                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
                 except ValueError:
                     pass
             if log_like != 0:
@@ -1539,7 +1385,11 @@ if __name__ == "__main__":
     # Load AS19 (original LES)
     as19 = load_df(options.as19_results_file, options.as19_samples_file)
     # Load AS19 (with calibrated ice dynamics)
-    calib = load_df(options.calibrated_results_file, options.calibrated_samples_file)
+    calib, calib_samples = load_df(
+        options.calibrated_results_file,
+        options.calibrated_samples_file,
+        return_samples=True,
+    )
 
     # Bayesian calibration: resampling
     as19_resampled = resample_ensemble_by_data(observed, as19, rcps)
@@ -1573,7 +1423,7 @@ if __name__ == "__main__":
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
     q_df = make_quantile_df(all_2100_df, quantiles)
 
-    plot_histograms("marginal_posteriors_all.pdf", all_2100_df)
+    plot_histograms("marginal_posteriors_all.pdf", all_2100_df, X_prior=calib_samples)
 
     plot_partitioning(
         "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
@@ -1610,3 +1460,24 @@ if __name__ == "__main__":
     q_abs["RCP"] = rcpss
     q_rel["RCP"] = rcpss
     print(q_rel)
+
+
+p_dict = {
+    "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 16)},
+    "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 16)},
+    "TEFO": {"axs": [0, 2], "bins": np.linspace(0.005, 0.035, 16)},
+    "SSAN": {"axs": [0, 3], "bins": np.linspace(3.0, 3.5, 16)},
+    "ZMIN": {"axs": [1, 0], "bins": np.linspace(-1000, 0, 16)},
+    "ZMAX": {"axs": [1, 1], "bins": np.linspace(0, 1000, 16)},
+    "PHIMIN": {"axs": [1, 2], "bins": np.linspace(5, 15, 16)},
+    "PHIMAX": {"axs": [1, 3], "bins": np.linspace(40, 45, 11)},
+    "GCM": {"axs": [2, 0], "bins": [-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25]},
+    "PRS": {"axs": [2, 1], "bins": np.linspace(5, 7, 16)},
+    "FICE": {"axs": [2, 2], "bins": np.linspace(4, 12, 16)},
+    "FSNOW": {"axs": [2, 3], "bins": np.linspace(2, 6, 16)},
+    "RFR": {"axs": [3, 0], "bins": np.linspace(0.2, 0.8, 16)},
+    "OCM": {"axs": [3, 1], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
+    "OCS": {"axs": [3, 2], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
+    "TCT": {"axs": [3, 3], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
+    "VCM": {"axs": [0, 0], "bins": np.linspace(0.75, 1.25, 16)},
+}

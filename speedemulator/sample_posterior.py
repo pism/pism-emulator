@@ -223,13 +223,6 @@ class MALASampler(object):
                 print("Saving samples for model {0}".format(model_index))
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
-                np.save(
-                    open(
-                        posterior_dir + "X_posterior_model_{0}.npy".format(model_index),
-                        "wb",
-                    ),
-                    X_posterior.astype("float32"),
-                )
                 df = pd.DataFrame(
                     data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy()
                     + dataset.X_mean.cpu().numpy(),
