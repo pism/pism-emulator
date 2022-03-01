@@ -947,6 +947,12 @@ def plot_histograms(
     ]
 
     m_star_keys = ["GCM", "RFR", "FICE", "FSNOW", "PRS", "OCM", "OCS", "TCT", "VCM"]
+    m_keys = m_flow_keys + m_star_keys
+    m_flow_df = df[df["Ensemble"] == "Flow Calib."][m_flow_keys]
+    m_df = df[df["Ensemble"] == "Flow+Mass Calib."][m_keys]
+
+    print(m_flow_df.median())
+    print(m_df.median())
 
     p_dict = {
         "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 16)},
@@ -1001,6 +1007,7 @@ def plot_histograms(
     for key in p_dict.keys():
         m_axs = p_dict[key]["axs"]
         m_bins = p_dict[key]["bins"]
+
         sns.histplot(
             data=df,
             x=key,
@@ -1015,18 +1022,19 @@ def plot_histograms(
             ax=axs[m_axs[0], m_axs[1]],
             legend=False,
         )
-        sns.kdeplot(
-            data=df,
-            x=key,
-            hue="Ensemble",
-            hue_order=ensembles,
-            clip=[m_bins[0], m_bins[-1]],
-            common_norm=False,
-            palette=palette,
-            linewidth=lw,
-            ax=axs[m_axs[0], m_axs[1]],
-            legend=False,
-        )
+        if key not in ["GCM", "RFR", "OCM", "OCS", "TCT"]:
+            sns.kdeplot(
+                data=df,
+                x=key,
+                hue="Ensemble",
+                hue_order=ensembles,
+                clip=[m_bins[0], m_bins[-1]],
+                common_norm=False,
+                palette=palette,
+                linewidth=lw,
+                ax=axs[m_axs[0], m_axs[1]],
+                legend=False,
+            )
         if (X_prior_b is not None) and (key in m_flow_keys):
             X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_flow_keys)
             X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
