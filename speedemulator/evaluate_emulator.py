@@ -28,7 +28,12 @@ import torch
 
 from sklearn.metrics import mean_squared_error
 
-from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
+from pismemulator.nnemulator import (
+    NNEmulator,
+    PISMDataset,
+    PISMODataset,
+    PISMDataModule,
+)
 from pismemulator.utils import plot_validation
 
 
@@ -64,7 +69,7 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
 
-    dataset = PISMDataset(
+    dataset = PISMODataset(
         data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
@@ -90,9 +95,8 @@ if __name__ == "__main__":
             omegas_0,
         )
 
-        data_loader.prepare_data(q=16)
+        data_loader.prepare_data(q=5)
         data_loader.setup(stage="fit")
-        F_mean = data_loader.F_mean
 
         emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
         state_dict = torch.load(emulator_file)
@@ -107,27 +111,59 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
         e.eval()
 
-        plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=True)
+        F_mean = state_dict["F_mean"]
+        plot_validation(
+            e,
+            F_mean,
+            dataset,
+            data_loader,
+            model_index,
+            emulator_dir,
+            validation=True,
+        )
 
-        for idx in range(len(data_loader.all_data)):
-            (
-                X_val,
-                F_val,
-                _,
-                _,
-            ) = data_loader.all_data[idx]
+        idx = 0
+        (
+            X_val,
+            F_val,
+            _,
+            _,
+        ) = data_loader.all_data[idx]
 
-            F_val = (F_val + F_mean).detach().numpy()
-            F_pred = e(X_val, add_mean=True).detach().numpy()
+        F_val = (F_val + F_mean).detach().numpy()
+        F_pred = e(X_val, add_mean=True).detach().numpy()
 
-            F_val_2d = np.zeros((dataset.ny, dataset.nx))
-            F_val_2d.put(dataset.sparse_idx_1d, F_val)
+        F_val_2d = np.zeros((dataset.ny, dataset.nx))
+        F_val_2d.put(dataset.sparse_idx_1d, F_val)
 
-            F_pred_2d = np.zeros((dataset.ny, dataset.nx))
-            F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
+        F_pred_2d = np.zeros((dataset.ny, dataset.nx))
+        F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
 
-            F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
-            F_v = np.ma.array(data=10 ** F_val_2d, mask=dataset.mask_2d)
-            rmse = np.sqrt(mean_squared_error(F_p, F_v))
-            corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-            print(model_index, idx, rmse, corr)
+        F_p = np.ma.array(data=10**F_pred_2d, mask=dataset.mask_2d)
+        F_v = np.ma.array(data=10**F_val_2d, mask=dataset.mask_2d)
+        rmse = np.sqrt(mean_squared_error(F_p, F_v))
+        corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
+        print(model_index, idx, rmse, corr)
+
+        # for idx in range(len(data_loader.all_data)):
+        #     (
+        #         X_val,
+        #         F_val,
+        #         _,
+        #         _,
+        #     ) = data_loader.all_data[idx]
+
+        #     F_val = (F_val + state_dict["F_mean"]).detach().numpy()
+        #     F_pred = e(X_val, add_mean=True).detach().numpy()
+
+        #     F_val_2d = np.zeros((dataset.ny, dataset.nx))
+        #     F_val_2d.put(dataset.sparse_idx_1d, F_val)
+
+        #     F_pred_2d = np.zeros((dataset.ny, dataset.nx))
+        #     F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
+
+        #     F_p = np.ma.array(data=10**F_pred_2d, mask=dataset.mask_2d)
+        #     F_v = np.ma.array(data=10**F_val_2d, mask=dataset.mask_2d)
+        #     rmse = np.sqrt(mean_squared_error(F_p, F_v))
+        #     corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
+        #     print(model_index, idx, rmse, corr)
