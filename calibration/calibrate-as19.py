@@ -948,33 +948,35 @@ def plot_histograms(
 
     m_star_keys = ["GCM", "RFR", "FICE", "FSNOW", "PRS", "OCM", "OCS", "TCT", "VCM"]
     m_keys = m_flow_keys + m_star_keys
+    m_as19_df = df[df["Ensemble"] == "AS19"][m_keys]
     m_flow_df = df[df["Ensemble"] == "Flow Calib."][m_flow_keys]
-    m_df = df[df["Ensemble"] == "Flow+Mass Calib."][m_keys]
+    m_mass_df = df[df["Ensemble"] == "Flow+Mass Calib."][m_keys]
 
+    print(m_as19_df.median())
     print(m_flow_df.median())
-    print(m_df.median())
+    print(m_mass_df.median())
 
     p_dict = {
-        "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 16)},
-        "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 16)},
-        "TEFO": {"axs": [0, 2], "bins": np.linspace(0.005, 0.035, 16)},
-        "SSAN": {"axs": [0, 3], "bins": np.linspace(3.0, 3.5, 16)},
-        "ZMIN": {"axs": [1, 0], "bins": np.linspace(-1000, 0, 16)},
-        "ZMAX": {"axs": [1, 1], "bins": np.linspace(0, 1000, 16)},
-        "PHIMIN": {"axs": [1, 2], "bins": np.linspace(5, 15, 16)},
+        "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 11)},
+        "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 11)},
+        "TEFO": {"axs": [0, 2], "bins": np.linspace(0.005, 0.035, 11)},
+        "SSAN": {"axs": [0, 3], "bins": np.linspace(3.0, 3.5, 11)},
+        "ZMIN": {"axs": [1, 0], "bins": np.linspace(-1000, 0, 11)},
+        "ZMAX": {"axs": [1, 1], "bins": np.linspace(0, 1000, 11)},
+        "PHIMIN": {"axs": [1, 2], "bins": np.linspace(5, 15, 11)},
         "PHIMAX": {"axs": [1, 3], "bins": np.linspace(40, 45, 11)},
         "GCM": {
             "axs": [2, 0],
             "bins": [-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
         },
-        "PRS": {"axs": [2, 1], "bins": np.linspace(5, 7, 16)},
-        "FICE": {"axs": [2, 2], "bins": np.linspace(4, 12, 16)},
-        "FSNOW": {"axs": [2, 3], "bins": np.linspace(2, 6, 16)},
+        "PRS": {"axs": [2, 1], "bins": np.linspace(5, 7, 11)},
+        "FICE": {"axs": [2, 2], "bins": np.linspace(4, 12, 11)},
+        "FSNOW": {"axs": [2, 3], "bins": np.linspace(2, 6, 11)},
         "RFR": {"axs": [3, 0], "bins": np.linspace(0.2, 0.8, 16)},
         "OCM": {"axs": [3, 1], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
         "OCS": {"axs": [3, 2], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
         "TCT": {"axs": [3, 3], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
-        "VCM": {"axs": [4, 0], "bins": np.linspace(0.75, 1.25, 16)},
+        "VCM": {"axs": [4, 0], "bins": np.linspace(0.75, 1.25, 11)},
     }
 
     if X_prior is not None:
@@ -1018,7 +1020,7 @@ def plot_histograms(
             palette=palette,
             stat="density",
             multiple="dodge",
-            linewidth=0.25,
+            linewidth=0.2,
             ax=axs[m_axs[0], m_axs[1]],
             legend=False,
         )
@@ -1045,16 +1047,16 @@ def plot_histograms(
                 X_prior_hist,
                 color="k",
                 linewidth=lw,
-                linestyle="solid",
+                linestyle="dashed",
             )
-        if (X_prior_b is not None) and (key in m_star_keys):
-            axs[m_axs[0], m_axs[1]].plot(
-                [0, 1],
-                [0.5, 0.5],
-                color="k",
-                lw=lw,
-                transform=axs[m_axs[0], m_axs[1]].transAxes,
-            )
+        # if (X_prior_b is not None) and (key in m_star_keys):
+        #     axs[m_axs[0], m_axs[1]].plot(
+        #         [0, 1],
+        #         [0.5, 0.5],
+        #         color="k",
+        #         lw=lw,
+        #         transform=axs[m_axs[0], m_axs[1]].transAxes,
+        #     )
 
     handles = [
         Patch(
@@ -1071,8 +1073,8 @@ def plot_histograms(
             [],
             c="k",
             lw=lw,
-            ls="solid",
-            label="Prior($\mathbf{m}$)",
+            ls="dashed",
+            label="Prior($\mathbf{m}_{\mathrm{flow}}$)",
         )
 
         handles.append(l_p)
@@ -1105,6 +1107,9 @@ def plot_histograms(
         key = ax.get_xlabel()
         if key != "":
             ax.set_xlabel(keys_dict[key])
+            # ax.text(0, 0.9, keys_dict[key],
+            #         transform=ax.transAxes,
+            #         )
 
     # fig.tight_layout()
     fig.savefig(out_filename)
@@ -1468,24 +1473,3 @@ if __name__ == "__main__":
     q_abs["RCP"] = rcpss
     q_rel["RCP"] = rcpss
     print(q_rel)
-
-
-p_dict = {
-    "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 16)},
-    "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 16)},
-    "TEFO": {"axs": [0, 2], "bins": np.linspace(0.005, 0.035, 16)},
-    "SSAN": {"axs": [0, 3], "bins": np.linspace(3.0, 3.5, 16)},
-    "ZMIN": {"axs": [1, 0], "bins": np.linspace(-1000, 0, 16)},
-    "ZMAX": {"axs": [1, 1], "bins": np.linspace(0, 1000, 16)},
-    "PHIMIN": {"axs": [1, 2], "bins": np.linspace(5, 15, 16)},
-    "PHIMAX": {"axs": [1, 3], "bins": np.linspace(40, 45, 11)},
-    "GCM": {"axs": [2, 0], "bins": [-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25]},
-    "PRS": {"axs": [2, 1], "bins": np.linspace(5, 7, 16)},
-    "FICE": {"axs": [2, 2], "bins": np.linspace(4, 12, 16)},
-    "FSNOW": {"axs": [2, 3], "bins": np.linspace(2, 6, 16)},
-    "RFR": {"axs": [3, 0], "bins": np.linspace(0.2, 0.8, 16)},
-    "OCM": {"axs": [3, 1], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
-    "OCS": {"axs": [3, 2], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
-    "TCT": {"axs": [3, 3], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
-    "VCM": {"axs": [0, 0], "bins": np.linspace(0.75, 1.25, 16)},
-}

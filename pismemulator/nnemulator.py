@@ -55,12 +55,13 @@ class DNNEmulator(pl.LightningModule):
         n_layers = self.hparams.n_layers
         n_hidden = self.hparams.n_hidden
 
-        assert isinstance(n_hidden, (list, int, np.ndarray)), f"{n_hidden} is not  (list, int, np.ndarray)"
-
+        if isinstance(n_hidden, int):
+            n_hidden = [n_hidden] * (n_layers - 1)
+            
         # Inputs to hidden layer linear transformation
-        self.l_first = nn.Linear(n_parameters, n_hidden)
-        self.norm = nn.LayerNorm(n_hidden)
-        self.dropout = nn.Dropout(p=0.0)
+        self.l_first = nn.Linear(n_parameters, n_hidden[0])
+        self.norm_first = nn.LayerNorm(n_hidden[0])
+        self.dropout_first = nn.Dropout(p=0.0)
 
         models = []
         for  n in range(n_layers - 2):
@@ -68,11 +69,11 @@ class DNNEmulator(pl.LightningModule):
                 OrderedDict(
                     [
                         ("Linear", nn.Linear(n_hidden[n], n_hidden[n+1])),
-                        ("LayerNorm", nn.LayerNorm(n_hidden)),
+                        ("LayerNorm", nn.LayerNorm(n_hidden[n+1])),
                         ("Dropout", nn.Dropout(p=0.1)),
-                    ]))))
+                    ])))
         self.dnn = nn.ModuleList(models)
-        self.l_last = nn.Linear(n_hidden, n_eigenglaciers)
+        self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
@@ -86,8 +87,8 @@ class DNNEmulator(pl.LightningModule):
         # Pass the input tensor through each of our operations
 
         a = self.l_first(x)
-        a = self.norm(a)
-        a = self.dropout(a)
+        a = self.norm_first(a)
+        a = self.dropout_first(a)
         z = torch.relu(a)
 
         for dnn in self.dnn:
@@ -101,7 +102,7 @@ class DNNEmulator(pl.LightningModule):
         else:
             F_pred = z_last @ self.V_hat.T
 
-        return F_pred
+        return z_last
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -232,7 +233,7 @@ class NNEmulator(pl.LightningModule):
         else:
             F_pred = z_5 @ self.V_hat.T
 
-        return F_pred
+        return z_5
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -343,6 +344,7 @@ class PISMDataset(torch.utils.data.Dataset):
         ds = xr.open_dataset(self.target_file)
         data = ds.variables[self.target_var].squeeze()
         mask = data.isnull()
+        mask = mask[::thinning_factor, ::thinning_factor]
         data = np.nan_to_num(
             data.values[::thinning_factor, ::thinning_factor],
             nan=epsilon,
@@ -363,9 +365,10 @@ class PISMDataset(torch.utils.data.Dataset):
                 data_corr.values[::thinning_factor, ::thinning_factor],
                 nan=epsilon,
             )
-            mask = mask.where(data_corr >= self.target_corr_threshold, True)
             self.target_has_corr = True
-        mask = mask[::thinning_factor, ::thinning_factor].values
+            mask = mask.where(data_corr >= self.target_corr_threshold, True)
+        mask = mask.values
+
         grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
         self.grid_resolution = grid_resolution
         ds.close()

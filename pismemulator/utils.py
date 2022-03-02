@@ -36,7 +36,7 @@ import sys
 np.random.seed(0)
 
 param_keys_dict = {
-    "GCM": "GCM",
+    "GCM": "symb": "GCM",
     "FICE": "$f_i$",
     "FSNOW": "$f_s$",
     "RFR": "$\psi$",
