@@ -57,21 +57,25 @@ class DNNEmulator(pl.LightningModule):
 
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden] * (n_layers - 1)
-            
+
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden[0])
         self.norm_first = nn.LayerNorm(n_hidden[0])
         self.dropout_first = nn.Dropout(p=0.0)
 
         models = []
-        for  n in range(n_layers - 2):
-            models.append(nn.Sequential(
-                OrderedDict(
-                    [
-                        ("Linear", nn.Linear(n_hidden[n], n_hidden[n+1])),
-                        ("LayerNorm", nn.LayerNorm(n_hidden[n+1])),
-                        ("Dropout", nn.Dropout(p=0.1)),
-                    ])))
+        for n in range(n_layers - 2):
+            models.append(
+                nn.Sequential(
+                    OrderedDict(
+                        [
+                            ("Linear", nn.Linear(n_hidden[n], n_hidden[n + 1])),
+                            ("LayerNorm", nn.LayerNorm(n_hidden[n + 1])),
+                            ("Dropout", nn.Dropout(p=0.1)),
+                        ]
+                    )
+                )
+            )
         self.dnn = nn.ModuleList(models)
         self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers)
 
@@ -233,7 +237,7 @@ class NNEmulator(pl.LightningModule):
         else:
             F_pred = z_5 @ self.V_hat.T
 
-        return z_5
+        return F_pred
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -415,9 +419,11 @@ class PISMDataset(torch.utils.data.Dataset):
         # glob can return duplicates, which must be removed
         training_files = list(OrderedDict.fromkeys(training_files))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(
-            self.samples_file, delimiter=",", skipinitialspace=True
-        ).squeeze("columns").sort_values(by=identifier_name)
+        samples = (
+            pd.read_csv(self.samples_file, delimiter=",", skipinitialspace=True)
+            .squeeze("columns")
+            .sort_values(by=identifier_name)
+        )
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -454,6 +460,7 @@ class PISMDataset(torch.utils.data.Dataset):
 
         print("  Loading data sets...")
         training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
+
         for idx, m_file in tqdm(enumerate(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.squeeze(
@@ -467,7 +474,6 @@ class PISMDataset(torch.utils.data.Dataset):
             response[idx, :] = data[self.sparse_idx_2d].flatten()
             ds.close()
 
-        print(self.sparse_idx_2d)
         p = response.max(axis=1) < self.threshold
         if self.log_y:
             response = np.log10(response)

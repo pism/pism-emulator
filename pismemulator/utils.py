@@ -36,7 +36,7 @@ import sys
 np.random.seed(0)
 
 param_keys_dict = {
-    "GCM": "symb": "GCM",
+    "GCM": "GCM",
     "FICE": "$f_i$",
     "FSNOW": "$f_s$",
     "RFR": "$\psi$",
@@ -63,8 +63,8 @@ param_keys_dict = {
     "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$",
     "SIAe": "$E_{\mathrm{SIA}}$",
     "SSAe": "$E_{\mathrm{SSA}}$",
-    'topg_to_phi_base': "$b_{\mathrm{base}}$",
-    'topg_to_phi_range': "$b_{\mathrm{range}}$",
+    "topg_to_phi_base": "$b_{\mathrm{base}}$",
+    "topg_to_phi_range": "$b_{\mathrm{range}}$",
 }
 
 
@@ -174,7 +174,9 @@ def plot_validation(
     """
     e.eval()
     cmap = "viridis"
-    fig, axs = plt.subplots(nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8))
+    fig, axs = plt.subplots(
+        nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
+    )
     r_idx = np.random.choice(len(data_loader.all_data), size=4, replace=False)
     for k, idx in enumerate(r_idx):
         (
@@ -195,13 +197,17 @@ def plot_validation(
         F_pred_2d = np.zeros((dataset.ny, dataset.nx))
         F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
 
-        F_v = np.ma.array(data=10 ** F_val_2d, mask=dataset.mask_2d)
-        F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
+        F_v = np.ma.array(data=10**F_val_2d, mask=dataset.mask_2d)
+        F_p = np.ma.array(data=10**F_pred_2d, mask=dataset.mask_2d)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
         corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-        c1 = axs[0, k].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+        c1 = axs[0, k].imshow(
+            F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
+        )
         axs[1, k].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
-        c2 = axs[2, k].imshow(F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm")
+        c2 = axs[2, k].imshow(
+            F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm"
+        )
         axs[1, k].text(
             0.01,
             0.00,
@@ -213,7 +219,9 @@ def plot_validation(
         axs[-1, k].text(
             0.01,
             -0.51,
-            "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]),
+            "\n".join(
+                [f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]
+            ),
             c="k",
             size=7,
             transform=axs[-1, k].transAxes,
@@ -296,6 +304,115 @@ def plot_validation(
         return fig
 
 
+def plot_compare(
+    F_p,
+    F_v,
+    validation=False,
+    return_fig=False,
+):
+    """
+    Plot target (PISM) and predicted (Emulator) speeds for validation
+    """
+    cmap = "viridis"
+    fig, axs = plt.subplots(
+        nrows=3, ncols=1, sharex="col", sharey="row", figsize=(2.5, 8)
+    )
+
+    rmse = np.sqrt(mean_squared_error(F_p, F_v))
+    corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
+    c1 = axs[0].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+    axs[1].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+    c2 = axs[2].imshow(F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm")
+    axs[1].text(
+        0.01,
+        0.00,
+        f"r={corr:.3f}",
+        c="k",
+        size=7,
+        transform=axs[1].transAxes,
+    )
+    axs[-1].text(
+        0.01,
+        -0.51,
+        "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]),
+        c="k",
+        size=7,
+        transform=axs[-1].transAxes,
+    )
+
+    axs[2].text(
+        0.01,
+        0.00,
+        f"RMSE: {rmse:.0f} m/yr",
+        c="k",
+        size=7,
+        transform=axs[2].transAxes,
+    )
+
+    axs[0].set_axis_off()
+    axs[1].set_axis_off()
+    axs[2].set_axis_off()
+    axs[0].text(
+        0.01,
+        0.98,
+        "PISM",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[0, 0].transAxes,
+    )
+    axs[1].text(
+        0.01,
+        0.98,
+        "Emulator",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[1, 0].transAxes,
+    )
+    axs[2].text(
+        0.01,
+        0.98,
+        "PISM-Emulator",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[2, 0].transAxes,
+    )
+
+    cb_ax = fig.add_axes([0.88, 0.525, 0.025, 0.15])
+    plt.colorbar(
+        c1,
+        cax=cb_ax,
+        shrink=0.9,
+        label="speed (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
+    cb_ax2 = fig.add_axes([0.88, 0.15, 0.025, 0.15])
+    plt.colorbar(
+        c2,
+        cax=cb_ax2,
+        shrink=0.9,
+        label="diff. (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
+    cb_ax.tick_params(labelsize=7)
+    cb_ax.set_yticklabels([1, 10, 100, 1000])
+    cb_ax2.tick_params(labelsize=7)
+    fig.subplots_adjust(wspace=0.05, hspace=0.15)
+    if validation:
+        mode = "val"
+    else:
+        mode = "train"
+
+    fig.savefig(f"test_comp.pdf")
+
+    if return_fig:
+        return fig
+
+
 def plot_eigenglaciers(
     dataset,
     data_loader,
@@ -309,13 +426,17 @@ def plot_eigenglaciers(
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
 
     lamda_scaled = lamda / lamda.sum() * 100
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize)
+    fig, axs = plt.subplots(
+        nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize
+    )
     for k, ax in enumerate(axs.ravel()):
         V = V_hat[:, k]
         data = np.zeros((dataset.ny, dataset.nx))
         data.put(dataset.sparse_idx_1d, V)
         eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
-        c = ax.imshow(eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3)
+        c = ax.imshow(
+            eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3
+        )
 
         ax.text(
             0.05,
@@ -444,7 +565,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                 if len(subnames) != 2:
                     sys.exit("Interaction unexpected")
                 # Temporary X that contains the interaction term
-                tempX = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
+                tempX = np.column_stack(
+                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
+                )
                 # BIC for baseline model + interaction term
                 lm_bic = calc_bic(tempX, Y)
             else:
@@ -459,9 +582,17 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
         min_key = min(bic_dict.keys(), key=(lambda k: bic_dict[k]))
         min_bic = bic_dict[min_key]
         if "*" in min_key:
-            print("  Minimum BIC = {:2.2f} when adding {} to model".format(min_bic, min_key))
+            print(
+                "  Minimum BIC = {:2.2f} when adding {} to model".format(
+                    min_bic, min_key
+                )
+            )
         else:
-            print("  Minimum BIC = {:2.2f} when removing {} from model".format(min_bic, min_key))
+            print(
+                "  Minimum BIC = {:2.2f} when removing {} from model".format(
+                    min_bic, min_key
+                )
+            )
 
         # Compare lowest BIC to baseline model BIC
         if min_bic < whole_lm_bic:
@@ -484,7 +615,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                         print("  Removed {} from model-eligible variables".format(s))
 
                 # Update X and BIC to reflect new baseline model
-                X = np.column_stack((X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]]))
+                X = np.column_stack(
+                    (X, X[:, params_dict[subnames[0]]] * X[:, params_dict[subnames[1]]])
+                )
                 whole_lm_bic = calc_bic(X, Y)
 
             else:
@@ -556,15 +689,19 @@ def prepare_data(
     print("\nPreparing sample {} and response {}".format(samples_file, response_file))
 
     # Load Samples file as Pandas DataFrame
-    samples = pd.read_csv(samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-        by=identifier_name
+    samples = (
+        pd.read_csv(samples_file, delimiter=",", skipinitialspace=True)
+        .squeeze("columns")
+        .sort_values(by=identifier_name)
     )
     samples.index = samples[identifier_name]
     samples.index.name = None
 
     # Load Response file as Pandas DataFrame
-    response = pd.read_csv(response_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-        by=identifier_name
+    response = (
+        pd.read_csv(response_file, delimiter=",", skipinitialspace=True)
+        .squeeze("columns")
+        .sort_values(by=identifier_name)
     )
     response.index = response[identifier_name]
     response.index.name = None
