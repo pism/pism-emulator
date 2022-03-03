@@ -1456,20 +1456,32 @@ if __name__ == "__main__":
     q_df["68%"] = q_df[0.84] - q_df[0.16]
     q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][
-        ["90%", "68%", 0.5]
-    ].reset_index(drop=True) - q_df[q_df["Ensemble"] == "AS19"][
-        ["90%", "68%", 0.5]
-    ].reset_index(
-        drop=True
-    )
+    q_abs_dfs = []
+    q_rel_dfs = []
+    for a, b in zip(["Flow Calib.", "Flow+Mass Calib.", "Flow+Mass Calib."], ["AS19", "Flow Calib.", "AS19"]):
+        q_abs = q_df[q_df["Ensemble"] == a][
+            ["90%", "68%", 0.5]
+        ].reset_index(drop=True) - q_df[q_df["Ensemble"] == b][
+            ["90%", "68%", 0.5]
+        ].reset_index(
+            drop=True
+        )
 
-    q_rel = (
-        q_abs
-        / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True)
-        * 100
-    )
+        q_rel = (
+            q_abs
+            / q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(drop=True)
+            * 100
+        )
 
-    q_abs["RCP"] = rcpss
-    q_rel["RCP"] = rcpss
-    print(q_rel)
+        q_abs["Difference"] = f"{a} - {b}"
+        q_abs["RCP"] = rcpss
+        q_rel["Difference"] = f"{a} - {b}"
+        q_rel["RCP"] = rcpss
+        q_abs_dfs.append(q_abs)
+        q_rel_dfs.append(q_rel)
+
+    q_abs_df = pd.merge(q_abs_dfs)
+    q_rel_df = pd.merge(q_rel_dfs)
+
+    print(q_abs_df)
+    print(q_rel_df)
