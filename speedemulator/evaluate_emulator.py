@@ -31,7 +31,6 @@ from sklearn.metrics import mean_squared_error
 from pismemulator.nnemulator import (
     NNEmulator,
     PISMDataset,
-    PISMODataset,
     PISMDataModule,
 )
 from pismemulator.utils import plot_validation
@@ -69,7 +68,7 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
 
-    dataset = PISMODataset(
+    dataset = PISMDataset(
         data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
@@ -95,7 +94,7 @@ if __name__ == "__main__":
             omegas_0,
         )
 
-        data_loader.prepare_data(q=5)
+        data_loader.prepare_data(q=6)
         data_loader.setup(stage="fit")
 
         emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
@@ -122,16 +121,8 @@ if __name__ == "__main__":
             validation=True,
         )
 
-        idx = 0
-        (
-            X_val,
-            F_val,
-            _,
-            _,
-        ) = data_loader.all_data[idx]
-
-        F_val = (F_val + F_mean).detach().numpy()
-        F_pred = e(X_val, add_mean=True).detach().numpy()
+        F_val = (F + state_dict["F_mean"]).detach().numpy()
+        F_pred = e(X, add_mean=True).detach().numpy()
 
         F_val_2d = np.zeros((dataset.ny, dataset.nx))
         F_val_2d.put(dataset.sparse_idx_1d, F_val)
@@ -143,7 +134,7 @@ if __name__ == "__main__":
         F_v = np.ma.array(data=10**F_val_2d, mask=dataset.mask_2d)
         rmse = np.sqrt(mean_squared_error(F_p, F_v))
         corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-        print(model_index, idx, rmse, corr)
+        print(model_index, "all", rmse / n_samples, corr)
 
         # for idx in range(len(data_loader.all_data)):
         #     (

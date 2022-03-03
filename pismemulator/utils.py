@@ -304,6 +304,115 @@ def plot_validation(
         return fig
 
 
+def plot_compare(
+    F_p,
+    F_v,
+    validation=False,
+    return_fig=False,
+):
+    """
+    Plot target (PISM) and predicted (Emulator) speeds for validation
+    """
+    cmap = "viridis"
+    fig, axs = plt.subplots(
+        nrows=3, ncols=1, sharex="col", sharey="row", figsize=(2.5, 8)
+    )
+
+    rmse = np.sqrt(mean_squared_error(F_p, F_v))
+    corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
+    c1 = axs[0].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+    axs[1].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
+    c2 = axs[2].imshow(F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm")
+    axs[1].text(
+        0.01,
+        0.00,
+        f"r={corr:.3f}",
+        c="k",
+        size=7,
+        transform=axs[1].transAxes,
+    )
+    axs[-1].text(
+        0.01,
+        -0.51,
+        "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]),
+        c="k",
+        size=7,
+        transform=axs[-1].transAxes,
+    )
+
+    axs[2].text(
+        0.01,
+        0.00,
+        f"RMSE: {rmse:.0f} m/yr",
+        c="k",
+        size=7,
+        transform=axs[2].transAxes,
+    )
+
+    axs[0].set_axis_off()
+    axs[1].set_axis_off()
+    axs[2].set_axis_off()
+    axs[0].text(
+        0.01,
+        0.98,
+        "PISM",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[0, 0].transAxes,
+    )
+    axs[1].text(
+        0.01,
+        0.98,
+        "Emulator",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[1, 0].transAxes,
+    )
+    axs[2].text(
+        0.01,
+        0.98,
+        "PISM-Emulator",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[2, 0].transAxes,
+    )
+
+    cb_ax = fig.add_axes([0.88, 0.525, 0.025, 0.15])
+    plt.colorbar(
+        c1,
+        cax=cb_ax,
+        shrink=0.9,
+        label="speed (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
+    cb_ax2 = fig.add_axes([0.88, 0.15, 0.025, 0.15])
+    plt.colorbar(
+        c2,
+        cax=cb_ax2,
+        shrink=0.9,
+        label="diff. (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
+    cb_ax.tick_params(labelsize=7)
+    cb_ax.set_yticklabels([1, 10, 100, 1000])
+    cb_ax2.tick_params(labelsize=7)
+    fig.subplots_adjust(wspace=0.05, hspace=0.15)
+    if validation:
+        mode = "val"
+    else:
+        mode = "train"
+
+    fig.savefig(f"test_comp.pdf")
+
+    if return_fig:
+        return fig
+
+
 def plot_eigenglaciers(
     dataset,
     data_loader,
@@ -580,16 +689,20 @@ def prepare_data(
     print("\nPreparing sample {} and response {}".format(samples_file, response_file))
 
     # Load Samples file as Pandas DataFrame
-    samples = pd.read_csv(
-        samples_file, delimiter=",", squeeze=True, skipinitialspace=True
-    ).sort_values(by=identifier_name)
+    samples = (
+        pd.read_csv(samples_file, delimiter=",", skipinitialspace=True)
+        .squeeze("columns")
+        .sort_values(by=identifier_name)
+    )
     samples.index = samples[identifier_name]
     samples.index.name = None
 
     # Load Response file as Pandas DataFrame
-    response = pd.read_csv(
-        response_file, delimiter=",", squeeze=True, skipinitialspace=True
-    ).sort_values(by=identifier_name)
+    response = (
+        pd.read_csv(response_file, delimiter=",", skipinitialspace=True)
+        .squeeze("columns")
+        .sort_values(by=identifier_name)
+    )
     response.index = response[identifier_name]
     response.index.name = None
 

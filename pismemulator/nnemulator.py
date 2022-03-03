@@ -237,7 +237,7 @@ class NNEmulator(pl.LightningModule):
         else:
             F_pred = z_5 @ self.V_hat.T
 
-        return z_5
+        return F_pred
 
     @staticmethod
     def add_model_specific_args(parent_parser):
