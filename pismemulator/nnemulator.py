@@ -117,10 +117,6 @@ class DNNEmulator(pl.LightningModule):
 
         return parent_parser
 
-    def criterion_ae(self, F_pred, F_obs, omegas, area):
-        instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
-        return torch.sum(instance_misfit * omegas.squeeze())
-
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(), self.hparams.learning_rate, weight_decay=0.0
@@ -250,10 +246,6 @@ class NNEmulator(pl.LightningModule):
         parser.add_argument("--learning_rate", type=float, default=0.01)
 
         return parent_parser
-
-    def criterion_ae(self, F_pred, F_obs, omegas, area):
-        instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
-        return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(

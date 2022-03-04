@@ -1434,7 +1434,6 @@ if __name__ == "__main__":
     year = 2100
     all_2100_df = all_df[(all_df["Year"] == year)]
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
-    q_df = make_quantile_df(all_2100_df, quantiles)
 
     plot_histograms("marginal_posteriors_all.pdf", all_2100_df, X_prior=calib_samples)
 
@@ -1450,38 +1449,49 @@ if __name__ == "__main__":
         years=years,
     )
 
+    q_df = make_quantile_df(all_2100_df, quantiles)
     make_quantile_table(q_df, quantiles=quantiles)
 
-    q_df["90%"] = q_df[0.95] - q_df[0.05]
-    q_df["68%"] = q_df[0.84] - q_df[0.16]
-    q_df.astype({"90%": np.float32, "68%": np.float32})
+    y_abs_dfs = []
+    y_rel_dfs = []
+    for year in [2020, 2100]:
+        q_df = make_quantile_df(all_df[(all_df["Year"] == year)], quantiles)       
+        q_df["90%"] = q_df[0.95] - q_df[0.05]
+        q_df["68%"] = q_df[0.84] - q_df[0.16]
+        q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    q_abs_dfs = []
-    q_rel_dfs = []
-    for a, b in zip(["Flow Calib.", "Flow+Mass Calib.", "Flow+Mass Calib."], ["AS19", "Flow Calib.", "AS19"]):
-        q_abs = q_df[q_df["Ensemble"] == a][
-            ["90%", "68%", 0.5]
-        ].reset_index(drop=True) - q_df[q_df["Ensemble"] == b][
-            ["90%", "68%", 0.5]
-        ].reset_index(
-            drop=True
-        )
+        q_abs_dfs = []
+        q_rel_dfs = []
+        for a, b in zip(["Flow Calib.", "Flow+Mass Calib.", "Flow+Mass Calib."], ["AS19", "Flow Calib.", "AS19"]):
+            q_abs = q_df[q_df["Ensemble"] == a][
+                ["90%", "68%", 0.5]
+            ].reset_index(drop=True) - q_df[q_df["Ensemble"] == b][
+                ["90%", "68%", 0.5]
+            ].reset_index(
+                drop=True
+            )
 
-        q_rel = (
-            q_abs
-            / q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(drop=True)
-            * 100
-        )
+            q_rel = (
+                q_abs
+                / q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(drop=True)
+                * 100
+            )
 
-        q_abs["Difference"] = f"{a} - {b}"
-        q_abs["RCP"] = rcpss
-        q_rel["Difference"] = f"{a} - {b}"
-        q_rel["RCP"] = rcpss
-        q_abs_dfs.append(q_abs)
-        q_rel_dfs.append(q_rel)
+            q_abs["Difference"] = f"{a} - {b}"
+            q_abs["RCP"] = rcpss
+            q_rel["Difference"] = f"{a} - {b}"
+            q_rel["RCP"] = rcpss
+            q_abs_dfs.append(q_abs)
+            q_rel_dfs.append(q_rel)
 
-    q_abs_df = pd.merge(q_abs_dfs)
-    q_rel_df = pd.merge(q_rel_dfs)
+        q_abs_df = pd.concat(q_abs_dfs)
+        q_rel_df = pd.concat(q_rel_dfs)
+        q_abs_df["Year"] = year
+        q_rel_df["Year"] = year
 
-    print(q_abs_df)
-    print(q_rel_df)
+        y_abs_dfs.append(q_abs_df)
+        y_rel_dfs.append(q_rel_df)
+
+    quantiles_abs_df = pd.concat(y_abs_dfs).round(2)
+    quantiles_rel_df = pd.concat(y_rel_dfs).round(2)
+    
