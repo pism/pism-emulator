@@ -106,7 +106,7 @@ class DNNEmulator(pl.LightningModule):
         else:
             F_pred = z_last @ self.V_hat.T
 
-        return z_last
+        return F_pred
 
     @staticmethod
     def add_model_specific_args(parent_parser):
