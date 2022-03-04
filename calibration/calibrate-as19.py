@@ -647,6 +647,7 @@ def plot_posterior_sle_pdfs(
                             -1.5,
                             int(pctl * 100),
                             ha="center",
+                            fontsize=5,
                         )
 
         if observed is not None:
@@ -664,7 +665,15 @@ def plot_posterior_sle_pdfs(
             )
 
     for k, rcp in enumerate(rcps):
-        add_inner_title(axs[k * 2 + 1, 0], rcp_dict[rcp])
+        axs[k * 2, 0].text(
+            -0.125,
+            0.2,
+            rcp_dict[rcp],
+            transform=axs[k * 2, 0].transAxes,
+            fontsize=7,
+            fontweight="bold",
+            horizontalalignment="left",
+        )
 
     l_as19 = Patch(
         facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[0]),
@@ -1455,25 +1464,26 @@ if __name__ == "__main__":
     y_abs_dfs = []
     y_rel_dfs = []
     for year in [2020, 2100]:
-        q_df = make_quantile_df(all_df[(all_df["Year"] == year)], quantiles)       
+        q_df = make_quantile_df(all_df[(all_df["Year"] == year)], quantiles)
         q_df["90%"] = q_df[0.95] - q_df[0.05]
         q_df["68%"] = q_df[0.84] - q_df[0.16]
         q_df.astype({"90%": np.float32, "68%": np.float32})
 
         q_abs_dfs = []
         q_rel_dfs = []
-        for a, b in zip(["Flow Calib.", "Flow+Mass Calib.", "Flow+Mass Calib."], ["AS19", "Flow Calib.", "AS19"]):
-            q_abs = q_df[q_df["Ensemble"] == a][
-                ["90%", "68%", 0.5]
-            ].reset_index(drop=True) - q_df[q_df["Ensemble"] == b][
-                ["90%", "68%", 0.5]
-            ].reset_index(
+        for a, b in zip(
+            ["Flow Calib.", "Flow+Mass Calib.", "Flow+Mass Calib."],
+            ["AS19", "Flow Calib.", "AS19"],
+        ):
+            q_abs = q_df[q_df["Ensemble"] == a][["90%", "68%", 0.5]].reset_index(
                 drop=True
-            )
+            ) - q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(drop=True)
 
             q_rel = (
                 q_abs
-                / q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(drop=True)
+                / q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(
+                    drop=True
+                )
                 * 100
             )
 
@@ -1494,4 +1504,3 @@ if __name__ == "__main__":
 
     quantiles_abs_df = pd.concat(y_abs_dfs).round(2)
     quantiles_rel_df = pd.concat(y_rel_dfs).round(2)
-    
