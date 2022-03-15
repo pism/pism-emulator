@@ -178,6 +178,7 @@ def plot_validation(
         nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
     )
     r_idx = np.random.choice(len(data_loader.all_data), size=4, replace=False)
+    r_idx = [0, 1, 2, 3]
     for k, idx in enumerate(r_idx):
         (
             X_val,

@@ -1029,6 +1029,7 @@ def plot_histograms(
             palette=palette,
             stat="density",
             multiple="dodge",
+            alpha=0.8,
             linewidth=0.2,
             ax=axs[m_axs[0], m_axs[1]],
             legend=False,
@@ -1041,8 +1042,9 @@ def plot_histograms(
                 hue_order=ensembles,
                 clip=[m_bins[0], m_bins[-1]],
                 common_norm=False,
+                warn_singular=False,
                 palette=palette,
-                linewidth=lw,
+                linewidth=lw * 1.25,
                 ax=axs[m_axs[0], m_axs[1]],
                 legend=False,
             )
