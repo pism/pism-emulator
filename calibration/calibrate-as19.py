@@ -1446,7 +1446,12 @@ if __name__ == "__main__":
     all_2100_df = all_df[(all_df["Year"] == year)]
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
 
-    plot_histograms("marginal_posteriors_all.pdf", all_2100_df, X_prior=calib_samples)
+    plot_histograms(
+        "marginal_posteriors_all.pdf",
+        all_2100_df,
+        X_prior=calib_samples,
+        ensembles=["Flow Calib.", "Flow+Mass Calib."],
+    )
 
     plot_partitioning(
         "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
