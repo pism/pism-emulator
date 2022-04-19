@@ -517,21 +517,23 @@ def plot_posterior_sle_pdfs(
     out_filename,
     df,
     observed=None,
+    rcps=[26, 45, 85],
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     years=[2020, 2100],
     ylim=None,
 ):
 
+    n_rcps = len(rcps)
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
     m_alphas = alphas[: len(ensembles)]
 
     fig, axs = plt.subplots(
-        6,
+        n_rcps * s,
         2,
         sharex="col",
         figsize=[5.8, 4.2],
-        gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * 3),
+        gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * n_rcps),
     )
     fig.subplots_adjust(hspace=0.0, wspace=0)
     for k, rcp in enumerate(rcps):
@@ -681,6 +683,12 @@ def plot_posterior_sle_pdfs(
         linewidth=0.25,
         label="Prior (AS19)",
     )
+    l_ismip6 = Patch(
+        facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[0]),
+        edgecolor="0.0",
+        linewidth=0.25,
+        label="Prior (ISMIP6)",
+    )
     l_flow = Patch(
         facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[1]),
         edgecolor="0.0",
@@ -699,12 +707,20 @@ def plot_posterior_sle_pdfs(
         linewidth=0.25,
         label="Posterior (Flow+Mass Calib.)",
     )
+    l_ismip6_calib = Patch(
+        facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[2]),
+        edgecolor="0.0",
+        linewidth=0.25,
+        label="Posterior (ISMIP6 Calib.)",
+    )
 
     ens_label_dict = {
         "AS19": l_as19,
         "Flow Calib.": l_flow,
         "Mass Calib.": l_mass,
         "Flow+Mass Calib.": l_calib,
+        "ISMIP6": l_ismip6,
+        "ISMIP6 Calib.": l_ismip6_calib,
     }
 
     legend_1 = axs[-1, 0].legend(
@@ -1147,7 +1163,7 @@ def load_df(respone_file, samples_file, return_samples=False):
 def resample_ensemble_by_data(
     observed,
     simulated,
-    rcps,
+    rcps=[26, 45, 85],
     calibration_start=2010,
     calibration_end=2020,
     fudge_factor=3,
@@ -1325,18 +1341,24 @@ palette_dict = {
     "Flow Calib.": "#31a354",
     "Mass Calib.": "#2c7fb8",
     "Flow+Mass Calib.": "0.0",
+    "ISMIP6": "#c51b8a",
+    "ISMIP6 Calib.": "0.0",
 }
 ts_fill_palette_dict = {
     "AS19": "0.80",
     "Flow Calib.": "0.70",
     "Mass Calib.": "#fee6ce",
     "Flow+Mass Calib.": "0.60",
+    "ISMIP6": "0.80",
+    "ISMIP6 Calib.": "0.60",
 }
 ts_median_palette_dict = {
     "AS19": "0.6",
     "Flow Calib.": "0.3",
     "Mass Calib.": "#e6550d",
     "Flow+Mass Calib.": "0.0",
+    "ISMIP6": "0.6",
+    "ISMIP6 Calib.": "0.0",
 }
 
 calibration_start = 2010
@@ -1415,15 +1437,11 @@ if __name__ == "__main__":
         return_samples=True,
     )
 
+    ismip6 = pd.read_csv("ismip6_gis_ctrl.csv.gz")
     # Bayesian calibration: resampling
-    as19_resampled = resample_ensemble_by_data(observed, as19, rcps)
-    as19_calib_resampled = resample_ensemble_by_data(observed, calib, rcps)
-    # as19_calib_resampled_100, _ = resample_ensemble_by_data(
-    #     observed, calib, rcps, n_samples=100
-    # )
-    # as19_calib_resampled_2500, _ = resample_ensemble_by_data(
-    #     observed, calib, rcps, n_samples=2500
-    # )
+    as19_resampled = resample_ensemble_by_data(observed, as19)
+    as19_calib_resampled = resample_ensemble_by_data(observed, calib)
+
     as19["Ensemble"] = "AS19"
     calib["Ensemble"] = "Flow Calib."
     as19_resampled["Ensemble"] = "Mass Calib."
