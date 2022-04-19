@@ -43,6 +43,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
+    parser.add_argument("--mode", choices=["train", "validation"], default="train")
     parser.add_argument(
         "--samples_file",
         default="../data/samples/velocity_calibration_samples_20_lhs.csv",
@@ -52,7 +53,6 @@ if __name__ == "__main__":
         default="../data/observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc",
     )
     parser.add_argument("--train_size", type=float, default=1.0)
-    parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -64,7 +64,11 @@ if __name__ == "__main__":
     samples_file = args.samples_file
     target_file = args.target_file
     train_size = args.train_size
-    thinning_factor = args.thinning_factor
+    mode = args.mode
+    if mode == "train":
+        validation = False
+    else:
+        validation = True
 
     torch.manual_seed(0)
 
@@ -81,21 +85,6 @@ if __name__ == "__main__":
 
     for model_index in range(0, num_models):
         print(f"Loading emulator {model_index}")
-        np.random.seed(model_index)
-
-        omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
-        omegas = omegas.type_as(X)
-        omegas_0 = torch.ones_like(omegas) / len(omegas)
-
-        data_loader = PISMDataModule(
-            X,
-            F,
-            omegas,
-            omegas_0,
-        )
-
-        data_loader.prepare_data(q=6)
-        data_loader.setup(stage="fit")
 
         emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
         state_dict = torch.load(emulator_file)
@@ -110,18 +99,15 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
         e.eval()
 
-        F_mean = state_dict["F_mean"]
         plot_validation(
             e,
-            F_mean,
             dataset,
-            data_loader,
             model_index,
             emulator_dir,
-            validation=True,
+            validation=validation,
         )
 
-        F_val = (F + state_dict["F_mean"]).detach().numpy()
+        F_val = F.detach().numpy()
         F_pred = e(X, add_mean=True).detach().numpy()
 
         F_val_2d = np.zeros((dataset.ny, dataset.nx))

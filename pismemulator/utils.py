@@ -161,9 +161,7 @@ def load_imbie(proj_start=2008):
 
 def plot_validation(
     e,
-    F_mean,
     dataset,
-    data_loader,
     model_index,
     emulator_dir,
     validation=False,
@@ -177,19 +175,14 @@ def plot_validation(
     fig, axs = plt.subplots(
         nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
     )
-    r_idx = np.random.choice(len(data_loader.all_data), size=4, replace=False)
-    r_idx = [0, 1, 2, 3]
+    np.random.seed(4)
+    r_idx = np.random.choice(dataset.Y.shape[0], size=4, replace=False)
     for k, idx in enumerate(r_idx):
-        (
-            X_val,
-            F_val,
-            _,
-            _,
-        ) = data_loader.all_data[idx]
+        X_val = dataset.X[idx]
+        F_val = dataset.Y[idx]
         X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
 
-        F_val = (F_val + F_mean).detach().numpy()
-        # F_val = (F_val).detach().numpy()
+        F_val = F_val.detach().numpy()
         F_pred = e(X_val, add_mean=True).detach().numpy()
 
         F_val_2d = np.zeros((dataset.ny, dataset.nx))
@@ -299,7 +292,9 @@ def plot_validation(
     if not isdir(fig_dir):
         mkdir(fig_dir)
 
-    fig.savefig(join(fig_dir, f"speed_emulator_{mode}_{model_index}.pdf"))
+    fig_name = join(fig_dir, f"speed_emulator_{mode}_{model_index}.pdf")
+    print(f"Saving to {fig_name}")
+    fig.savefig(fig_name)
 
     if return_fig:
         return fig
