@@ -851,9 +851,7 @@ def plot_posterior_sle_pdf(
             axs[k * 2 + 1].legend().remove()
 
         if observed is not None:
-            obs = observed[
-                (observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)
-            ]
+            obs = observed[(observed["Year"] >= year) & (observed["Year"] < year + 1)]
             obs_mean = obs["SLE (cm)"].mean()
             obs_std = obs["SLE uncertainty (cm)"].mean()
             axs[(k * 2) + 1].axvline(obs_mean, c="k", lw=0.5)
@@ -1342,7 +1340,7 @@ def resample_ensemble_by_data(
                     observed_std = observed_interp_std(year) * fudge_factor
                     log_like -= 0.5 * (
                         (exp_mass - observed_mass) / observed_std
-                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std ** 2)
+                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
                 except ValueError:
                     pass
             if log_like != 0:
@@ -1577,6 +1575,29 @@ if __name__ == "__main__":
 
     plot_partitioning(
         "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
+    )
+
+    year = 2020
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_as19_{year}.pdf",
+        all_df,
+        observed=observed,
+        year=year,
+        ensembles=["AS19"],
+    )
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_as19flow_{year}.pdf",
+        all_df,
+        observed=observed,
+        year=year,
+        ensembles=["AS19", "Flow Calib."],
+    )
+    plot_posterior_sle_pdf(
+        f"sle_pdf_w_obs_calibrated_{year}.pdf",
+        all_df,
+        observed=observed,
+        year=year,
+        ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     )
 
     years = [2020, 2100]

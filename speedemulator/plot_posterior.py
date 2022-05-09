@@ -106,7 +106,30 @@ if __name__ == "__main__":
 
     X_posterior = posterior_df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-    Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
+    Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
+
+    prior_df = pd.DataFrame(data=X_prior, columns=X_keys)
+
+    fig, axs = plt.subplots(nrows=2, ncols=int(n_parameters / 2), figsize=(5.4, 2.4))
+    fig.subplots_adjust(hspace=0.2, wspace=0.2)
+    for k, ax in enumerate(axs.ravel()):
+        print(X_keys[k])
+        sns.kdeplot(x=X_keys[k], data=prior_df, common_norm=False, ax=ax)
+        sns.kdeplot(
+            x=X_keys[k],
+            data=posterior_df.reset_index(),
+            common_norm=False,
+            color="k",
+            ax=ax,
+        )
+        ax.set(ylabel=None)
+    l_prior = Line2D([], [], c=color_prior, lw=lw, ls="solid", label="Prior")
+    l_post = Line2D([], [], c="k", lw=lw, ls="solid", label="Posterior")
+
+    legend = fig.legend(handles=[l_prior, l_post], bbox_to_anchor=(0.3, 0.99))
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+    fig.savefig("prior_posterior.pdf")
 
     fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(5.4, 5.6))
     fig.subplots_adjust(hspace=0.0, wspace=0.0)

@@ -38,6 +38,118 @@ from torch.utils.data import DataLoader, TensorDataset
 from pismemulator.metrics import AbsoluteError, absolute_error
 
 
+class PDDEmulator(pl.LightningModule):
+    def __init__(
+        self,
+        n_parameters,
+        hparams,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.save_hyperparameters(hparams)
+        n_layers = self.hparams.n_layers
+        n_hidden = self.hparams.n_hidden_1
+
+        # Inputs to hidden layer linear transformation
+        self.l_first = nn.Linear(n_parameters, n_hidden)
+        self.norm = nn.LayerNorm(n_hidden)
+        self.dropout = nn.Dropout(p=0.0)
+
+        model = nn.Sequential(
+            OrderedDict(
+                [
+                    ("Linear", nn.Linear(n_hidden, n_hidden)),
+                    ("LayerNorm", nn.LayerNorm(n_hidden)),
+                    ("Dropout", nn.Dropout(p=0.1)),
+                    ("relu", nn.ReLU()),
+                ]
+            )
+        )
+        self.dnn = nn.ModuleList([model for n in range(n_layers - 2)])
+        self.l_last = nn.Linear(n_hidden, n_eigenglaciers)
+
+        self.train_ae = AbsoluteError()
+        self.test_ae = AbsoluteError()
+
+    def forward(self, x):
+        # Pass the input tensor through each of our operations
+
+        a = self.l_first(x)
+        a = self.norm(a)
+        a = self.dropout(a)
+        z = torch.relu(a)
+
+        for dnn in self.dnn:
+            a = dnn(z)
+            z = torch.relu(a) + z
+
+        z_last = self.l_last(z)
+        M = z_last
+
+        return M
+
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group("NNEmulator")
+        parser.add_argument("--batch_size", type=int, default=128)
+        parser.add_argument("--n_hidden_1", type=int, default=128)
+        parser.add_argument("--n_hidden_2", type=int, default=128)
+        parser.add_argument("--n_hidden_3", type=int, default=128)
+        parser.add_argument("--n_hidden_4", type=int, default=128)
+        parser.add_argument("--learning_rate", type=float, default=0.01)
+
+        return parent_parser
+
+    def criterion_ae(self, F_pred, F_obs, omegas, area):
+        instance_misfit = torch.sum(torch.abs((F_pred - F_obs)) ** 2 * area, axis=1)
+        return torch.sum(instance_misfit * omegas.squeeze())
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
+        # This is an approximation to Doug's version:
+        scheduler = {
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+        }
+
+        return [optimizer], [scheduler]
+
+    def training_step(self, batch, batch_idx):
+        temp, precip, std_dev, M = batch
+        f_pred = self.forward(x)
+        loss = absolute_error(f_pred, f, o, self.area)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+
+        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
+
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
+
+    def validation_epoch_end(self, outputs):
+
+        self.log(
+            "train_loss",
+            self.train_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+
 class DNNEmulator(pl.LightningModule):
     def __init__(
         self,
@@ -119,7 +231,9 @@ class DNNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
@@ -251,7 +365,9 @@ class NNEmulator(pl.LightningModule):
         return torch.sum(instance_misfit * omegas.squeeze())
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), self.hparams.learning_rate, weight_decay=0.0)
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
         # This is an approximation to Doug's version:
         scheduler = {
             "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
@@ -366,9 +482,9 @@ class PISMDataset(torch.utils.data.Dataset):
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
-        samples = pd.read_csv(self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True).sort_values(
-            by=identifier_name
-        )
+        samples = pd.read_csv(
+            self.samples_file, delimiter=",", squeeze=True, skipinitialspace=True
+        ).sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
@@ -485,7 +601,9 @@ class PISMDataModule(pl.LightningDataModule):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
 
-        training_data, val_data = train_test_split(all_data, train_size=self.train_size, random_state=0)
+        training_data, val_data = train_test_split(
+            all_data, train_size=self.train_size, random_state=0
+        )
         self.training_data = training_data
         self.test_data = training_data
 
@@ -548,14 +666,16 @@ class PISMDataModule(pl.LightningDataModule):
         if kwargs["svd_lowrank"]:
             Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
             U, S, V = torch.svd_lowrank(Z @ F_bar, q=kwargs["q"])
-            lamda = S ** 2 / (n_grid_points)
+            lamda = S**2 / (n_grid_points)
         else:
             S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
             lamda, V = torch.eig(S, eigenvectors=True)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"])
+        cutoff_index = torch.sum(
+            torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"]
+        )
         print(f"...using the first {cutoff_index} eigen values")
         lamda_truncated = lamda.detach()[:cutoff_index]
         V = V.detach()[:, :cutoff_index]
