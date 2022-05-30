@@ -35,7 +35,136 @@ import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 
-from pismemulator.metrics import AbsoluteError, absolute_error
+from pismemulator.metrics import (
+    AbsoluteError,
+    absolute_error,
+    AreaAbsoluteError,
+    area_absolute_error,
+)
+
+
+class PDDEmulator(pl.LightningModule):
+    """
+    The Neural Network emulator is adapted from Aschwanden & Brinkerhoff (2022),
+    sans Principal Component Analysis.
+    but maps (T, P, beta) -> A, M, R where
+    T: temperature (monthly or daily)
+    P: precipitation (monthly or daily)
+    beta: f_snow, f_ice, f_refreeze the three PDD parameters
+
+    A: Accumulation (annual)
+    M: Melt (annual)
+    R: Refreeze (annual)
+    """
+
+    def __init__(
+        self,
+        n_parameters: int,
+        n_outputs: int,
+        hparams,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        hparams["n_paramters"] = n_parameters
+        hparams["n_outputs"] = n_outputs
+        self.save_hyperparameters(hparams)
+        n_layers = self.hparams.n_layers
+        n_hidden = self.hparams.n_hidden
+
+        if isinstance(n_hidden, int):
+            n_hidden = [n_hidden] * (n_layers - 1)
+
+        # Inputs to hidden layer linear transformation
+        self.l_first = nn.Linear(n_parameters, n_hidden[0])
+        self.norm_first = nn.LayerNorm(n_hidden[0])
+        self.dropout_first = nn.Dropout(p=0.0)
+
+        models = []
+        for n in range(n_layers - 2):
+            models.append(
+                nn.Sequential(
+                    OrderedDict(
+                        [
+                            ("Linear", nn.Linear(n_hidden[n], n_hidden[n + 1])),
+                            ("LayerNorm", nn.LayerNorm(n_hidden[n + 1])),
+                            ("Dropout", nn.Dropout(p=0.1)),
+                        ]
+                    )
+                )
+            )
+        self.dnn = nn.ModuleList(models)
+        self.l_last = nn.Linear(n_hidden[-1], n_outputs)
+
+        self.train_ae = AbsoluteError()
+        self.test_ae = AbsoluteError()
+
+    def forward(self, x, add_mean=False):
+        # Pass the input tensor through each of our operations
+
+        a = self.l_first(x)
+        a = self.norm_first(a)
+        a = self.dropout_first(a)
+        z = torch.relu(a)
+
+        for dnn in self.dnn:
+            a = dnn(z)
+            z = torch.relu(a) + z
+
+        return self.l_last(z)
+
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group("NNEmulator")
+        parser.add_argument("--batch_size", type=int, default=128)
+        parser.add_argument("--n_hidden", default=128)
+        parser.add_argument("--learning_rate", type=float, default=0.1)
+
+        return parent_parser
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
+        # This is an approximation to Doug's version:
+        scheduler = {
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+        }
+
+        return [optimizer], [scheduler]
+
+    def training_step(self, batch, batch_idx):
+        x, f, o, _ = batch
+        f_pred = self.forward(x)
+        loss = absolute_error(f_pred, f, o)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+
+        self.log("train_loss", self.train_ae(f_pred, f, o))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0))
+
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
+
+    def validation_epoch_end(self, outputs):
+
+        self.log(
+            "train_loss",
+            self.train_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 
 class DNNEmulator(pl.LightningModule):
@@ -84,8 +213,8 @@ class DNNEmulator(pl.LightningModule):
 
         self.register_buffer("area", area)
 
-        self.train_ae = AbsoluteError()
-        self.test_ae = AbsoluteError()
+        self.train_ae = AreaAbsoluteError()
+        self.test_ae = AreaAbsoluteError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -131,7 +260,7 @@ class DNNEmulator(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, f, o, _ = batch
         f_pred = self.forward(x)
-        loss = absolute_error(f_pred, f, o, self.area)
+        loss = area_absolute_error(f_pred, f, o, self.area)
 
         return loss
 
@@ -201,8 +330,8 @@ class NNEmulator(pl.LightningModule):
 
         self.register_buffer("area", area)
 
-        self.train_ae = AbsoluteError()
-        self.test_ae = AbsoluteError()
+        self.train_ae = AreaAbsoluteError()
+        self.test_ae = AreaAbsoluteError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -261,7 +390,7 @@ class NNEmulator(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, f, o, _ = batch
         f_pred = self.forward(x)
-        loss = absolute_error(f_pred, f, o, self.area)
+        loss = area_absolute_error(f_pred, f, o, self.area)
 
         return loss
 
@@ -495,7 +624,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.n_samples = n_samples
         self.n_grid_points = n_grid_points
 
-        normed_area = np.ones(n_grid_points)
+        normed_area = np.ones(n_grid_points, dtype=np.float32)
         if not return_numpy:
             normed_area = torch.tensor(normed_area)
         normed_area /= normed_area.sum()
@@ -617,6 +746,416 @@ class PISMDataModule(pl.LightningDataModule):
             return V_hat, F_bar, F_mean, lamda
         else:
             return V_hat, F_bar, F_mean
+
+    def train_dataloader(self):
+        return self.train_loader
+
+    def validation_dataloader(self):
+        return self.val_loader
+
+
+class TorchPDDModel(torch.nn.modules.Module):
+    """
+
+    # Copyright (c) 2013--2018, Julien Seguinot <seguinot@vaw.baug.ethz.ch>
+    # GNU General Public License v3.0+ (https://www.gnu.org/licenses/gpl-3.0.txt)
+
+    A positive degree day model for glacier surface mass balance
+
+    Return a callable Positive Degree Day (PDD) model instance.
+
+    Model parameters are held as public attributes, and can be set using
+    corresponding keyword arguments at initialization time:
+
+    *pdd_factor_snow* : float
+        Positive degree-day factor for snow.
+    *pdd_factor_ice* : float
+        Positive degree-day factor for ice.
+    *refreeze_snow* : float
+        Refreezing fraction of melted snow.
+    *refreeze_ice* : float
+        Refreezing fraction of melted ice.
+    *temp_snow* : float
+        Temperature at which all precipitation falls as snow.
+    *temp_rain* : float
+        Temperature at which all precipitation falls as rain.
+    *interpolate_rule* : [ 'linear' | 'nearest' | 'zero' |
+                           'slinear' | 'quadratic' | 'cubic' ]
+        Interpolation rule passed to `scipy.interpolate.interp1d`.
+    *interpolate_n*: int
+        Number of points used in interpolations.
+    """
+
+    def __init__(
+        self,
+        pdd_factor_snow=3,
+        pdd_factor_ice=8,
+        refreeze_snow=0.0,
+        refreeze_ice=0.0,
+        temp_snow=0.0,
+        temp_rain=2.0,
+        interpolate_rule="linear",
+        interpolate_n=52,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+
+        # set pdd model parameters
+        self.pdd_factor_snow = pdd_factor_snow
+        self.pdd_factor_ice = pdd_factor_ice
+        self.refreeze_snow = refreeze_snow
+        self.refreeze_ice = refreeze_ice
+        self.temp_snow = temp_snow
+        self.temp_rain = temp_rain
+        self.interpolate_rule = interpolate_rule
+        self.interpolate_n = interpolate_n
+
+    def forward(self, temp, prec, stdv=0.0):
+        """Run the positive degree day model.
+
+        Use temperature, precipitation, and standard deviation of temperature
+        to compute the number of positive degree days, accumulation and melt
+        surface mass fluxes, and the resulting surface mass balance.
+
+        *temp*: array_like
+            Input near-surface air temperature in degrees Celcius.
+        *prec*: array_like
+            Input precipitation rate in meter per year.
+        *stdv*: array_like (default 0.0)
+            Input standard deviation of near-surface air temperature in Kelvin.
+
+        By default, inputs are N-dimensional arrays whose first dimension is
+        interpreted as time and as periodic. Arrays of dimensions
+        N-1 are interpreted as constant in time and expanded to N dimensions.
+        Arrays of dimension 0 and numbers are interpreted as constant in time
+        and space and will be expanded too. The largest input array determines
+        the number of dimensions N.
+
+        Return the number of positive degree days ('pdd'), surface mass balance
+        ('smb'), and many other output variables in a dictionary.
+        """
+
+        # ensure numpy arrays
+        temp = torch.asarray(temp)
+        prec = torch.asarray(prec)
+        stdv = torch.asarray(stdv)
+
+        # expand arrays to the largest shape
+        maxshape = max(temp.shape, prec.shape, stdv.shape)
+        temp = self._expand(temp, maxshape)
+        prec = self._expand(prec, maxshape)
+        stdv = self._expand(stdv, maxshape)
+
+        # interpolate time-series
+        if self.interpolate_n >= 1:
+            temp = self._interpolate(temp)
+            prec = self._interpolate(prec)
+            stdv = self._interpolate(stdv)
+
+        # compute accumulation and pdd
+        accu_rate = self.accu_rate(temp, prec)
+        inst_pdd = self.inst_pdd(temp, stdv)
+
+        # initialize snow depth, melt and refreeze rates
+        snow_depth = torch.zeros_like(temp)
+        snow_melt_rate = torch.zeros_like(temp)
+        ice_melt_rate = torch.zeros_like(temp)
+        snow_refreeze_rate = torch.zeros_like(temp)
+        ice_refreeze_rate = torch.zeros_like(temp)
+
+        snow_depth[:-1] = torch.clone(snow_depth[1:])
+        snow_depth = snow_depth + accu_rate
+        snow_melt_rate, ice_melt_rate = self.melt_rates(snow_depth, inst_pdd)
+        snow_depth = snow_depth - snow_melt_rate
+
+        melt_rate = snow_melt_rate + ice_melt_rate
+        snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
+        ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
+        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
+        runoff_rate = melt_rate - refreeze_rate
+        inst_smb = accu_rate - runoff_rate
+
+        # output
+        return {
+            "temp": temp,
+            "prec": prec,
+            "stdv": stdv,
+            "inst_pdd": inst_pdd,
+            "accu_rate": accu_rate,
+            "snow_melt_rate": snow_melt_rate,
+            "ice_melt_rate": ice_melt_rate,
+            "melt_rate": melt_rate,
+            "snow_refreeze_rate": snow_refreeze_rate,
+            "ice_refreeze_rate": ice_refreeze_rate,
+            "refreeze_rate": refreeze_rate,
+            "runoff_rate": runoff_rate,
+            "inst_smb": inst_smb,
+            "snow_depth": snow_depth,
+            "pdd": self._integrate(inst_pdd),
+            "accu": self._integrate(accu_rate),
+            "snow_melt": self._integrate(snow_melt_rate),
+            "ice_melt": self._integrate(ice_melt_rate),
+            "melt": self._integrate(melt_rate),
+            "runoff": self._integrate(runoff_rate),
+            "refreeze": self._integrate(refreeze_rate),
+            "smb": self._integrate(inst_smb),
+        }
+
+    def _expand(self, array, shape):
+        """Expand an array to the given shape"""
+        if array.shape == shape:
+            res = array
+        elif array.shape == (1, shape[1], shape[2]):
+            res = np.asarray([array[0]] * shape[0])
+        elif array.shape == shape[1:]:
+            res = np.asarray([array] * shape[0])
+        elif array.shape == ():
+            res = array * torch.ones(shape)
+        else:
+            raise ValueError(
+                "could not expand array of shape %s to %s" % (array.shape, shape)
+            )
+        return res
+
+    def _integrate(self, array):
+        """Integrate an array over one year"""
+        return torch.sum(array, axis=0) / (self.interpolate_n - 1)
+
+    def _interpolate(self, array):
+        """Interpolate an array through one year."""
+
+        from scipy.interpolate import interp1d
+
+        rule = self.interpolate_rule
+        npts = self.interpolate_n
+        oldx = (torch.arange(len(array) + 2) - 0.5) / len(array)
+        oldy = torch.vstack((array[-1], array, array[0]))
+        newx = (torch.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
+        newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
+
+        return torch.from_numpy(newy)
+
+    def inst_pdd(self, temp, stdv):
+        """Compute instantaneous positive degree days from temperature.
+
+        Use near-surface air temperature and standard deviation to compute
+        instantaneous positive degree days (effective temperature for melt,
+        unit degrees C) using an integral formulation (Calov and Greve, 2005).
+
+        *temp*: array_like
+            Near-surface air temperature in degrees Celcius.
+        *stdv*: array_like
+            Standard deviation of near-surface air temperature in Kelvin.
+        """
+
+        # compute positive part of temperature everywhere
+        positivepart = torch.greater(temp, 0) * temp
+
+        # compute Calov and Greve (2005) integrand, ignoring division by zero
+        normtemp = temp / (torch.sqrt(torch.tensor(2)) * stdv)
+        calovgreve = stdv / torch.sqrt(torch.tensor(2) * torch.pi) * torch.exp(
+            -(normtemp**2)
+        ) + temp / 2 * torch.erfc(-normtemp)
+
+        # use positive part where sigma is zero and Calov and Greve elsewhere
+        teff = torch.where(stdv == 0.0, positivepart, calovgreve)
+
+        # convert to degree-days
+        return teff * 365.242198781
+
+    def accu_rate(self, temp, prec):
+        """Compute accumulation rate from temperature and precipitation.
+
+        The fraction of precipitation that falls as snow decreases linearly
+        from one to zero between temperature thresholds defined by the
+        `temp_snow` and `temp_rain` attributes.
+
+        *temp*: array_like
+            Near-surface air temperature in degrees Celcius.
+        *prec*: array_like
+            Precipitation rate in meter per year.
+        """
+
+        # compute snow fraction as a function of temperature
+        reduced_temp = (self.temp_rain - temp) / (self.temp_rain - self.temp_snow)
+        snowfrac = torch.clip(reduced_temp, 0, 1)
+
+        # return accumulation rate
+        return snowfrac * prec
+
+    def melt_rates(self, snow, pdd):
+        """Compute melt rates from snow precipitation and pdd sum.
+
+        Snow melt is computed from the number of positive degree days (*pdd*)
+        and the `pdd_factor_snow` model attribute. If all snow is melted and
+        some energy (PDD) remains, ice melt is computed using `pdd_factor_ice`.
+
+        *snow*: array_like
+            Snow precipitation rate.
+        *pdd*: array_like
+            Number of positive degree days.
+        """
+
+        # parse model parameters for readability
+        ddf_snow = self.pdd_factor_snow / 1e3
+        ddf_ice = self.pdd_factor_ice / 1e3
+
+        # compute a potential snow melt
+        pot_snow_melt = ddf_snow * pdd
+
+        # effective snow melt can't exceed amount of snow
+        snow_melt = torch.minimum(snow, pot_snow_melt)
+
+        # ice melt is proportional to excess snow melt
+        ice_melt = (pot_snow_melt - snow_melt) * ddf_ice / ddf_snow
+
+        # return melt rates
+        return (snow_melt, ice_melt)
+
+
+class PDDDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        X,
+        Y,
+        omegas,
+        omegas_0,
+        batch_size: int = 128,
+        train_size: float = 0.9,
+        num_workers: int = 0,
+    ):
+        super().__init__()
+        self.X = X
+        self.Y = Y
+        self.omegas = omegas
+        self.omegas_0 = omegas_0
+        self.batch_size = batch_size
+        self.train_size = train_size
+        self.num_workers = num_workers
+
+    def setup(self, stage: str = None):
+
+        all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
+        self.all_data = all_data
+
+        training_data, val_data = train_test_split(
+            all_data, train_size=self.train_size, random_state=0
+        )
+        self.training_data = training_data
+        self.test_data = training_data
+
+        self.val_data = val_data
+        train_all_loader = DataLoader(
+            dataset=all_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+        )
+        self.train_all_loader = train_all_loader
+        val_all_loader = DataLoader(
+            dataset=all_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
+        )
+        self.val_all_loader = val_all_loader
+        train_loader = DataLoader(
+            dataset=training_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+        )
+        self.train_loader = train_loader
+        self.test_loader = train_loader
+        val_loader = DataLoader(
+            dataset=val_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
+        self.val_loader = val_loader
+
+    def prepare_data(self, **kwargs):
+        pass
+
+    def train_dataloader(self):
+        return self.train_loader
+
+    def validation_dataloader(self):
+        return self.val_loader
+
+
+class PDDDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        X,
+        Y,
+        omegas,
+        omegas_0,
+        batch_size: int = 128,
+        train_size: float = 0.9,
+        num_workers: int = 0,
+    ):
+        super().__init__()
+        self.X = X
+        self.Y = Y
+        self.omegas = omegas
+        self.omegas_0 = omegas_0
+        self.batch_size = batch_size
+        self.train_size = train_size
+        self.num_workers = num_workers
+
+    def setup(self, stage: str = None):
+
+        all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
+        self.all_data = all_data
+
+        training_data, val_data = train_test_split(
+            all_data, train_size=self.train_size, random_state=0
+        )
+        self.training_data = training_data
+        self.test_data = training_data
+
+        self.val_data = val_data
+        train_all_loader = DataLoader(
+            dataset=all_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+        )
+        self.train_all_loader = train_all_loader
+        val_all_loader = DataLoader(
+            dataset=all_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
+        )
+        self.val_all_loader = val_all_loader
+        train_loader = DataLoader(
+            dataset=training_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+        )
+        self.train_loader = train_loader
+        self.test_loader = train_loader
+        val_loader = DataLoader(
+            dataset=val_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
+        self.val_loader = val_loader
+
+    def prepare_data(self, **kwargs):
+        pass
 
     def train_dataloader(self):
         return self.train_loader

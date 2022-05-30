@@ -32,6 +32,7 @@ from scipy.stats.distributions import truncnorm, gamma, uniform, randint
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 import sys
+import xarray as xr
 
 np.random.seed(0)
 
@@ -66,6 +67,34 @@ param_keys_dict = {
     "topg_to_phi_base": "$b_{\mathrm{base}}$",
     "topg_to_phi_range": "$b_{\mathrm{range}}$",
 }
+
+
+def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
+    """
+    Read and return Obs
+    """
+
+    with xr.open_dataset(file) as Obs:
+
+        stacked = Obs.stack(z=("rlat", "rlon"))
+        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
+
+        temp = stacked.tas.dropna(dim="z").values
+        rainfall = stacked.rainfall.dropna(dim="z").values / 1000
+        snowfall = stacked.snfall.dropna(dim="z").values / 1000
+        smb = stacked.gld.dropna(dim="z").values / 1000
+        refreeze = ncl_stacked.rfrz.dropna(dim="z").values / 1000
+        melt = stacked.snmel.dropna(dim="z").values / 1000
+        precip = rainfall + snowfall
+
+    return (
+        temp[..., ::thinning_factor] - 273.15,
+        precip[..., ::thinning_factor],
+        refreeze.sum(axis=0)[..., ::thinning_factor],
+        snowfall.sum(axis=0)[..., ::thinning_factor],
+        melt.sum(axis=0)[..., ::thinning_factor],
+        smb.sum(axis=0)[..., ::thinning_factor],
+    )
 
 
 def load_imbie_csv(proj_start=2008):
