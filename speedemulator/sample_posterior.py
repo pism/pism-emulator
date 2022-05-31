@@ -108,8 +108,8 @@ class MALASampler(object):
             )
             lamda, Q = torch.linalg.eig(H)
             lamda, Q = lamda.type(torch.float), Q.type(torch.float)
-            lamda_prime = torch.sqrt(lamda[:, 0] ** 2 + eps)
-            lamda_prime_inv = 1.0 / torch.sqrt(lamda[:, 0] ** 2 + eps)
+            lamda_prime = torch.sqrt(lamda**2 + eps)
+            lamda_prime_inv = 1.0 / torch.sqrt(lamda**2 + eps)
             H = Q @ torch.diag(lamda_prime) @ Q.T
             Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
             log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))

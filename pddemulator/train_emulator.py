@@ -22,11 +22,21 @@ from argparse import ArgumentParser
 
 import numpy as np
 import os
+from os.path import join
+from pathlib import Path
+
 import pandas as pd
 from pyDOE import lhs
 from scipy.stats import dirichlet
+from scipy.stats import gaussian_kde
 from scipy.stats.distributions import uniform
 from scipy.special import gamma
+
+import pylab as plt
+from matplotlib.ticker import NullFormatter
+from matplotlib.patches import Polygon
+from matplotlib.lines import Line2D
+import seaborn as sns
 
 
 import torch
@@ -455,10 +465,15 @@ if __name__ == "__main__":
         train_loader = data_loader.train_loader
         val_loader = data_loader.val_loader
 
-    trainer.fit(e, train_loader, val_loader)
-    trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
-    torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
+    # trainer.fit(e, train_loader, val_loader)
+    # trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
+    # torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
 
+    e = PDDEmulator.load_from_checkpoint(
+        f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
+        n_parameters=n_parameters,
+        n_outputs=n_outputs,
+    )
     # Out-Of-Set validation
     val_df = draw_samples(n_samples=100, random_seed=3)
 
@@ -511,6 +526,8 @@ if __name__ == "__main__":
 
     from sklearn.metrics import mean_squared_error
 
+    device = "cpu"
+    e.to(device)
     e.eval()
     Y_pred = e(X_val_norm).detach().cpu()
     rmse = [
@@ -524,9 +541,8 @@ if __name__ == "__main__":
     print("RMSE")
     print(f"A={rmse[0]:.4f}, M={rmse[1]:.4f}, R={rmse[2]:.4f}")
 
-    nu = 1
-    mcmc_df = draw_samples(n_samples=200, random_seed=4)
-    temp_test, precip_test, _, _, _, _ = load_hirham_climate(thinning_factor=25)
+    mcmc_df = draw_samples(n_samples=1000, random_seed=4)
+    temp_test, precip_test, _, _, _, _ = load_hirham_climate(thinning_factor=20)
     std_dev_test = np.zeros_like(temp_test)
 
     f_snow_test = 3.0
@@ -581,7 +597,7 @@ if __name__ == "__main__":
     X_min = X_test_norm.cpu().numpy().min(axis=0)
     X_max = X_test_norm.cpu().numpy().max(axis=0)
 
-    sigma_hat = 0.01
+    sigma_hat = 0.0001
 
     X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
     X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
@@ -622,3 +638,223 @@ if __name__ == "__main__":
         save_interval=1000,
         print_interval=100,
     )
+
+    X_std = X_P_std
+    X_mean = X_P_mean
+    frac = 1.0
+    lw = 1
+    color_prior = "b"
+    X_list = []
+    X_keys = ["f_snow", "f_ice", "refreeze"]
+    X_Prior = (
+        X_P_prior.detach().cpu().numpy() * X_P_std[-3::].detach().cpu().numpy()
+        + X_P_mean[-3::].detach().cpu().numpy()
+    )
+    keys_dict = {
+        "f_ice": "$f_{\mathrm{ice}}$",
+        "f_snow": "$f_{\mathrm{snoe}}$",
+        "refreeze": "$r$",
+    }
+    p = Path(f"{emulator_dir}/posterior_samples/")
+    print("Loading posterior samples\n")
+    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
+        print(f"  -- {m_file}")
+        df = pd.read_csv(m_file).sample(frac=frac)
+        if "Unnamed: 0" in df.columns:
+            df.drop(columns=["Unnamed: 0"], inplace=True)
+        model = m_file.name.split("_")[-1].split(".")[0]
+        df["Model"] = int(model)
+        X_list.append(df)
+
+    print(f"Merging posteriors into dataframe")
+    posterior_df = pd.concat(X_list)
+
+    X_posterior = posterior_df.drop(columns=["Model"]).values
+    C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
+    Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
+
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(5.4, 2.8))
+    fig.subplots_adjust(hspace=0.0, wspace=0.0)
+    for i in range(3):
+        min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
+        max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
+        bins = np.linspace(min_val, max_val, 100)
+        X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
+        X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
+        b = 0.5 * (b[1:] + b[:-1])
+        axs[i].plot(
+            b,
+            X_posterior_hist * 0.5,
+            color="0.5",
+            linewidth=lw * 0.25,
+            linestyle="solid",
+            alpha=0.5,
+        )
+
+    figfile = f"{emulator_dir}/posterior.pdf"
+    print(f"Saving figure to {figfile}")
+    fig.savefig(figfile)
+
+    fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(5.4, 5.6))
+    fig.subplots_adjust(hspace=0.0, wspace=0.0)
+    for i in range(3):
+        for j in range(3):
+            if i > j:
+
+                axs[i, j].scatter(
+                    X_posterior[:, j],
+                    X_posterior[:, i],
+                    c="#31a354",
+                    s=0.05,
+                    alpha=0.01,
+                    label="Posterior",
+                    rasterized=True,
+                )
+
+                min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
+                max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
+                bins_y = np.linspace(min_val, max_val, 100)
+
+                min_val = min(X_Prior[:, j].min(), X_posterior[:, j].min())
+                max_val = max(X_Prior[:, j].max(), X_posterior[:, j].max())
+                bins_x = np.linspace(min_val, max_val, 100)
+
+                v = gaussian_kde(X_posterior[:, [j, i]].T)
+                bx = 0.5 * (bins_x[1:] + bins_x[:-1])
+                by = 0.5 * (bins_y[1:] + bins_y[:-1])
+                Bx, By = np.meshgrid(bx, by)
+
+                axs[i, j].contour(
+                    Bx,
+                    By,
+                    v(np.vstack((Bx.ravel(), By.ravel()))).reshape(Bx.shape),
+                    7,
+                    linewidths=0.5,
+                    colors="black",
+                )
+
+                axs[i, j].set_xlim(X_Prior[:, j].min(), X_Prior[:, j].max())
+                axs[i, j].set_ylim(X_Prior[:, i].min(), X_Prior[:, i].max())
+
+            elif i < j:
+                patch_upper = Polygon(
+                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]),
+                    facecolor=plt.cm.seismic(Cn_0[i, j]),
+                )
+                axs[i, j].add_patch(patch_upper)
+                if C_0[i, j] > -0.5:
+                    color = "black"
+                else:
+                    color = "white"
+                axs[i, j].text(
+                    0.5,
+                    0.5,
+                    "{0:.2f}".format(C_0[i, j]),
+                    fontsize=6,
+                    horizontalalignment="center",
+                    verticalalignment="center",
+                    transform=axs[i, j].transAxes,
+                    color=color,
+                )
+
+            elif i == j:
+                min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
+                max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
+                bins = np.linspace(min_val, max_val, 30)
+                X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
+                X_posterior_hist, _ = np.histogram(
+                    X_posterior[:, i], bins, density=True
+                )
+                b = 0.5 * (b[1:] + b[:-1])
+
+                axs[i, j].plot(
+                    b,
+                    X_prior_hist,
+                    color=color_prior,
+                    linewidth=lw,
+                    label="Prior",
+                    linestyle="solid",
+                )
+
+                all_models = posterior_df["Model"].unique()
+                for k, m_model in enumerate(all_models):
+                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(
+                        columns=["Model"]
+                    )
+                    X_model_posterior = m_df.values
+                    X_model_posterior_hist, _ = np.histogram(
+                        X_model_posterior[:, i], _, density=True
+                    )
+                    if k == 0:
+                        axs[i, j].plot(
+                            b,
+                            X_model_posterior_hist * 0.5,
+                            color="0.5",
+                            linewidth=lw * 0.25,
+                            linestyle="solid",
+                            alpha=0.5,
+                            label="Posterior (BayesBag)",
+                        )
+                    else:
+                        axs[i, j].plot(
+                            b,
+                            X_model_posterior_hist * 0.5,
+                            color="0.5",
+                            linewidth=lw * 0.25,
+                            linestyle="solid",
+                            alpha=0.5,
+                        )
+
+                axs[i, j].plot(
+                    b,
+                    X_posterior_hist,
+                    color="black",
+                    linewidth=lw,
+                    linestyle="solid",
+                    label="Posterior",
+                )
+
+                axs[i, j].set_xlim(min_val, max_val)
+
+            else:
+                axs[i, j].remove()
+
+    for i, ax in enumerate(axs[:, 0]):
+        ax.set_ylabel(keys_dict[X_keys[i]])
+
+    for j, ax in enumerate(axs[-1, :]):
+        ax.set_xlabel(keys_dict[X_keys[j]])
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+        plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
+        if j > 0:
+            ax.tick_params(axis="y", which="both", length=0)
+            ax.yaxis.set_minor_formatter(NullFormatter())
+            ax.yaxis.set_major_formatter(NullFormatter())
+
+    for ax in axs[:-1, 0].ravel():
+        ax.xaxis.set_major_formatter(NullFormatter())
+        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.tick_params(axis="x", which="both", length=0)
+
+    for ax in axs[:-1, 1:].ravel():
+        ax.xaxis.set_major_formatter(NullFormatter())
+        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.yaxis.set_major_formatter(NullFormatter())
+        ax.yaxis.set_minor_formatter(NullFormatter())
+        ax.tick_params(axis="both", which="both", length=0)
+
+    l_prior = Line2D([], [], c=color_prior, lw=lw, ls="solid", label="Prior")
+    l_post = Line2D([], [], c="k", lw=lw, ls="solid", label="Posterior")
+    l_post_b = Line2D(
+        [], [], c="0.25", lw=lw * 0.25, ls="solid", label="Posterior (BayesBag)"
+    )
+
+    legend = fig.legend(
+        handles=[l_prior, l_post, l_post_b], bbox_to_anchor=(0.3, 0.955)
+    )
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_alpha(0.0)
+
+    figfile = f"{emulator_dir}/emulator_posterior.pdf"
+    print(f"Saving figure to {figfile}")
+    fig.savefig(figfile)
