@@ -133,7 +133,7 @@ class MALASampler(object):
         L1 = torch.sum(
             np.log(gamma((self.nu + 1) / 2.0))
             - np.log(gamma(self.nu / 2.0))
-            - np.log(np.sqrt(np.pi * nu) * sigma_hat)
+            - np.log(np.sqrt(np.pi * self.nu) * sigma_hat)
             - (self.nu + 1) / 2.0 * torch.log(1 + 1.0 / self.nu * (r / sigma_hat) ** 2)
         )
         L2 = torch.sum(
@@ -469,11 +469,6 @@ if __name__ == "__main__":
     # trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
     # torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
 
-    e = PDDEmulator.load_from_checkpoint(
-        f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
-        n_parameters=n_parameters,
-        n_outputs=n_outputs,
-    )
     # Out-Of-Set validation
     val_df = draw_samples(n_samples=100, random_seed=3)
 
@@ -526,6 +521,12 @@ if __name__ == "__main__":
 
     from sklearn.metrics import mean_squared_error
 
+    e = PDDEmulator.load_from_checkpoint(
+        f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
+        n_parameters=n_parameters,
+        n_outputs=n_outputs,
+    )
+
     device = "cpu"
     e.to(device)
     e.eval()
@@ -539,7 +540,22 @@ if __name__ == "__main__":
         for i in range(Y_val.shape[1])
     ]
     print("RMSE")
-    print(f"A={rmse[0]:.4f}, M={rmse[1]:.4f}, R={rmse[2]:.4f}")
+    print(f"M={rmse[0]:.4f}, A={rmse[1]:.4f}, R={rmse[2]:.4f}")
+
+    xmin = np.min(Y_val.min(axis=1), Y_pred.min(axis=1))
+    xmax = np.max(Y_val.max(axis=1), Y_pred.max(axis=1))
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(5.4, 2.8))
+    fig.subplots_adjust(hspace=0.0, wspace=0.0)
+    axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Melt")
+    axs[1].plot(Y_val[:, 1], Y_pred[:, 1], ".", ms=0.25, label="Accumulation")
+    axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="Refreeze")
+    axs[0].axis("equal")
+    axs[1].axis("equal")
+    axs[2].axis("equal")
+    axs[0].legend()
+    axs[1].legend()
+    axs[2].legend()
+    fig.savefig(f"{emulator_dir}/validation.pdf")
 
     mcmc_df = draw_samples(n_samples=1000, random_seed=4)
     temp_test, precip_test, _, _, _, _ = load_hirham_climate(thinning_factor=20)
