@@ -93,6 +93,8 @@ class AreaAbsoluteError(Metric):
     def is_differentiable(self):
         return True
 
+    full_state_update: bool = True
+
 
 def _absolute_error_update(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
     _check_same_shape(preds, target)

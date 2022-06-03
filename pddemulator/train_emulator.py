@@ -31,6 +31,7 @@ from scipy.stats import dirichlet
 from scipy.stats import gaussian_kde
 from scipy.stats.distributions import uniform
 from scipy.special import gamma
+from sklearn.metrics import mean_squared_error
 
 import pylab as plt
 from matplotlib.ticker import NullFormatter
@@ -424,32 +425,23 @@ if __name__ == "__main__":
     omegas = omegas.type(torch.FloatTensor)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
     area = torch.ones_like(omegas)
-    train_size = 1.0
     num_workers = 8
     hparams = {"n_layers": 5, "n_hidden": 128, "batch_size": 128, "learning_rate": 0.01}
 
-    if train_size == 1.0:
-        data_loader = PDDDataModule(
-            X_train_norm, Y_train, omegas, omegas_0, num_workers=num_workers
-        )
-    else:
-        data_loader = PDDDataModule(
-            X_train_norm,
-            Y_train,
-            omegas,
-            omegas_0,
-            train_size=train_size,
-            num_workers=num_workers,
-        )
-
+    # Load training data
+    data_loader = PDDDataModule(
+        X_train_norm, Y_train, omegas, omegas_0, num_workers=num_workers
+    )
     data_loader.setup()
 
+    # Generate emulator
     e = PDDEmulator(
         n_parameters,
         n_outputs,
         hparams,
     )
 
+    # Setup trainer
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
     trainer = pl.Trainer.from_argparse_args(
         args,
@@ -458,18 +450,28 @@ if __name__ == "__main__":
         deterministic=True,
         num_sanity_val_steps=0,
     )
-    if train_size == 1.0:
-        train_loader = data_loader.train_all_loader
-        val_loader = data_loader.val_all_loader
-    else:
-        train_loader = data_loader.train_loader
-        val_loader = data_loader.val_loader
+    train_loader = data_loader.train_all_loader
+    val_loader = data_loader.val_all_loader
 
+    # Train the emulator
     # trainer.fit(e, train_loader, val_loader)
     # trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
-    # torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
 
     # Out-Of-Set validation
+
+    # Is there a better way to re-use the device for inference?
+    device = e.device.type
+    e.to(device)
+
+    # Load trained emulator
+    e = PDDEmulator.load_from_checkpoint(
+        f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
+        n_parameters=n_parameters,
+        n_outputs=n_outputs,
+    )
+
+    # Prepare out-of-set validation
+    # We draw samples with a different seed than the training data
     val_df = draw_samples(n_samples=100, random_seed=3)
 
     X = []
@@ -519,17 +521,8 @@ if __name__ == "__main__":
     X_val_std = X_val.std(axis=0)
     X_val_norm = (X_val - X_val_mean) / X_val_std
 
-    from sklearn.metrics import mean_squared_error
-
-    e = PDDEmulator.load_from_checkpoint(
-        f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
-        n_parameters=n_parameters,
-        n_outputs=n_outputs,
-    )
-
-    device = "cpu"
-    e.to(device)
     e.eval()
+
     Y_pred = e(X_val_norm).detach().cpu()
     rmse = [
         np.sqrt(
@@ -542,8 +535,9 @@ if __name__ == "__main__":
     print("RMSE")
     print(f"M={rmse[0]:.4f}, A={rmse[1]:.4f}, R={rmse[2]:.4f}")
 
-    xmin = np.min(Y_val.min(axis=1), Y_pred.min(axis=1))
-    xmax = np.max(Y_val.max(axis=1), Y_pred.max(axis=1))
+    # We can see that emulator struggles with A (accumulation)
+    # but works well for M (melt) and R (refreeze)
+
     fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(5.4, 2.8))
     fig.subplots_adjust(hspace=0.0, wspace=0.0)
     axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Melt")
@@ -557,28 +551,33 @@ if __name__ == "__main__":
     axs[2].legend()
     fig.savefig(f"{emulator_dir}/validation.pdf")
 
-    mcmc_df = draw_samples(n_samples=1000, random_seed=4)
-    temp_test, precip_test, _, _, _, _ = load_hirham_climate(thinning_factor=20)
-    std_dev_test = np.zeros_like(temp_test)
+    # Create observations using the forward model
+    obs_df = draw_samples(n_samples=500, random_seed=4)
+    temp_obs, precip_obs, _, _, _, _ = load_hirham_climate(thinning_factor=20)
+    std_dev_obs = np.zeros_like(temp_obs)
 
-    f_snow_test = 3.0
-    f_ice_test = 8.0
-    refreeze_test = 0.0
+    f_snow_obs = 3.0
+    f_ice_obs = 8.0
+    refreeze_obs = 0.0
     pdd = TorchPDDModel(
-        pdd_factor_snow=f_snow_test,
-        pdd_factor_ice=f_ice_test,
-        refreeze_snow=refreeze_test,
-        refreeze_ice=refreeze_test,
+        pdd_factor_snow=f_snow_obs,
+        pdd_factor_ice=f_ice_obs,
+        refreeze_snow=refreeze_obs,
+        refreeze_ice=refreeze_obs,
     )
-    result = pdd(temp_test, precip_test, std_dev_test)
+    result = pdd(temp_obs, precip_obs, std_dev_obs)
 
-    M_test = result["melt"]
-    A_test = result["accu"]
-    R_test = result["refreeze"]
+    M_obs = result["melt"]
+    A_obs = result["accu"]
+    R_obs = result["refreeze"]
 
-    Y_test = torch.vstack((M_test, A_test, R_test)).T.type(torch.FloatTensor)
+    Y_obs = torch.vstack((M_obs, A_obs, R_obs)).T.type(torch.FloatTensor)
 
-    device = "cpu"
+    # Create observations using the forward model
+    mcmc_df = draw_samples(n_samples=2000, random_seed=5)
+    temp_prior, precip_prior, _, _, _, _ = load_hirham_climate(thinning_factor=10)
+    std_dev_prior = np.zeros_like(temp_prior)
+
     X = []
     Y = []
     for k, row in mcmc_df.iterrows():
@@ -589,29 +588,29 @@ if __name__ == "__main__":
             torch.from_numpy(
                 np.hstack(
                     (
-                        temp_test.T,
-                        precip_test.T,
-                        np.tile(m_f_snow, (temp_test.shape[1], 1)),
-                        np.tile(m_f_ice, (temp_test.shape[1], 1)),
-                        np.tile(m_refreeze, (temp_test.shape[1], 1)),
+                        temp_prior.T,
+                        precip_prior.T,
+                        np.tile(m_f_snow, (temp_prior.shape[1], 1)),
+                        np.tile(m_f_ice, (temp_prior.shape[1], 1)),
+                        np.tile(m_refreeze, (temp_prior.shape[1], 1)),
                     )
                 )
             )
         )
 
-    X_test = torch.vstack(X).type(torch.FloatTensor)
-    X_test_mean = X_test.nanmean(axis=0)
-    X_test_std = X_test.std(axis=0)
+    X_prior = torch.vstack(X).type(torch.FloatTensor)
+    X_prior_mean = X_prior.nanmean(axis=0)
+    X_prior_std = X_prior.std(axis=0)
 
-    X_test_norm = torch.nan_to_num((X_test - X_test_mean) / X_test_std)
+    X_prior_norm = torch.nan_to_num((X_prior - X_prior_mean) / X_prior_std)
 
-    X_P_mean = X_test_mean[-3::].to(device)
-    X_P_std = X_test_std[-3::].to(device)
-    X_P_prior = X_test_norm[:, -3::].to(device)
-    X_I_prior = X_test_norm[:, :-3].to(device)
+    X_P_mean = X_prior_mean[-3::].to(device)
+    X_P_std = X_prior_std[-3::].to(device)
+    X_P_prior = X_prior_norm[:, -3::].to(device)
+    X_I_prior = X_prior_norm[:, :-3].to(device)
 
-    X_min = X_test_norm.cpu().numpy().min(axis=0)
-    X_max = X_test_norm.cpu().numpy().max(axis=0)
+    X_min = X_prior_norm.cpu().numpy().min(axis=0)
+    X_max = X_prior_norm.cpu().numpy().max(axis=0)
 
     sigma_hat = 0.0001
 
@@ -635,7 +634,7 @@ if __name__ == "__main__":
     X_P_min = X_min[-3:]
     X_P_max = X_max[-3:]
 
-    Y_target = Y_test.to(device)
+    Y_target = Y_obs.to(device)
 
     n_iters = 20000
     X_P_keys = ["f_snow", "f_ice", "refreeze"]
@@ -774,6 +773,7 @@ if __name__ == "__main__":
                 )
 
             elif i == j:
+
                 min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
                 max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
                 bins = np.linspace(min_val, max_val, 30)
