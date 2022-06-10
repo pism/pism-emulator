@@ -50,6 +50,268 @@ from pismemulator.nnemulator import PDDEmulator, TorchPDDModel, PDDDataModule
 from pismemulator.utils import load_hirham_climate
 
 
+class MALAPDDSampler(object):
+    """
+    MALA Sampler
+
+    Author: Douglas C Brinkerhoff, University of Montana
+    """
+
+    def __init__(
+        self,
+        model,
+        alpha_b=3.0,
+        beta_b=3.0,
+        alpha=0.01,
+        nu=1,
+        emulator_dir="./emulator",
+    ):
+        super().__init__()
+        self.model = model.eval()
+        self.alpha = alpha
+        self.alpha_b = alpha_b
+        self.beta_b = beta_b
+        self.nu = nu
+        self.emulator_dir = emulator_dir
+
+    def find_MAP(
+        self, X, T, P, S, Y_target, X_min, X_max, n_iters=50, print_interval=10
+    ):
+        print("***********************************************")
+        print("***********************************************")
+        print("Finding MAP point")
+        print("***********************************************")
+        print("***********************************************")
+        # Line search distances
+        alphas = np.logspace(-4, 0, 11)
+        # Find MAP point
+        for i in range(n_iters):
+            log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+                X, T, P, S, Y_target, X_min, X_max, compute_hessian=True
+            )
+            p = Hinv @ -g
+            alpha_index = np.nanargmin(
+                [
+                    self.get_log_like_gradient_and_hessian(
+                        X + alpha * p,
+                        T,
+                        P,
+                        S,
+                        Y_target,
+                        X_min,
+                        X_max,
+                        compute_hessian=False,
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    for alpha in alphas
+                ]
+            )
+            mu = X + alphas[alpha_index] * p
+            X.data = mu.data
+            if i % print_interval == 0:
+                print("===============================================")
+                print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
+                print(
+                    "".join(
+                        [
+                            f"{key}: {(val * std + mean):.3f}\n"
+                            for key, val, std, mean in zip(
+                                X_P_keys,
+                                X.data.cpu().numpy(),
+                                X_P_std,
+                                X_P_mean,
+                            )
+                        ]
+                    )
+                )
+
+                print("===============================================")
+        return X
+
+    def V(self, X, T, P, S, Y_target, X_bar):
+        pdd = TorchPDDModel(
+            pdd_factor_snow=X[0],
+            pdd_factor_ice=X[1],
+            refreeze_snow=X[2],
+            refreeze_ice=X[2],
+        )
+
+        result = pdd(T, P, S)
+
+        M = result["melt"]
+        A = result["accu"]
+        R = result["refreeze"]
+        Y_pred = torch.vstack(
+            (
+                M,
+                A,
+                R,
+            )
+        ).T
+
+        r = Y_pred - Y_target
+        L1 = torch.sum(
+            np.log(gamma((self.nu + 1) / 2.0))
+            - np.log(gamma(self.nu / 2.0))
+            - np.log(np.sqrt(np.pi * self.nu) * sigma_hat)
+            - (self.nu + 1) / 2.0 * torch.log(1 + 1.0 / self.nu * (r / sigma_hat) ** 2)
+        )
+        L2 = torch.sum(
+            (self.alpha_b - 1) * torch.log(X_bar)
+            + (self.beta_b - 1) * torch.log(1 - X_bar)
+        )
+
+        return -(self.alpha * L1 + L2)
+
+    def get_log_like_gradient_and_hessian(
+        self, X, T, P, S, Y_target, X_min, X_max, eps=1e-2, compute_hessian=False
+    ):
+
+        X_bar = (X - X_min) / (X_max - X_min)
+        log_pi = self.V(X, T, P, S, Y_target, X_bar)
+        if compute_hessian:
+            g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
+            H = torch.stack(
+                [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
+            )
+            lamda, Q = torch.linalg.eig(H)
+            lamda, Q = lamda.type(torch.float), Q.type(torch.float)
+            lamda_prime = torch.sqrt(lamda**2 + eps)
+            lamda_prime_inv = 1.0 / torch.sqrt(lamda**2 + eps)
+            H = Q @ torch.diag(lamda_prime) @ Q.T
+            Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
+            log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
+            return log_pi, g, H, Hinv, log_det_Hinv
+        else:
+            return log_pi
+
+    def draw_sample(self, mu, cov, eps=1e-10):
+        L = torch.linalg.cholesky(cov + eps * torch.eye(cov.shape[0], device=device))
+        return mu + L @ torch.randn(L.shape[0], device=device)
+
+    def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
+        return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+
+    def MALA_step(self, X, T, P, S, Y_target, X_min, X_max, h, local_data=None):
+        if local_data is not None:
+            pass
+        else:
+            local_data = self.get_log_like_gradient_and_hessian(
+                X, T, P, S, Y_target, X_min, X_max, compute_hessian=True
+            )
+
+        log_pi, _, H, Hinv, log_det_Hinv = local_data
+
+        X_ = self.draw_sample(X, 2 * h * Hinv).detach()
+        X_.requires_grad = True
+
+        log_pi_ = self.get_log_like_gradient_and_hessian(
+            X_, T, P, S, Y_target, X_min, X_max, compute_hessian=False
+        )
+
+        logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
+        logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
+
+        log_alpha = -log_pi_ + logq_ + log_pi - logq
+        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
+        u = torch.rand(1, device=device)
+        if u <= alpha and log_alpha != np.inf:
+            X.data = X_.data
+            local_data = self.get_log_like_gradient_and_hessian(
+                X, T, P, S, Y_target, X_min, X_max, compute_hessian=True
+            )
+            s = 1
+        else:
+            s = 0
+        return X, local_data, s
+
+    def MALA(
+        self,
+        X,
+        X_min,
+        X_max,
+        T,
+        P,
+        S,
+        Y_target,
+        n_iters=10001,
+        h=0.1,
+        h_max=1.0,
+        acc_target=0.25,
+        k=0.01,
+        beta=0.99,
+        model_index=0,
+        save_interval=1000,
+        print_interval=50,
+    ):
+        print("***********************************************")
+        print("***********************************************")
+        print(
+            "Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(
+                model_index
+            )
+        )
+        print("***********************************************")
+        print("***********************************************")
+
+        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
+        if not os.path.isdir(posterior_dir):
+            os.makedirs(posterior_dir)
+
+        local_data = None
+        m_vars = []
+        acc = acc_target
+        print(n_iters)
+        for i in range(n_iters):
+            X, local_data, s = self.MALA_step(
+                X, T, P, S, Y_target, X_min, X_max, h, local_data=local_data
+            )
+            m_vars.append(X.detach())
+            acc = beta * acc + (1 - beta) * s
+            h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
+            if i % print_interval == 0:
+                print("===============================================")
+                print(
+                    "sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(
+                        i, acc, local_data[0].item()
+                    )
+                )
+                print(
+                    " ".join(
+                        [
+                            f"{key}: {(val * std + mean):.3f}\n"
+                            for key, val, std, mean in zip(
+                                X_P_keys,
+                                X.data.cpu().numpy(),
+                                X_P_std,
+                                X_P_mean,
+                            )
+                        ]
+                    )
+                )
+
+                print("===============================================")
+
+            if i % save_interval == 0:
+                print("///////////////////////////////////////////////")
+                print("Saving samples for model {0}".format(model_index))
+                print("///////////////////////////////////////////////")
+                X_posterior = torch.stack(m_vars).cpu().numpy()
+                df = pd.DataFrame(
+                    data=X_posterior.astype("float32") * X_P_std.cpu().numpy()
+                    + X_P_mean.cpu().numpy(),
+                    columns=X_P_keys,
+                )
+                df.to_csv(
+                    posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
+                    compression="infer",
+                )
+        X_posterior = torch.stack(m_vars).cpu().numpy()
+        return X_posterior
+
+
 class MALASampler(object):
     """
     MALA Sampler
@@ -363,8 +625,8 @@ if __name__ == "__main__":
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    temp, precip, _, _, _, _ = load_hirham_climate(thinning_factor=200)
-    std_dev = np.zeros_like(temp)
+    temp_train, precip_train, _, _, _, _ = load_hirham_climate(thinning_factor=200)
+    std_dev_train = np.zeros_like(temp_train) + 4.0
 
     prior_df = draw_samples(n_samples=100)
 
@@ -381,7 +643,7 @@ if __name__ == "__main__":
             refreeze_snow=m_refreeze,
             refreeze_ice=m_refreeze,
         )
-        result = pdd(temp, precip, std_dev)
+        result = pdd(temp_train, precip_train, std_dev_train)
 
         M_train = result["melt"]
         A_train = result["accu"]
@@ -398,11 +660,12 @@ if __name__ == "__main__":
             torch.from_numpy(
                 np.hstack(
                     (
-                        temp.T,
-                        precip.T,
-                        np.tile(m_f_snow, (temp.shape[1], 1)),
-                        np.tile(m_f_ice, (temp.shape[1], 1)),
-                        np.tile(m_refreeze, (temp.shape[1], 1)),
+                        temp_train.T,
+                        precip_train.T,
+                        std_dev_train.T,
+                        np.tile(m_f_snow, (temp_train.shape[1], 1)),
+                        np.tile(m_f_ice, (temp_train.shape[1], 1)),
+                        np.tile(m_refreeze, (temp_train.shape[1], 1)),
                     )
                 )
             )
@@ -416,7 +679,7 @@ if __name__ == "__main__":
     # Normalize
     X_train_mean = X_train.mean(axis=0)
     X_train_std = X_train.std(axis=0)
-    X_train_norm = (X_train - X_train_mean) / X_train_std
+    X_train_norm = torch.nan_to_num((X_train - X_train_mean) / X_train_std, 0)
 
     callbacks = []
 
@@ -454,8 +717,8 @@ if __name__ == "__main__":
     val_loader = data_loader.val_all_loader
 
     # Train the emulator
-    # trainer.fit(e, train_loader, val_loader)
-    # trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
+    trainer.fit(e, train_loader, val_loader)
+    trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
 
     # Out-Of-Set validation
 
@@ -590,6 +853,7 @@ if __name__ == "__main__":
                     (
                         temp_prior.T,
                         precip_prior.T,
+                        std_dev_prior.T,
                         np.tile(m_f_snow, (temp_prior.shape[1], 1)),
                         np.tile(m_f_ice, (temp_prior.shape[1], 1)),
                         np.tile(m_refreeze, (temp_prior.shape[1], 1)),
@@ -638,10 +902,10 @@ if __name__ == "__main__":
 
     n_iters = 20000
     X_P_keys = ["f_snow", "f_ice", "refreeze"]
+
     mala = MALASampler(e, emulator_dir=emulator_dir)
     X_map = mala.find_MAP(X_P_0, X_I_0, Y_target, X_P_min, X_P_max)
 
-    # To reproduce the paper, n_iters should be 10^5
     X_posterior = mala.MALA(
         X_map,
         X_I_0,
@@ -653,6 +917,26 @@ if __name__ == "__main__":
         save_interval=1000,
         print_interval=100,
     )
+
+    # mala = MALAPDDSampler(e, emulator_dir=emulator_dir)
+    # X_map = mala.find_MAP(
+    #     X_P_0, temp_obs, precip_obs, std_dev_obs, Y_target, X_P_min, X_P_max
+    # )
+
+    # # To reproduce the paper, n_iters should be 10^5
+    # X_posterior = mala.MALA(
+    #     X_map,
+    #     X_P_min,
+    #     X_P_max,
+    #     temp_obs,
+    #     precip_obs,
+    #     std_dev_obs,
+    #     Y_target,
+    #     n_iters=n_iters,
+    #     model_index=int(model_index),
+    #     save_interval=1000,
+    #     print_interval=100,
+    # )
 
     X_std = X_P_std
     X_mean = X_P_mean

@@ -865,9 +865,9 @@ class TorchPDDModel(torch.nn.modules.Module):
         ice_refreeze_rate = torch.zeros_like(temp)
 
         snow_depth[:-1] = torch.clone(snow_depth[1:])
-        snow_depth = snow_depth + accu_rate
+        snow_depth += accu_rate
         snow_melt_rate, ice_melt_rate = self.melt_rates(snow_depth, inst_pdd)
-        snow_depth = snow_depth - snow_melt_rate
+        snow_depth -= snow_melt_rate
 
         melt_rate = snow_melt_rate + ice_melt_rate
         snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
