@@ -80,20 +80,20 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
         temp = stacked.tas.dropna(dim="z").values
-        rainfall = stacked.rainfall.dropna(dim="z").values / 1000
-        snowfall = stacked.snfall.dropna(dim="z").values / 1000
-        smb = stacked.gld.dropna(dim="z").values / 1000
-        refreeze = ncl_stacked.rfrz.dropna(dim="z").values / 1000
-        melt = stacked.snmel.dropna(dim="z").values / 1000
+        rainfall = stacked.rainfall.dropna(dim="z").values
+        snowfall = stacked.snfall.dropna(dim="z").values
+        smb = stacked.gld.dropna(dim="z").values
+        refreeze = ncl_stacked.rfrz.dropna(dim="z").values
+        melt = stacked.snmel.dropna(dim="z").values
         precip = rainfall + snowfall
 
     return (
         temp[..., ::thinning_factor] - 273.15,
         precip[..., ::thinning_factor],
-        refreeze.sum(axis=0)[..., ::thinning_factor],
-        snowfall.sum(axis=0)[..., ::thinning_factor],
-        melt.sum(axis=0)[..., ::thinning_factor],
-        smb.sum(axis=0)[..., ::thinning_factor],
+        snowfall.sum(axis=0)[::thinning_factor],
+        melt.sum(axis=0)[::thinning_factor],
+        refreeze.sum(axis=0)[::thinning_factor],
+        smb.sum(axis=0)[::thinning_factor],
     )
 
 

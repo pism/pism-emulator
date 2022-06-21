@@ -49,6 +49,8 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pismemulator.nnemulator import PDDEmulator, TorchPDDModel, PDDDataModule
 from pismemulator.utils import load_hirham_climate
 
+np.random.seed(2)
+
 
 class MALAPDDSampler(object):
     """
@@ -555,8 +557,8 @@ def draw_samples(n_samples=250, random_seed=2):
     np.random.seed(random_seed)
 
     distributions = {
-        "f_snow": uniform(loc=1.0, scale=4.0),  # uniform between 2 and 6
-        "f_ice": uniform(loc=3.0, scale=9),  # uniform between 3 and 12
+        "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
+        "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
         "refreeze": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
     }
     # Names of all the variables
@@ -625,10 +627,15 @@ if __name__ == "__main__":
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    temp_train, precip_train, _, _, _, _ = load_hirham_climate(thinning_factor=200)
-    std_dev_train = np.zeros_like(temp_train) + 4.0
+    temp_train, precip_train, a_train, m_train, r_train, b_train = load_hirham_climate(
+        thinning_factor=100
+    )
+    std_dev_train = np.zeros_like(temp_train)
 
-    prior_df = draw_samples(n_samples=100)
+    prior_df = draw_samples(n_samples=1000)
+
+    nt_train = temp_train.shape[0]
+    np_train = precip_train.shape[0]
 
     X = []
     Y = []
@@ -641,17 +648,17 @@ if __name__ == "__main__":
             pdd_factor_snow=m_f_snow,
             pdd_factor_ice=m_f_ice,
             refreeze_snow=m_refreeze,
-            refreeze_ice=m_refreeze,
+            refreeze_ice=0,
         )
         result = pdd(temp_train, precip_train, std_dev_train)
 
-        M_train = result["melt"]
         A_train = result["accu"]
-        R_train = result["refreeze"]
+        M_train = result["melt"]
+        R_train = result["runoff"]
         m_Y = torch.vstack(
             (
-                M_train,
                 A_train,
+                M_train,
                 R_train,
             )
         ).T
@@ -662,7 +669,6 @@ if __name__ == "__main__":
                     (
                         temp_train.T,
                         precip_train.T,
-                        std_dev_train.T,
                         np.tile(m_f_snow, (temp_train.shape[1], 1)),
                         np.tile(m_f_ice, (temp_train.shape[1], 1)),
                         np.tile(m_refreeze, (temp_train.shape[1], 1)),
@@ -688,8 +694,8 @@ if __name__ == "__main__":
     omegas = omegas.type(torch.FloatTensor)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
     area = torch.ones_like(omegas)
-    num_workers = 8
-    hparams = {"n_layers": 5, "n_hidden": 128, "batch_size": 128, "learning_rate": 0.01}
+    num_workers = 6
+    hparams = {"n_layers": 5, "n_hidden": 128, "batch_size": 128, "learning_rate": 0.1}
 
     # Load training data
     data_loader = PDDDataModule(
@@ -711,6 +717,7 @@ if __name__ == "__main__":
         callbacks=callbacks,
         logger=logger,
         deterministic=True,
+        default_root_dir=emulator_dir,
         num_sanity_val_steps=0,
     )
     train_loader = data_loader.train_all_loader
@@ -736,6 +743,8 @@ if __name__ == "__main__":
     # Prepare out-of-set validation
     # We draw samples with a different seed than the training data
     val_df = draw_samples(n_samples=100, random_seed=3)
+    temp_val, precip_val, _, _, _, _ = load_hirham_climate(thinning_factor=200)
+    std_dev_val = np.zeros_like(temp_val)
 
     X = []
     Y = []
@@ -748,17 +757,17 @@ if __name__ == "__main__":
             pdd_factor_snow=m_f_snow,
             pdd_factor_ice=m_f_ice,
             refreeze_snow=m_refreeze,
-            refreeze_ice=m_refreeze,
+            refreeze_ice=0,
         )
-        result = pdd(temp, precip, std_dev)
+        result = pdd(temp_val, precip_val, std_dev_val)
 
-        M_val = result["melt"]
         A_val = result["accu"]
-        R_val = result["refreeze"]
+        M_val = result["melt"]
+        R_val = result["runoff"]
         m_Y = torch.vstack(
             (
-                M_val,
                 A_val,
+                M_val,
                 R_val,
             )
         ).T
@@ -767,11 +776,11 @@ if __name__ == "__main__":
             torch.from_numpy(
                 np.hstack(
                     (
-                        temp.T,
-                        precip.T,
-                        np.tile(m_f_snow, (temp.shape[1], 1)),
-                        np.tile(m_f_ice, (temp.shape[1], 1)),
-                        np.tile(m_refreeze, (temp.shape[1], 1)),
+                        temp_val.T,
+                        precip_val.T,
+                        np.tile(m_f_snow, (temp_val.shape[1], 1)),
+                        np.tile(m_f_ice, (temp_val.shape[1], 1)),
+                        np.tile(m_refreeze, (temp_val.shape[1], 1)),
                     )
                 )
             )
@@ -796,49 +805,60 @@ if __name__ == "__main__":
         for i in range(Y_val.shape[1])
     ]
     print("RMSE")
-    print(f"M={rmse[0]:.4f}, A={rmse[1]:.4f}, R={rmse[2]:.4f}")
+    print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}, R={rmse[2]:.6f}")
 
     # We can see that emulator struggles with A (accumulation)
-    # but works well for M (melt) and R (refreeze)
+    # but works well for M (melt) and R (runoff)
 
-    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(5.4, 2.8))
-    fig.subplots_adjust(hspace=0.0, wspace=0.0)
-    axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Melt")
-    axs[1].plot(Y_val[:, 1], Y_pred[:, 1], ".", ms=0.25, label="Accumulation")
-    axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="Refreeze")
-    axs[0].axis("equal")
-    axs[1].axis("equal")
-    axs[2].axis("equal")
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 4))
+    fig.subplots_adjust(hspace=0.25, wspace=0.25)
+    axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Accumulation")
+    axs[1].plot(Y_val[:, 1], Y_pred[:, 1], ".", ms=0.25, label="Melt")
+    axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="Runoff")
+    for k in range(3):
+        m_max = np.ceil(np.maximum(Y_val[:, k].max(), Y_pred[:, k].max()))
+        m_min = np.floor(np.minimum(Y_val[:, k].min(), Y_pred[:, k].min()))
+        axs[k].set_xlim(m_min, m_max)
+        axs[k].set_ylim(m_min, m_max)
+    # axs[0].axis("equal")
+    # axs[1].axis("equal")
+    # axs[2].axis("equal")
     axs[0].legend()
     axs[1].legend()
     axs[2].legend()
     fig.savefig(f"{emulator_dir}/validation.pdf")
 
     # Create observations using the forward model
-    obs_df = draw_samples(n_samples=500, random_seed=4)
-    temp_obs, precip_obs, _, _, _, _ = load_hirham_climate(thinning_factor=20)
+    obs_df = draw_samples(n_samples=100, random_seed=4)
+    temp_obs, precip_obs, _, _, _, _ = load_hirham_climate(thinning_factor=100)
     std_dev_obs = np.zeros_like(temp_obs)
 
-    f_snow_obs = 3.0
-    f_ice_obs = 8.0
-    refreeze_obs = 0.0
+    f_snow_obs = 3.44
+    f_ice_obs = 7.79
+    refreeze_obs = 0.18
+    f_true = [f_snow_obs, f_ice_obs, refreeze_obs]
+
     pdd = TorchPDDModel(
         pdd_factor_snow=f_snow_obs,
         pdd_factor_ice=f_ice_obs,
         refreeze_snow=refreeze_obs,
-        refreeze_ice=refreeze_obs,
+        refreeze_ice=0,
     )
     result = pdd(temp_obs, precip_obs, std_dev_obs)
 
-    M_obs = result["melt"]
     A_obs = result["accu"]
-    R_obs = result["refreeze"]
+    M_obs = result["melt"]
+    R_obs = result["runoff"]
 
-    Y_obs = torch.vstack((M_obs, A_obs, R_obs)).T.type(torch.FloatTensor)
+    A_obs += np.random.normal(0, 0.01, A_obs.shape)
+    M_obs += np.random.normal(0, 0.1, M_obs.shape)
+    R_obs += np.random.normal(0, 0.1, R_obs.shape)
+
+    Y_obs = torch.vstack((A_obs, M_obs, R_obs)).T.type(torch.FloatTensor)
 
     # Create observations using the forward model
-    mcmc_df = draw_samples(n_samples=2000, random_seed=5)
-    temp_prior, precip_prior, _, _, _, _ = load_hirham_climate(thinning_factor=10)
+    mcmc_df = draw_samples(n_samples=50000, random_seed=5)
+    temp_prior, precip_prior, _, _, _, _ = load_hirham_climate(thinning_factor=100)
     std_dev_prior = np.zeros_like(temp_prior)
 
     X = []
@@ -853,7 +873,6 @@ if __name__ == "__main__":
                     (
                         temp_prior.T,
                         precip_prior.T,
-                        std_dev_prior.T,
                         np.tile(m_f_snow, (temp_prior.shape[1], 1)),
                         np.tile(m_f_ice, (temp_prior.shape[1], 1)),
                         np.tile(m_refreeze, (temp_prior.shape[1], 1)),
@@ -876,7 +895,7 @@ if __name__ == "__main__":
     X_min = X_prior_norm.cpu().numpy().min(axis=0)
     X_max = X_prior_norm.cpu().numpy().max(axis=0)
 
-    sigma_hat = 0.0001
+    sigma_hat = 0.001
 
     X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
     X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
@@ -900,7 +919,7 @@ if __name__ == "__main__":
 
     Y_target = Y_obs.to(device)
 
-    n_iters = 20000
+    n_iters = 50000
     X_P_keys = ["f_snow", "f_ice", "refreeze"]
 
     mala = MALASampler(e, emulator_dir=emulator_dir)
@@ -972,8 +991,8 @@ if __name__ == "__main__":
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
 
-    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(5.4, 2.8))
-    fig.subplots_adjust(hspace=0.0, wspace=0.0)
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 4))
+    fig.subplots_adjust(hspace=0.25, wspace=0.25)
     for i in range(3):
         min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
         max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
@@ -984,11 +1003,11 @@ if __name__ == "__main__":
         axs[i].plot(
             b,
             X_posterior_hist * 0.5,
-            color="0.5",
-            linewidth=lw * 0.25,
+            color="k",
+            linewidth=lw,
             linestyle="solid",
-            alpha=0.5,
         )
+        axs[i].axvline(f_true[i], lw=3, color="orange", label="true")
 
     figfile = f"{emulator_dir}/posterior.pdf"
     print(f"Saving figure to {figfile}")

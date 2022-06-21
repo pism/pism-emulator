@@ -25,6 +25,7 @@ import re
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import xarray as xr
+import pyro
 
 import torch
 import torch.nn as nn
@@ -796,6 +797,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         temp_rain=2.0,
         interpolate_rule="linear",
         interpolate_n=52,
+        device="cpu",
         *args,
         **kwargs,
     ):
@@ -810,6 +812,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         self.temp_rain = temp_rain
         self.interpolate_rule = interpolate_rule
         self.interpolate_n = interpolate_n
+        self.device = device
 
     def forward(self, temp, prec, stdv=0.0):
         """Run the positive degree day model.
@@ -836,10 +839,11 @@ class TorchPDDModel(torch.nn.modules.Module):
         ('smb'), and many other output variables in a dictionary.
         """
 
+        device = self.device
         # ensure numpy arrays
-        temp = torch.asarray(temp)
-        prec = torch.asarray(prec)
-        stdv = torch.asarray(stdv)
+        temp = torch.asarray(temp, device=device)
+        prec = torch.asarray(prec, device=device)
+        stdv = torch.asarray(stdv, device=device)
 
         # expand arrays to the largest shape
         maxshape = max(temp.shape, prec.shape, stdv.shape)
@@ -864,10 +868,27 @@ class TorchPDDModel(torch.nn.modules.Module):
         snow_refreeze_rate = torch.zeros_like(temp)
         ice_refreeze_rate = torch.zeros_like(temp)
 
-        snow_depth[:-1] = torch.clone(snow_depth[1:])
-        snow_depth += accu_rate
-        snow_melt_rate, ice_melt_rate = self.melt_rates(snow_depth, inst_pdd)
-        snow_depth -= snow_melt_rate
+        sd_changes = torch.stack(
+            [
+                (snow_depth[i - 1] + accu_rate[i])
+                - self.melt_rates(snow_depth[i - 1] + accu_rate[i], inst_pdd[i])[0]
+                for i in range(len(temp))
+            ]
+        )
+        snow_melt_rate = torch.stack(
+            [
+                self.melt_rates(snow_depth[i - 1] + accu_rate[i], inst_pdd[i])[0]
+                for i in range(len(temp))
+            ]
+        )
+        ice_melt_rate = torch.stack(
+            [
+                self.melt_rates(snow_depth[i - 1] + accu_rate[i], inst_pdd[i])[1]
+                for i in range(len(temp))
+            ]
+        )
+
+        snow_depth = [sd_changes[0 : i + 1].sum(0) for i in range(len(temp)) if i > 0]
 
         melt_rate = snow_melt_rate + ice_melt_rate
         snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
@@ -929,12 +950,12 @@ class TorchPDDModel(torch.nn.modules.Module):
 
         rule = self.interpolate_rule
         npts = self.interpolate_n
-        oldx = (torch.arange(len(array) + 2) - 0.5) / len(array)
+        oldx = (torch.arange(len(array) + 2, device=self.device) - 0.5) / len(array)
         oldy = torch.vstack((array[-1], array, array[0]))
         newx = (torch.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
-        newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
+        newy = interp1d(oldx.cpu(), oldy.cpu(), kind=rule, axis=0)(newx)
 
-        return torch.from_numpy(newy)
+        return torch.from_numpy(newy).to(self.device)
 
     def inst_pdd(self, temp, stdv):
         """Compute instantaneous positive degree days from temperature.
@@ -998,8 +1019,8 @@ class TorchPDDModel(torch.nn.modules.Module):
         """
 
         # parse model parameters for readability
-        ddf_snow = self.pdd_factor_snow / 1e3
-        ddf_ice = self.pdd_factor_ice / 1e3
+        ddf_snow = self.pdd_factor_snow
+        ddf_ice = self.pdd_factor_ice
 
         # compute a potential snow melt
         pot_snow_melt = ddf_snow * pdd
