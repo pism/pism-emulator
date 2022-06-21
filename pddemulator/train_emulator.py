@@ -142,13 +142,13 @@ class MALAPDDSampler(object):
 
         result = pdd(T, P, S)
 
-        M = result["melt"]
         A = result["accu"]
+        M = result["melt"]
         R = result["refreeze"]
         Y_pred = torch.vstack(
             (
-                M,
                 A,
+                M,
                 R,
             )
         ).T
@@ -628,11 +628,11 @@ if __name__ == "__main__":
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
     temp_train, precip_train, a_train, m_train, r_train, b_train = load_hirham_climate(
-        thinning_factor=100
+        thinning_factor=200
     )
     std_dev_train = np.zeros_like(temp_train)
 
-    prior_df = draw_samples(n_samples=1000)
+    prior_df = draw_samples(n_samples=500)
 
     nt_train = temp_train.shape[0]
     np_train = precip_train.shape[0]
@@ -654,7 +654,7 @@ if __name__ == "__main__":
 
         A_train = result["accu"]
         M_train = result["melt"]
-        R_train = result["runoff"]
+        R_train = result["refreeze"]
         m_Y = torch.vstack(
             (
                 A_train,
@@ -695,7 +695,7 @@ if __name__ == "__main__":
     omegas_0 = torch.ones_like(omegas) / len(omegas)
     area = torch.ones_like(omegas)
     num_workers = 6
-    hparams = {"n_layers": 5, "n_hidden": 128, "batch_size": 128, "learning_rate": 0.1}
+    hparams = {"n_layers": 5, "n_hidden": 128, "batch_size": 128, "learning_rate": 0.01}
 
     # Load training data
     data_loader = PDDDataModule(
@@ -724,8 +724,8 @@ if __name__ == "__main__":
     val_loader = data_loader.val_all_loader
 
     # Train the emulator
-    trainer.fit(e, train_loader, val_loader)
-    trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
+    # trainer.fit(e, train_loader, val_loader)
+    # trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
 
     # Out-Of-Set validation
 
@@ -763,7 +763,7 @@ if __name__ == "__main__":
 
         A_val = result["accu"]
         M_val = result["melt"]
-        R_val = result["runoff"]
+        R_val = result["refreeze"]
         m_Y = torch.vstack(
             (
                 A_val,
@@ -807,14 +807,11 @@ if __name__ == "__main__":
     print("RMSE")
     print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}, R={rmse[2]:.6f}")
 
-    # We can see that emulator struggles with A (accumulation)
-    # but works well for M (melt) and R (runoff)
-
     fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 4))
     fig.subplots_adjust(hspace=0.25, wspace=0.25)
     axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Accumulation")
     axs[1].plot(Y_val[:, 1], Y_pred[:, 1], ".", ms=0.25, label="Melt")
-    axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="Runoff")
+    axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="refreeze")
     for k in range(3):
         m_max = np.ceil(np.maximum(Y_val[:, k].max(), Y_pred[:, k].max()))
         m_min = np.floor(np.minimum(Y_val[:, k].min(), Y_pred[:, k].min()))
@@ -830,7 +827,7 @@ if __name__ == "__main__":
 
     # Create observations using the forward model
     obs_df = draw_samples(n_samples=100, random_seed=4)
-    temp_obs, precip_obs, _, _, _, _ = load_hirham_climate(thinning_factor=100)
+    temp_obs, precip_obs, _, _, _, _ = load_hirham_climate(thinning_factor=10)
     std_dev_obs = np.zeros_like(temp_obs)
 
     f_snow_obs = 3.44
@@ -848,7 +845,7 @@ if __name__ == "__main__":
 
     A_obs = result["accu"]
     M_obs = result["melt"]
-    R_obs = result["runoff"]
+    R_obs = result["refreeze"]
 
     A_obs += np.random.normal(0, 0.01, A_obs.shape)
     M_obs += np.random.normal(0, 0.1, M_obs.shape)
@@ -857,7 +854,7 @@ if __name__ == "__main__":
     Y_obs = torch.vstack((A_obs, M_obs, R_obs)).T.type(torch.FloatTensor)
 
     # Create observations using the forward model
-    mcmc_df = draw_samples(n_samples=50000, random_seed=5)
+    mcmc_df = draw_samples(n_samples=10000, random_seed=5)
     temp_prior, precip_prior, _, _, _, _ = load_hirham_climate(thinning_factor=100)
     std_dev_prior = np.zeros_like(temp_prior)
 
@@ -919,7 +916,7 @@ if __name__ == "__main__":
 
     Y_target = Y_obs.to(device)
 
-    n_iters = 50000
+    n_iters = 20000
     X_P_keys = ["f_snow", "f_ice", "refreeze"]
 
     mala = MALASampler(e, emulator_dir=emulator_dir)
