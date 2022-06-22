@@ -623,16 +623,12 @@ if __name__ == "__main__":
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    if not os.path.isdir(emulator_dir):
-        os.makedirs(emulator_dir)
-        os.makedirs(os.path.join(emulator_dir, "emulator"))
-
     temp_train, precip_train, a_train, m_train, r_train, b_train = load_hirham_climate(
-        thinning_factor=200
+        thinning_factor=100
     )
     std_dev_train = np.zeros_like(temp_train)
 
-    prior_df = draw_samples(n_samples=500)
+    prior_df = draw_samples(n_samples=1000)
 
     nt_train = temp_train.shape[0]
     np_train = precip_train.shape[0]
@@ -724,8 +720,8 @@ if __name__ == "__main__":
     val_loader = data_loader.val_all_loader
 
     # Train the emulator
-    # trainer.fit(e, train_loader, val_loader)
-    # trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
+    trainer.fit(e, train_loader, val_loader)
+    trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
 
     # Out-Of-Set validation
 

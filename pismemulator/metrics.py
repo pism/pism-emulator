@@ -61,6 +61,19 @@ def area_absolute_error(
 
 
 class AreaAbsoluteError(Metric):
+
+    # Set to True if the metric during 'update' requires access to the global metric
+    # state for its calculations. If not, setting this to False indicates that all
+    # batch states are independent and we will optimize the runtime of 'forward'
+    # Use:
+    # x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
+    # y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
+    # o = torch.tensor([0.25, 0.25, 0.3, 0.2])
+    # a = torch.tensor([0.25, 0.25])
+    # torchmetrics.utilities.check_forward_full_state_property(AreaAbsoluteError, input_args={"preds": x, "target": y, "omegas": o, "area": a})
+
+    full_state_update: bool = False
+
     def __init__(self, compute_on_step: bool = True, dist_sync_on_step=False):
         # call `self.add_state`for every internal state that is needed for the metrics computations
         # dist_reduce_fx indicates the function that should be used to reduce
@@ -92,8 +105,6 @@ class AreaAbsoluteError(Metric):
     @property
     def is_differentiable(self):
         return True
-
-    full_state_update: bool = True
 
 
 def _absolute_error_update(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
@@ -129,6 +140,18 @@ def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
 
 
 class AbsoluteError(Metric):
+
+    # Set to True if the metric during 'update' requires access to the global metric
+    # state for its calculations. If not, setting this to False indicates that all
+    # batch states are independent and we will optimize the runtime of 'forward'
+    # Use:
+    # x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
+    # y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
+    # o = torch.tensor([0.25, 0.25, 0.3, 0.2])
+    # torchmetrics.utilities.check_forward_full_state_property(AreaAbsoluteError, input_args={"preds": x, "target": y, "omegas": o})
+
+    full_state_update: bool = False
+
     def __init__(self, compute_on_step: bool = True, dist_sync_on_step=False):
         # call `self.add_state`for every internal state that is needed for the metrics computations
         # dist_reduce_fx indicates the function that should be used to reduce
