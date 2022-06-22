@@ -144,11 +144,11 @@ class MALAPDDSampler(object):
 
         A = result["accu"]
         M = result["melt"]
-        R = result["refreeze"]
+        R = result["runoff"]
+        B = result["smb"]
         Y_pred = torch.vstack(
             (
-                A,
-                M,
+                B,
                 R,
             )
         ).T
@@ -650,11 +650,11 @@ if __name__ == "__main__":
 
         A_train = result["accu"]
         M_train = result["melt"]
-        R_train = result["refreeze"]
+        R_train = result["runoff"]
+        B_train = result["smb"]
         m_Y = torch.vstack(
             (
-                A_train,
-                M_train,
+                B_train,
                 R_train,
             )
         ).T
@@ -759,11 +759,11 @@ if __name__ == "__main__":
 
         A_val = result["accu"]
         M_val = result["melt"]
-        R_val = result["refreeze"]
+        R_val = result["runoff"]
+        B_val = result["smb"]
         m_Y = torch.vstack(
             (
-                A_val,
-                M_val,
+                B_val,
                 R_val,
             )
         ).T
@@ -801,7 +801,7 @@ if __name__ == "__main__":
         for i in range(Y_val.shape[1])
     ]
     print("RMSE")
-    print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}, R={rmse[2]:.6f}")
+    print(f"B={rmse[0]:.6f}, R={rmse[2]:.6f}")
 
     fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 4))
     fig.subplots_adjust(hspace=0.25, wspace=0.25)
@@ -841,13 +841,15 @@ if __name__ == "__main__":
 
     A_obs = result["accu"]
     M_obs = result["melt"]
-    R_obs = result["refreeze"]
+    R_obs = result["runoff"]
+    B_obs = result["smb"]
 
     A_obs += np.random.normal(0, 0.01, A_obs.shape)
     M_obs += np.random.normal(0, 0.1, M_obs.shape)
     R_obs += np.random.normal(0, 0.1, R_obs.shape)
+    B_obs += np.random.normal(0, 0.1, B_obs.shape)
 
-    Y_obs = torch.vstack((A_obs, M_obs, R_obs)).T.type(torch.FloatTensor)
+    Y_obs = torch.vstack((B_obs, R_obs)).T.type(torch.FloatTensor)
 
     # Create observations using the forward model
     mcmc_df = draw_samples(n_samples=10000, random_seed=5)
