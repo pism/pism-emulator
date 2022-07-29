@@ -25,15 +25,19 @@ import os
 from os.path import join
 from scipy.stats import dirichlet
 import torch
+import pylab as plt
+import pandas as pd
+import seaborn as sns
 
 from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score
 
 from pismemulator.nnemulator import (
     NNEmulator,
     PISMDataset,
     PISMDataModule,
 )
-from pismemulator.utils import plot_validation
+from pismemulator.utils import plot_validation, kl_divergence
 
 
 if __name__ == "__main__":
@@ -43,7 +47,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
-    parser.add_argument("--mode", choices=["train", "validation"], default="train")
+    parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
         "--samples_file",
         default="../data/samples/velocity_calibration_samples_20_lhs.csv",
@@ -83,6 +87,19 @@ if __name__ == "__main__":
     F = dataset.Y
     n_samples = dataset.n_samples
 
+    rmses = []
+    log_rmses = []
+    r2s = []
+    corrs = []
+
+    # Calculate the mean by looping over emulators
+
+    dfs = []
+    num_ens = F.shape[0]
+    num_pts = F.shape[1]
+    F_vals = np.zeros((num_models * num_ens, num_pts))
+    F_preds = np.zeros((num_models * num_ens, num_pts))
+
     for model_index in range(0, num_models):
         print(f"Loading emulator {model_index}")
 
@@ -99,48 +116,48 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
         e.eval()
 
-        plot_validation(
-            e,
-            dataset,
-            model_index,
-            emulator_dir,
-            validation=validation,
-        )
+        # plot_validation(
+        #     e,
+        #     dataset,
+        #     model_index,
+        #     emulator_dir,
+        #     validation=validation,
+        # )
 
         F_val = F.detach().numpy()
         F_pred = e(X, add_mean=True).detach().numpy()
 
-        F_val_2d = np.zeros((dataset.ny, dataset.nx))
-        F_val_2d.put(dataset.sparse_idx_1d, F_val)
+        F_vals[model_index * num_ens : (model_index + 1) * num_ens, :] = F_val
+        F_preds[model_index * num_ens : (model_index + 1) * num_ens, :] = F_pred
 
-        F_pred_2d = np.zeros((dataset.ny, dataset.nx))
-        F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
+        # Loop over ensemble member
+        for m in range(len(F_val)):
 
-        F_p = np.ma.array(data=10**F_pred_2d, mask=dataset.mask_2d)
-        F_v = np.ma.array(data=10**F_val_2d, mask=dataset.mask_2d)
-        rmse = np.sqrt(mean_squared_error(F_p, F_v))
-        corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-        print(model_index, "all", rmse / n_samples, corr)
+            F_v = F_val[m]
+            F_p = F_pred[m]
 
-        # for idx in range(len(data_loader.all_data)):
-        #     (
-        #         X_val,
-        #         F_val,
-        #         _,
-        #         _,
-        #     ) = data_loader.all_data[idx]
+            rmse = np.sqrt(((10**F_p - 10**F_v) ** 2).mean())
+            rmses.append(rmse)
+            r2 = r2_score(F_p, F_v)
+            r2s.append(r2)
+            log_rmse = np.sqrt(((F_p - F_v) ** 2).mean())
+            log_rmses.append(log_rmse)
+            corr = np.corrcoef(F_v, F_p)[0, 1]
+            corrs.append(corr)
+            df = pd.DataFrame(
+                data=np.array([rmse, log_rmse, corr, r2, m, model_index]).reshape(
+                    1, -1
+                ),
+                columns=[
+                    "RMSD (m/yr)",
+                    "RMSD log (m/yr)",
+                    "Pearson r (1)",
+                    "R2 (1)",
+                    "Ensemble member",
+                    "Model",
+                ],
+            ).astype({"Ensemble member": int, "Model": int})
+            dfs.append(df)
 
-        #     F_val = (F_val + state_dict["F_mean"]).detach().numpy()
-        #     F_pred = e(X_val, add_mean=True).detach().numpy()
-
-        #     F_val_2d = np.zeros((dataset.ny, dataset.nx))
-        #     F_val_2d.put(dataset.sparse_idx_1d, F_val)
-
-        #     F_pred_2d = np.zeros((dataset.ny, dataset.nx))
-        #     F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
-
-        #     F_p = np.ma.array(data=10**F_pred_2d, mask=dataset.mask_2d)
-        #     F_v = np.ma.array(data=10**F_val_2d, mask=dataset.mask_2d)
-        #     rmse = np.sqrt(mean_squared_error(F_p, F_v))
-        #     corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-        #     print(model_index, idx, rmse, corr)
+    df = pd.concat(dfs)
+    df.to_csv(f"{emulator_dir}/emulator_stats_{mode}.csv.gz", compression="infer")

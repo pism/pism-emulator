@@ -844,7 +844,7 @@ if __name__ == "__main__":
     R_obs = result["runoff"]
     B_obs = result["smb"]
 
-    A_obs += np.random.normal(0, 0.01, A_obs.shape)
+    A_obs += bnp.random.normal(0, 0.01, A_obs.shape)
     M_obs += np.random.normal(0, 0.1, M_obs.shape)
     R_obs += np.random.normal(0, 0.1, R_obs.shape)
     B_obs += np.random.normal(0, 0.1, B_obs.shape)

@@ -37,35 +37,35 @@ import xarray as xr
 np.random.seed(0)
 
 param_keys_dict = {
-    "GCM": "GCM",
-    "FICE": "$f_i$",
-    "FSNOW": "$f_s$",
-    "RFR": "$\psi$",
-    "PRS": "$\omega$",
-    "OCM": "$m_{t}$",
-    "OCS": "$m_{x}$",
-    "TCT": "$h_{\mathrm{min}}$",
-    "VCM": "$\sigma_{\mathrm{max}}$",
-    "SIAE": "$E_{\mathrm{SIA}}$",
-    "SSAN": "$n_{\mathrm{SSA}}$",
-    "TEFO": "$\delta$",
-    "PPQ": "$q$",
-    "PHIMIN": "$\phi_{\mathrm{min}}$",
-    "PHIMAX": "$\phi_{\mathrm{max}}$",
-    "ZMIN": "$z_{\mathrm{min}}$",
-    "ZMAX": "$z_{\mathrm{max}}$",
-    "sia_e": "$E_{\mathrm{SIA}}$",
-    "ssa_e": "$E_{\mathrm{SSA}}$",
-    "ppq": "$q$",
-    "tefo": "$\delta$",
-    "phi_min": "$\phi_{\mathrm{min}}$",
-    "z_min": "$z_{\mathrm{min}}$",
-    "z_max": "$z_{\mathrm{max}}$",
-    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$",
-    "SIAe": "$E_{\mathrm{SIA}}$",
-    "SSAe": "$E_{\mathrm{SSA}}$",
-    "topg_to_phi_base": "$b_{\mathrm{base}}$",
-    "topg_to_phi_range": "$b_{\mathrm{range}}$",
+    "GCM": "GCM (1)",
+    "FICE": "$f_i$ (mm K$^{-1}$ day$^{-1}$)",
+    "FSNOW": "$f_s$ (mm K$^{-1}$ day$^{-1}$)",
+    "RFR": "$\psi (1)$",
+    "PRS": "$\omega$ (% K$^{-1}$)",
+    "OCM": "$m_{t}$ (1)",
+    "OCS": "$m_{x}$ (1)",
+    "TCT": "$h_{\mathrm{min}}$ (1)",
+    "VCM": "$\sigma_{\mathrm{max}}$ (MPa)",
+    "SIAE": "$E_{\mathrm{SIA}}$ (1)",
+    "SSAN": "$n_{\mathrm{SSA}}$ (1)",
+    "TEFO": "$\delta$ (1)",
+    "PPQ": "$q$ (1)",
+    "PHIMIN": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
+    "PHIMAX": "$\phi_{\mathrm{max}}$ ($^{\circ}$)",
+    "ZMIN": "$z_{\mathrm{min}}$ (m)",
+    "ZMAX": "$z_{\mathrm{max}}$ (m)",
+    "sia_e": "$E_{\mathrm{SIA}}$ (1)",
+    "ssa_e": "$E_{\mathrm{SSA}}$ (1)",
+    "ppq": "$q$ (1)",
+    "tefo": "$\delta$ (1)",
+    "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
+    "z_min": "$z_{\mathrm{min}}$ (m)",
+    "z_max": "$z_{\mathrm{max}}$ (m)",
+    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$ (m yr$^{-1}$",
+    "SIAe": "$E_{\mathrm{SIA}}$ (1)",
+    "SSAe": "$E_{\mathrm{SSA}}$ (1)",
+    "topg_to_phi_base": "$b_{\mathrm{base}}$ (m)",
+    "topg_to_phi_range": "$b_{\mathrm{range}}$ (m)",
 }
 
 
@@ -309,7 +309,6 @@ def plot_validation(
         extend="both",
     )
     cb_ax.tick_params(labelsize=7)
-    cb_ax.set_yticklabels([1, 10, 100, 1000])
     cb_ax2.tick_params(labelsize=7)
     fig.subplots_adjust(wspace=0.05, hspace=0.15)
     if validation:
@@ -327,6 +326,8 @@ def plot_validation(
 
     if return_fig:
         return fig
+    else:
+        del fig
 
 
 def plot_compare(
@@ -343,7 +344,7 @@ def plot_compare(
         nrows=3, ncols=1, sharex="col", sharey="row", figsize=(2.5, 8)
     )
 
-    rmse = np.sqrt(mean_squared_error(F_p, F_v))
+    rmse = np.sqrt(((F_p - F_v) ** 2).mean())
     corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
     c1 = axs[0].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
     axs[1].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))

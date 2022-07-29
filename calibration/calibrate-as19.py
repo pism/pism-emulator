@@ -19,6 +19,8 @@ from pismemulator.utils import param_keys_dict as keys_dict
 from scipy.interpolate import interp1d
 from scipy.stats import beta
 
+from scipy.stats.distributions import truncnorm, gamma, uniform, randint
+
 
 def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):
     """
@@ -529,7 +531,7 @@ def plot_posterior_sle_pdfs(
     m_alphas = alphas[: len(ensembles)]
 
     fig, axs = plt.subplots(
-        n_rcps * s,
+        n_rcps * 2,
         2,
         sharex="col",
         figsize=[5.8, 4.2],
@@ -958,7 +960,7 @@ def plot_histograms(
     df,
     X_prior=None,
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    palette="cividis",
+    palette="binary",
 ):
     m_flow_keys = [
         "SIAE",
@@ -970,7 +972,6 @@ def plot_histograms(
         "PHIMIN",
         "PHIMAX",
     ]
-
     m_star_keys = ["GCM", "RFR", "FICE", "FSNOW", "PRS", "OCM", "OCS", "TCT", "VCM"]
     m_keys = m_flow_keys + m_star_keys
     m_as19_df = df[df["Ensemble"] == "AS19"][m_keys]
@@ -991,17 +992,50 @@ def plot_histograms(
         "PHIMIN": {"axs": [1, 2], "bins": np.linspace(5, 15, 11)},
         "PHIMAX": {"axs": [1, 3], "bins": np.linspace(40, 45, 11)},
         "GCM": {
-            "axs": [2, 0],
+            "axs": [4, 0],
             "bins": [-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
+            "dist": randint(0, 4),
         },
-        "PRS": {"axs": [2, 1], "bins": np.linspace(5, 7, 11)},
-        "FICE": {"axs": [2, 2], "bins": np.linspace(4, 12, 11)},
-        "FSNOW": {"axs": [2, 3], "bins": np.linspace(2, 6, 11)},
-        "RFR": {"axs": [3, 0], "bins": np.linspace(0.2, 0.8, 16)},
-        "OCM": {"axs": [3, 1], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
-        "OCS": {"axs": [3, 2], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
-        "TCT": {"axs": [3, 3], "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25]},
-        "VCM": {"axs": [4, 0], "bins": np.linspace(0.75, 1.25, 11)},
+        "PRS": {
+            "axs": [4, 1],
+            "bins": np.linspace(5, 7, 11),
+            "dist": uniform(loc=5, scale=2),
+        },
+        "FICE": {
+            "axs": [3, 1],
+            "bins": np.linspace(4, 12, 11),
+            "dist": truncnorm(-4 / 4.0, 4.0 / 4, loc=8, scale=4),
+        },
+        "FSNOW": {
+            "axs": [3, 0],
+            "bins": np.linspace(2, 6, 11),
+            "dist": truncnorm(-4.1 / 3, 4.1 / 3, loc=4.1, scale=1.5),
+        },
+        "RFR": {
+            "axs": [3, 2],
+            "bins": np.linspace(0.2, 0.8, 16),
+            "dist": truncnorm(-0.4 / 0.3, 0.4 / 0.3, loc=0.5, scale=0.2),
+        },
+        "OCM": {
+            "axs": [2, 0],
+            "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+            "dist": randint(-1, 2),
+        },
+        "OCS": {
+            "axs": [2, 1],
+            "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+            "dist": randint(-1, 2),
+        },
+        "TCT": {
+            "axs": [2, 2],
+            "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+            "dist": randint(-1, 2),
+        },
+        "VCM": {
+            "axs": [2, 3],
+            "bins": np.linspace(0.75, 1.25, 11),
+            "dist": truncnorm(-0.35 / 0.2, 0.35 / 0.2, loc=1, scale=0.2),
+        },
     }
 
     if X_prior is not None:
@@ -1050,7 +1084,7 @@ def plot_histograms(
             ax=axs[m_axs[0], m_axs[1]],
             legend=False,
         )
-        if key not in ["GCM", "RFR", "OCM", "OCS", "TCT"]:
+        if key not in ["GCM", "OCM", "OCS", "TCT"]:
             sns.kdeplot(
                 data=df,
                 x=key,
@@ -1076,6 +1110,29 @@ def plot_histograms(
                 linewidth=lw,
                 linestyle="dashed",
             )
+        elif (X_prior_b is not None) and (key in m_star_keys):
+
+            X_prior_b = X_prior[m_star_keys]
+            X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_star_keys)
+            X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
+            b = 0.5 * (b[1:] + b[:-1])
+            if key not in ["GCM", "OCM", "OCS", "TCT"]:
+                axs[m_axs[0], m_axs[1]].plot(
+                    b,
+                    X_prior_hist,
+                    color="k",
+                    linewidth=lw,
+                    linestyle="dashed",
+                )
+            else:
+                axs[m_axs[0], m_axs[1]].plot(
+                    b[::2],
+                    X_prior_hist[::2],
+                    "s",
+                    color="k",
+                )
+        else:
+            pass
         # if (X_prior_b is not None) and (key in m_star_keys):
         #     axs[m_axs[0], m_axs[1]].plot(
         #         [0, 1],
@@ -1101,11 +1158,11 @@ def plot_histograms(
             c="k",
             lw=lw,
             ls="dashed",
-            label="Prior($\mathbf{m}_{\mathrm{flow}}$)",
+            label="Prior",
         )
 
         handles.append(l_p)
-    legend_1 = axs[4, 1].legend(
+    legend_1 = axs[4, 2].legend(
         handles=handles,
         loc="lower left",
         bbox_to_anchor=(0, -0.2),
@@ -1113,7 +1170,7 @@ def plot_histograms(
     legend_1.get_frame().set_linewidth(0.0)
     legend_1.get_frame().set_alpha(0.0)
 
-    axs[4, 1].set_axis_off()
+    axs[3, 3].set_axis_off()
     axs[4, 2].set_axis_off()
     axs[4, 3].set_axis_off()
 
@@ -1138,7 +1195,7 @@ def plot_histograms(
             #         transform=ax.transAxes,
             #         )
 
-    # fig.tight_layout()
+    fig.tight_layout()
     fig.savefig(out_filename)
     plt.close(fig)
 
