@@ -87,19 +87,10 @@ if __name__ == "__main__":
     F = dataset.Y
     n_samples = dataset.n_samples
 
-    rmses = []
-    log_rmses = []
-    r2s = []
-    corrs = []
-
     # Calculate the mean by looping over emulators
 
-    dfs = []
-    num_ens = F.shape[0]
-    num_pts = F.shape[1]
-    F_vals = np.zeros((num_models * num_ens, num_pts))
-    F_preds = np.zeros((num_models * num_ens, num_pts))
-
+    F_val = np.zeros((num_models, F.shape[0], F.shape[1]))
+    F_pred = np.zeros((num_models, F.shape[0], F.shape[1]))
     for model_index in range(0, num_models):
         print(f"Loading emulator {model_index}")
 
@@ -116,48 +107,30 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
         e.eval()
 
-        # plot_validation(
-        #     e,
-        #     dataset,
-        #     model_index,
-        #     emulator_dir,
-        #     validation=validation,
-        # )
+        F_v = F.detach().numpy()
+        F_p = e(X, add_mean=True).detach().numpy()
+        F_val[model_index, ...] = F_v
+        F_pred[model_index, ...] = F_p
 
-        F_val = F.detach().numpy()
-        F_pred = e(X, add_mean=True).detach().numpy()
+        del F_v, F_p, e
 
-        F_vals[model_index * num_ens : (model_index + 1) * num_ens, :] = F_val
-        F_preds[model_index * num_ens : (model_index + 1) * num_ens, :] = F_pred
-
-        # Loop over ensemble member
-        for m in range(len(F_val)):
-
-            F_v = F_val[m]
-            F_p = F_pred[m]
-
-            rmse = np.sqrt(((10**F_p - 10**F_v) ** 2).mean())
-            rmses.append(rmse)
-            r2 = r2_score(F_p, F_v)
-            r2s.append(r2)
-            log_rmse = np.sqrt(((F_p - F_v) ** 2).mean())
-            log_rmses.append(log_rmse)
-            corr = np.corrcoef(F_v, F_p)[0, 1]
-            corrs.append(corr)
-            df = pd.DataFrame(
-                data=np.array([rmse, log_rmse, corr, r2, m, model_index]).reshape(
-                    1, -1
-                ),
-                columns=[
-                    "RMSD (m/yr)",
-                    "RMSD log (m/yr)",
-                    "Pearson r (1)",
-                    "R2 (1)",
-                    "Ensemble member",
-                    "Model",
-                ],
-            ).astype({"Ensemble member": int, "Model": int})
-            dfs.append(df)
-
-    df = pd.concat(dfs)
-    df.to_csv(f"{emulator_dir}/emulator_stats_{mode}.csv.gz", compression="infer")
+    # Calculate the mean velocity field (average over the number of ensmble members) for each emulator
+    # calculate the root meant square for each emulator, and then get the mean
+    print(
+        np.mean(
+            np.sqrt((10 ** F_val.mean(axis=0) - 10 ** F_pred.mean(axis=0)) ** 2).mean(
+                axis=1
+            )
+        )
+    )
+    # Calculate the mean velocity field (averaged over the num_models) for each ensemble memember,
+    # calculate the root mean square difference for each ensemble memeber, and then get the mean
+    print(
+        np.mean(
+            np.sqrt(
+                ((10 ** F_val.mean(axis=1) - 10 ** F_pred.mean(axis=1)) ** 2).mean(
+                    axis=1
+                )
+            )
+        )
+    )
