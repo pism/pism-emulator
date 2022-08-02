@@ -31,6 +31,9 @@ import seaborn as sns
 
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
+from scipy.stats import pearsonr
+
+from tqdm import tqdm
 
 from pismemulator.nnemulator import (
     NNEmulator,
@@ -88,49 +91,84 @@ if __name__ == "__main__":
     n_samples = dataset.n_samples
 
     # Calculate the mean by looping over emulators
+    rmses = []
+    pearson_rs = []
+    for m in tqdm(range(len(F))):
+        print(f"Loading ensemble member {m}")
+        F_val = np.zeros((num_models, F.shape[1]))
+        F_pred = np.zeros((num_models, F.shape[1]))
+        for model_index in tqdm(range(0, num_models)):
 
-    F_val = np.zeros((num_models, F.shape[0], F.shape[1]))
-    F_pred = np.zeros((num_models, F.shape[0], F.shape[1]))
-    for model_index in range(0, num_models):
-        print(f"Loading emulator {model_index}")
-
-        emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
-        state_dict = torch.load(emulator_file)
-        e = NNEmulator(
-            state_dict["l_1.weight"].shape[1],
-            state_dict["V_hat"].shape[1],
-            state_dict["V_hat"],
-            state_dict["F_mean"],
-            state_dict["area"],
-            hparams,
-        )
-        e.load_state_dict(state_dict)
-        e.eval()
-
-        F_v = F.detach().numpy()
-        F_p = e(X, add_mean=True).detach().numpy()
-        F_val[model_index, ...] = F_v
-        F_pred[model_index, ...] = F_p
-
-        del F_v, F_p, e
-
-    # Calculate the mean velocity field (average over the number of ensmble members) for each emulator
-    # calculate the root meant square for each emulator, and then get the mean
-    print(
-        np.mean(
-            np.sqrt((10 ** F_val.mean(axis=0) - 10 ** F_pred.mean(axis=0)) ** 2).mean(
-                axis=1
+            emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
+            state_dict = torch.load(emulator_file)
+            e = NNEmulator(
+                state_dict["l_1.weight"].shape[1],
+                state_dict["V_hat"].shape[1],
+                state_dict["V_hat"],
+                state_dict["F_mean"],
+                state_dict["area"],
+                hparams,
             )
-        )
-    )
-    # Calculate the mean velocity field (averaged over the num_models) for each ensemble memember,
-    # calculate the root mean square difference for each ensemble memeber, and then get the mean
-    print(
-        np.mean(
+            e.load_state_dict(state_dict)
+            e.eval()
+
+            F_v = F[m].detach().numpy()
+            F_p = e(X[m], add_mean=True).detach().numpy()
+            F_val[:] = F_v
+            F_pred[:] = F_p
+
+        rmses.append(
             np.sqrt(
-                ((10 ** F_val.mean(axis=1) - 10 ** F_pred.mean(axis=1)) ** 2).mean(
-                    axis=1
-                )
+                ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
             )
         )
-    )
+        pearson_rs.append(pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0)))
+    rmse_mean = np.array(rmses).mean()
+    pearson_r_mean = np.array(pearson_rs).mean()
+    print(f"RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}")
+
+    # F_val = np.zeros((num_models, F.shape[0], F.shape[1]))
+    # F_pred = np.zeros((num_models, F.shape[0], F.shape[1]))
+    # for model_index in range(0, num_models):
+    #     print(f"Loading emulator {model_index}")
+
+    #     emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
+    #     state_dict = torch.load(emulator_file)
+    #     e = NNEmulator(
+    #         state_dict["l_1.weight"].shape[1],
+    #         state_dict["V_hat"].shape[1],
+    #         state_dict["V_hat"],
+    #         state_dict["F_mean"],
+    #         state_dict["area"],
+    #         hparams,
+    #     )
+    #     e.load_state_dict(state_dict)
+    #     e.eval()
+
+    #     F_v = F.detach().numpy()
+    #     F_p = e(X, add_mean=True).detach().numpy()
+    #     F_val[model_index, ...] = F_v
+    #     F_pred[model_index, ...] = F_p
+
+    #     del F_v, F_p, e
+
+    # # Calculate the mean velocity field (average over the number of ensemble members) for each emulator
+    # # calculate the root meant square for each emulator, and then get the mean
+    # print(
+    #     np.mean(
+    #         np.sqrt((10 ** F_val.mean(axis=0) - 10 ** F_pred.mean(axis=0)) ** 2).mean(
+    #             axis=1
+    #         )
+    #     )
+    # )
+    # # Calculate the mean velocity field (averaged over the num_models) for each ensemble memember,
+    # # calculate the root mean square difference for each ensemble memeber, and then get the mean
+    # print(
+    #     np.mean(
+    #         np.sqrt(
+    #             ((10 ** F_val.mean(axis=1) - 10 ** F_pred.mean(axis=1)) ** 2).mean(
+    #                 axis=1
+    #             )
+    #         )
+    #     )
+    # )
