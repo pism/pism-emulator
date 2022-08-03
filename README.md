@@ -1,13 +1,7 @@
 # pism-emulator
-
-<<<<<<< HEAD
-[![DOI](https://zenodo.org/badge/291851126.svg)](https://zenodo.org/badge/latestdoi/291851126)
-
-
-[![License: GPL-3.0](https://img.shields.io:/github/license/pism/pism-emulator)](https://opensource.org/licenses/GPL-3.0)
 =======
+
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6257002.svg)]( https://doi.org/10.5281/zenodo.6257002) [![License: GPL-3.0](https://img.shields.io:/github/license/pism/pism-emulator)](https://opensource.org/licenses/GPL-3.0)
->>>>>>> dev
 
 ## Introduction
 
