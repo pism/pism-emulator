@@ -57,4 +57,4 @@ No need to download large data sets. A low-resolution working example is provide
 
 ## References
 
-Aschwanden, A. and D. J. Brinkerhoff: Calibrated mass loss projections from the Greenland Ice Sheet (in prep.)
+Aschwanden, A. and D. J. Brinkerhoff: Calibrated mass loss projections from the Greenland Ice Sheet (revised)
