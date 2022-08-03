@@ -22,14 +22,12 @@ from argparse import ArgumentParser
 
 import numpy as np
 import os
-from os.path import join
+from os.path import isdir, join
 from scipy.stats import dirichlet
 import torch
 import pylab as plt
-import pandas as pd
-import seaborn as sns
+from matplotlib.colors import LogNorm
 
-from sklearn.metrics import mean_squared_error
 from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import r2_score
 from scipy.stats import pearsonr
@@ -41,6 +39,8 @@ from pismemulator.nnemulator import (
     PISMDataset,
     PISMDataModule,
 )
+from pismemulator.utils import plot_validation
+from pismemulator.utils import param_keys_dict as keys_dict
 
 if __name__ == "__main__":
     __spec__ = None
@@ -49,6 +49,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
+    parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
         "--samples_file",
         default="../data/samples/velocity_calibration_samples_lhs_100.csv",
@@ -69,6 +70,11 @@ if __name__ == "__main__":
     samples_file = args.samples_file
     target_file = args.target_file
     sample_size = args.sample_size
+    mode = args.mode
+    if mode == "train":
+        validation = False
+    else:
+        validation = True
 
     torch.manual_seed(0)
     rng = np.random.default_rng(2021)
@@ -94,8 +100,17 @@ if __name__ == "__main__":
     maes = []
     pearson_rs = []
     r2s = []
+
+    plot_glaciers = rng.choice(glaciers, size=4, replace=False)
+
+    cmap = "viridis"
+    fig, axs = plt.subplots(
+        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
+    )
+
+    k = 0
     for m in tqdm(glaciers):
-        print(f"Loading ensemble member {m}")
+        print(f"{k+1} of {len(glaciers)}: Loading ensemble member {m}")
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
         for model_index in tqdm(range(0, num_models)):
@@ -113,11 +128,11 @@ if __name__ == "__main__":
             e.load_state_dict(state_dict)
             e.eval()
 
+            X_val = X[m]
             F_v = F[m].detach().numpy()
-            F_p = e(X[m], add_mean=True).detach().numpy()
+            F_p = e(X_val, add_mean=True).detach().numpy()
             F_val[:] = F_v
             F_pred[:] = F_p
-
         rmse = np.sqrt(
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
@@ -132,56 +147,130 @@ if __name__ == "__main__":
             f"MAE={mae:.0f} m/yr, RMSE={rmse:.0f} m/yr, Pearson r={r[0]:.4f}, r2={r2:.4f}"
         )
 
+        if m in plot_glaciers:
+            print(k)
+            X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
+
+            F_val_2d = np.zeros((dataset.ny, dataset.nx))
+            F_val_2d.put(dataset.sparse_idx_1d, 10**F_val)
+
+            F_pred_2d = np.zeros((dataset.ny, dataset.nx))
+            F_pred_2d.put(dataset.sparse_idx_1d, 10**F_pred)
+
+            mask = np.logical_or(F_val_2d < 0.01, F_pred_2d < 0.01)
+            F_val_2d = np.ma.array(data=F_val_2d, mask=mask)
+            F_pred_2d = np.ma.array(data=F_pred_2d, mask=mask)
+
+            c1 = axs[0, k].imshow(
+                F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
+            )
+            axs[1, k].imshow(
+                F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
+            )
+            c2 = axs[2, k].imshow(
+                F_pred_2d - F_val_2d,
+                origin="lower",
+                vmin=-50,
+                vmax=50,
+                cmap="coolwarm",
+            )
+            axs[-1, k].text(
+                0.01,
+                0.0,
+                "\n".join(
+                    [
+                        f"{keys_dict[i]}: {j:.3f}"
+                        for i, j in zip(dataset.X_keys, X_val_unscaled)
+                    ]
+                ),
+                c="k",
+                size=7,
+                transform=axs[-1, k].transAxes,
+            )
+
+            axs[-1, k].text(
+                0.01,
+                0.75,
+                f"MAE: {mae:.0f} m/yr\nRMSE: {rmse:.0f} m/yr\nr$^2$: {r2:.3f}",
+                c="k",
+                size=7,
+                transform=axs[-1, k].transAxes,
+            )
+
+            axs[0, k].set_axis_off()
+            axs[1, k].set_axis_off()
+            axs[2, k].set_axis_off()
+            axs[-1, k].set_axis_off()
+
+            k += 1
+
     rmse_mean = np.sqrt((np.array(rmses) ** 2).mean())
     mae_mean = np.array(maes).mean()
     pearson_r_mean = np.array(pearson_rs).mean()
     r2_mean = np.array(r2s).mean()
+    print("\n\nFinal Score:\n=======================================================")
     print(
         f"MAE={mae_mean:.0f}m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
     )
+    print("\n")
+    axs[0, 0].text(
+        0.01,
+        0.98,
+        "PISM",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[0, 0].transAxes,
+    )
+    axs[1, 0].text(
+        0.01,
+        0.98,
+        "Emulator",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[1, 0].transAxes,
+    )
+    axs[2, 0].text(
+        0.01,
+        0.98,
+        "PISM-Emulator",
+        c="k",
+        size=7,
+        weight="bold",
+        transform=axs[2, 0].transAxes,
+    )
+    cb_ax = fig.add_axes([0.88, 0.65, 0.025, 0.15])
+    plt.colorbar(
+        c1,
+        cax=cb_ax,
+        shrink=0.9,
+        label="speed (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
+    cb_ax2 = fig.add_axes([0.88, 0.3, 0.025, 0.15])
+    plt.colorbar(
+        c2,
+        cax=cb_ax2,
+        shrink=0.9,
+        label="diff. (m/yr)",
+        orientation="vertical",
+        extend="both",
+    )
+    cb_ax.tick_params(labelsize=7)
+    cb_ax2.tick_params(labelsize=7)
+    fig.subplots_adjust(wspace=0.0, hspace=0.0)
 
-    # F_val = np.zeros((num_models, F.shape[0], F.shape[1]))
-    # F_pred = np.zeros((num_models, F.shape[0], F.shape[1]))
-    # for model_index in range(0, num_models):
-    #     print(f"Loading emulator {model_index}")
+    if validation:
+        mode = "val"
+    else:
+        mode = "train"
 
-    #     emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
-    #     state_dict = torch.load(emulator_file)
-    #     e = NNEmulator(
-    #         state_dict["l_1.weight"].shape[1],
-    #         state_dict["V_hat"].shape[1],
-    #         state_dict["V_hat"],
-    #         state_dict["F_mean"],
-    #         state_dict["area"],
-    #         hparams,
-    #     )
-    #     e.load_state_dict(state_dict)
-    #     e.eval()
+    fig_dir = f"{emulator_dir}/{mode}"
+    if not isdir(fig_dir):
+        mkdir(fig_dir)
 
-    #     F_v = F.detach().numpy()
-    #     F_p = e(X, add_mean=True).detach().numpy()
-    #     F_val[model_index, ...] = F_v
-    #     F_pred[model_index, ...] = F_p
-
-    #     del F_v, F_p, e
-
-    # # Calculate the mean velocity field (average over the number of ensemble members) for each emulator
-    # # calculate the root meant square for each emulator, and then get the mean
-    # print(
-    #     np.mean(
-    #         np.sqrt((10 ** F_val.mean(axis=0) - 10 ** F_pred.mean(axis=0)) ** 2).mean(
-    #             axis=1
-    #         )
-    #     )
-    # )
-    # # Calculate the mean velocity field (averaged over the num_models) for each ensemble memember,
-    # # calculate the root mean square difference for each ensemble memeber, and then get the mean
-    # print(
-    #     np.mean(
-    #         np.sqrt(
-    #             ((10 ** F_val.mean(axis=1) - 10 ** F_pred.mean(axis=1)) ** 2).mean(
-    #                 axis=1
-    #             )
-    #         )
-    #     )
-    # )
+    fig_name = join(fig_dir, f"speed_emulator_{mode}.pdf")
+    print(f"Saving to {fig_name}")
+    fig.savefig(fig_name)

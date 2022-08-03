@@ -30,7 +30,8 @@ import pylab as plt
 from SALib.sample import saltelli
 from scipy.stats.distributions import truncnorm, gamma, uniform, randint
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
 import sys
 import xarray as xr
 
@@ -186,148 +187,6 @@ def load_imbie(proj_start=2008):
     df[f"SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
 
     return df
-
-
-def plot_validation(
-    e,
-    dataset,
-    model_index,
-    emulator_dir,
-    validation=False,
-    return_fig=False,
-):
-    """
-    Plot target (PISM) and predicted (Emulator) speeds for validation
-    """
-    e.eval()
-    cmap = "viridis"
-    fig, axs = plt.subplots(
-        nrows=3, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
-    )
-    np.random.seed(4)
-    r_idx = np.random.choice(dataset.Y.shape[0], size=4, replace=False)
-    for k, idx in enumerate(r_idx):
-        X_val = dataset.X[idx]
-        F_val = dataset.Y[idx]
-        X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
-
-        F_val = F_val.detach().numpy()
-        F_pred = e(X_val, add_mean=True).detach().numpy()
-
-        F_val_2d = np.zeros((dataset.ny, dataset.nx))
-        F_val_2d.put(dataset.sparse_idx_1d, F_val)
-
-        F_pred_2d = np.zeros((dataset.ny, dataset.nx))
-        F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
-
-        F_v = np.ma.array(data=10**F_val_2d, mask=dataset.mask_2d)
-        F_p = np.ma.array(data=10**F_pred_2d, mask=dataset.mask_2d)
-        rmse = np.sqrt(mean_squared_error(F_p, F_v))
-        corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-        c1 = axs[0, k].imshow(
-            F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
-        )
-        axs[1, k].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
-        c2 = axs[2, k].imshow(
-            F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm"
-        )
-        axs[1, k].text(
-            0.01,
-            0.00,
-            f"r={corr:.3f}",
-            c="k",
-            size=7,
-            transform=axs[1, k].transAxes,
-        )
-        axs[-1, k].text(
-            0.01,
-            -0.51,
-            "\n".join(
-                [f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]
-            ),
-            c="k",
-            size=7,
-            transform=axs[-1, k].transAxes,
-        )
-
-        axs[2, k].text(
-            0.01,
-            0.00,
-            f"RMSE: {rmse:.0f} m/yr",
-            c="k",
-            size=7,
-            transform=axs[2, k].transAxes,
-        )
-
-        axs[0, k].set_axis_off()
-        axs[1, k].set_axis_off()
-        axs[2, k].set_axis_off()
-    axs[0, 0].text(
-        0.01,
-        0.98,
-        "PISM",
-        c="k",
-        size=7,
-        weight="bold",
-        transform=axs[0, 0].transAxes,
-    )
-    axs[1, 0].text(
-        0.01,
-        0.98,
-        "Emulator",
-        c="k",
-        size=7,
-        weight="bold",
-        transform=axs[1, 0].transAxes,
-    )
-    axs[2, 0].text(
-        0.01,
-        0.98,
-        "PISM-Emulator",
-        c="k",
-        size=7,
-        weight="bold",
-        transform=axs[2, 0].transAxes,
-    )
-
-    cb_ax = fig.add_axes([0.88, 0.525, 0.025, 0.15])
-    plt.colorbar(
-        c1,
-        cax=cb_ax,
-        shrink=0.9,
-        label="speed (m/yr)",
-        orientation="vertical",
-        extend="both",
-    )
-    cb_ax2 = fig.add_axes([0.88, 0.15, 0.025, 0.15])
-    plt.colorbar(
-        c2,
-        cax=cb_ax2,
-        shrink=0.9,
-        label="diff. (m/yr)",
-        orientation="vertical",
-        extend="both",
-    )
-    cb_ax.tick_params(labelsize=7)
-    cb_ax2.tick_params(labelsize=7)
-    fig.subplots_adjust(wspace=0.05, hspace=0.15)
-    if validation:
-        mode = "val"
-    else:
-        mode = "train"
-
-    fig_dir = f"{emulator_dir}/{mode}"
-    if not isdir(fig_dir):
-        mkdir(fig_dir)
-
-    fig_name = join(fig_dir, f"speed_emulator_{mode}_{model_index}.pdf")
-    print(f"Saving to {fig_name}")
-    fig.savefig(fig_name)
-
-    if return_fig:
-        return fig
-    else:
-        del fig
 
 
 def plot_compare(
