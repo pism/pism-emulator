@@ -30,6 +30,7 @@ import pandas as pd
 import seaborn as sns
 
 from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import r2_score
 from scipy.stats import pearsonr
 
@@ -40,8 +41,6 @@ from pismemulator.nnemulator import (
     PISMDataset,
     PISMDataModule,
 )
-from pismemulator.utils import plot_validation, kl_divergence
-
 
 if __name__ == "__main__":
     __spec__ = None
@@ -50,16 +49,15 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
-    parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
         "--samples_file",
-        default="../data/samples/velocity_calibration_samples_20_lhs.csv",
+        default="../data/samples/velocity_calibration_samples_lhs_100.csv",
     )
     parser.add_argument(
         "--target_file",
         default="../data/observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc",
     )
-    parser.add_argument("--train_size", type=float, default=1.0)
+    parser.add_argument("--sample_size", type=int, default=80)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -70,14 +68,10 @@ if __name__ == "__main__":
     num_models = args.num_models
     samples_file = args.samples_file
     target_file = args.target_file
-    train_size = args.train_size
-    mode = args.mode
-    if mode == "train":
-        validation = False
-    else:
-        validation = True
+    sample_size = args.sample_size
 
     torch.manual_seed(0)
+    rng = np.random.default_rng(2021)
 
     dataset = PISMDataset(
         data_dir=data_dir,
@@ -88,12 +82,19 @@ if __name__ == "__main__":
     )
     X = dataset.X
     F = dataset.Y
-    n_samples = dataset.n_samples
+    n_members = len(F)
+    if sample_size <= n_members:
+        glaciers = rng.choice(range(n_members), size=sample_size, replace=False)
+    else:
+        glaciers = range(n_members)
+    print(f"Glaciers selected: {glaciers}")
 
     # Calculate the mean by looping over emulators
     rmses = []
+    maes = []
     pearson_rs = []
-    for m in tqdm(range(len(F))):
+    r2s = []
+    for m in tqdm(glaciers):
         print(f"Loading ensemble member {m}")
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
@@ -117,15 +118,27 @@ if __name__ == "__main__":
             F_val[:] = F_v
             F_pred[:] = F_p
 
-        rmses.append(
-            np.sqrt(
-                ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
-            )
+        rmse = np.sqrt(
+            ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
-        pearson_rs.append(pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0)))
-    rmse_mean = np.array(rmses).mean()
+        mae = mean_absolute_error(10 ** F_pred.mean(axis=0), 10 ** F_val.mean(axis=0))
+        r = pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0))
+        r2 = r2_score(F_pred.mean(axis=0), F_val.mean(axis=0))
+        rmses.append(rmse)
+        maes.append(mae)
+        pearson_rs.append(r[0])
+        r2s.append(r2)
+        print(
+            f"MAE={mae:.0f} m/yr, RMSE={rmse:.0f} m/yr, Pearson r={r[0]:.4f}, r2={r2:.4f}"
+        )
+
+    rmse_mean = np.sqrt((np.array(rmses) ** 2).mean())
+    mae_mean = np.array(maes).mean()
     pearson_r_mean = np.array(pearson_rs).mean()
-    print(f"RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}")
+    r2_mean = np.array(r2s).mean()
+    print(
+        f"MAE={mae_mean:.0f}m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
+    )
 
     # F_val = np.zeros((num_models, F.shape[0], F.shape[1]))
     # F_pred = np.zeros((num_models, F.shape[0], F.shape[1]))
