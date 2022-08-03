@@ -17,6 +17,9 @@ from pismemulator.utils import load_imbie, load_imbie_csv
 from pismemulator.utils import param_keys_dict as keys_dict
 
 from scipy.interpolate import interp1d
+from scipy.stats import beta
+
+from scipy.stats.distributions import truncnorm, gamma, uniform, randint
 
 
 def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):
@@ -516,21 +519,23 @@ def plot_posterior_sle_pdfs(
     out_filename,
     df,
     observed=None,
+    rcps=[26, 45, 85],
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     years=[2020, 2100],
     ylim=None,
 ):
 
+    n_rcps = len(rcps)
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
     m_alphas = alphas[: len(ensembles)]
 
     fig, axs = plt.subplots(
-        6,
+        n_rcps * 2,
         2,
         sharex="col",
         figsize=[5.8, 4.2],
-        gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * 3),
+        gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * n_rcps),
     )
     fig.subplots_adjust(hspace=0.0, wspace=0)
     for k, rcp in enumerate(rcps):
@@ -646,6 +651,7 @@ def plot_posterior_sle_pdfs(
                             -1.5,
                             int(pctl * 100),
                             ha="center",
+                            fontsize=5,
                         )
 
         if observed is not None:
@@ -663,13 +669,27 @@ def plot_posterior_sle_pdfs(
             )
 
     for k, rcp in enumerate(rcps):
-        add_inner_title(axs[k * 2 + 1, 0], rcp_dict[rcp])
+        axs[k * 2, 0].text(
+            -0.125,
+            0.2,
+            rcp_dict[rcp],
+            transform=axs[k * 2, 0].transAxes,
+            fontsize=7,
+            fontweight="bold",
+            horizontalalignment="left",
+        )
 
     l_as19 = Patch(
         facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[0]),
         edgecolor="0.0",
         linewidth=0.25,
         label="Prior (AS19)",
+    )
+    l_ismip6 = Patch(
+        facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[0]),
+        edgecolor="0.0",
+        linewidth=0.25,
+        label="Prior (ISMIP6)",
     )
     l_flow = Patch(
         facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[1]),
@@ -689,12 +709,20 @@ def plot_posterior_sle_pdfs(
         linewidth=0.25,
         label="Posterior (Flow+Mass Calib.)",
     )
+    l_ismip6_calib = Patch(
+        facecolor=color_tint(rcp_col_dict[legend_rcp], alphas[2]),
+        edgecolor="0.0",
+        linewidth=0.25,
+        label="Posterior (ISMIP6 Calib.)",
+    )
 
     ens_label_dict = {
         "AS19": l_as19,
         "Flow Calib.": l_flow,
         "Mass Calib.": l_mass,
         "Flow+Mass Calib.": l_calib,
+        "ISMIP6": l_ismip6,
+        "ISMIP6 Calib.": l_ismip6_calib,
     }
 
     legend_1 = axs[-1, 0].legend(
@@ -928,9 +956,103 @@ def plot_posterior_sle_pdf(
 def plot_histograms(
     out_filename,
     df,
+    X_prior=None,
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    palette="cividis",
+    palette="binary",
 ):
+    m_flow_keys = [
+        "SIAE",
+        "PPQ",
+        "TEFO",
+        "SSAN",
+        "ZMIN",
+        "ZMAX",
+        "PHIMIN",
+        "PHIMAX",
+    ]
+    m_star_keys = ["GCM", "RFR", "FICE", "FSNOW", "PRS", "OCM", "OCS", "TCT", "VCM"]
+    m_keys = m_flow_keys + m_star_keys
+    m_as19_df = df[df["Ensemble"] == "AS19"][m_keys]
+    m_flow_df = df[df["Ensemble"] == "Flow Calib."][m_flow_keys]
+    m_mass_df = df[df["Ensemble"] == "Flow+Mass Calib."][m_keys]
+
+    print(m_as19_df.median())
+    print(m_flow_df.median())
+    print(m_mass_df.median())
+
+    p_dict = {
+        "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 11)},
+        "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 11)},
+        "TEFO": {"axs": [0, 2], "bins": np.linspace(0.005, 0.035, 11)},
+        "SSAN": {"axs": [0, 3], "bins": np.linspace(3.0, 3.5, 11)},
+        "ZMIN": {"axs": [1, 0], "bins": np.linspace(-1000, 0, 11)},
+        "ZMAX": {"axs": [1, 1], "bins": np.linspace(0, 1000, 11)},
+        "PHIMIN": {"axs": [1, 2], "bins": np.linspace(5, 15, 11)},
+        "PHIMAX": {"axs": [1, 3], "bins": np.linspace(40, 45, 11)},
+        "GCM": {
+            "axs": [4, 0],
+            "bins": [-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
+            "dist": randint(0, 4),
+        },
+        "PRS": {
+            "axs": [4, 1],
+            "bins": np.linspace(5, 7, 11),
+            "dist": uniform(loc=5, scale=2),
+        },
+        "FICE": {
+            "axs": [3, 1],
+            "bins": np.linspace(4, 12, 11),
+            "dist": truncnorm(-4 / 4.0, 4.0 / 4, loc=8, scale=4),
+        },
+        "FSNOW": {
+            "axs": [3, 0],
+            "bins": np.linspace(2, 6, 11),
+            "dist": truncnorm(-4.1 / 3, 4.1 / 3, loc=4.1, scale=1.5),
+        },
+        "RFR": {
+            "axs": [3, 2],
+            "bins": np.linspace(0.2, 0.8, 16),
+            "dist": truncnorm(-0.4 / 0.3, 0.4 / 0.3, loc=0.5, scale=0.2),
+        },
+        "OCM": {
+            "axs": [2, 0],
+            "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+            "dist": randint(-1, 2),
+        },
+        "OCS": {
+            "axs": [2, 1],
+            "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+            "dist": randint(-1, 2),
+        },
+        "TCT": {
+            "axs": [2, 2],
+            "bins": [-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
+            "dist": randint(-1, 2),
+        },
+        "VCM": {
+            "axs": [2, 3],
+            "bins": np.linspace(0.75, 1.25, 11),
+            "dist": truncnorm(-0.35 / 0.2, 0.35 / 0.2, loc=1, scale=0.2),
+        },
+    }
+
+    if X_prior is not None:
+        X = X_prior[m_flow_keys]
+        X_mean = X.mean(axis=0)
+        X_std = X.std(axis=0)
+        X_keys = X_prior.keys()
+
+        n_samples, n_parameters = X.shape
+
+        X_min = (((X.min(axis=0) - X_mean) / X_std - 1e-3) * X_std + X_mean).values
+        X_max = (((X.max(axis=0) - X_mean) / X_std + 1e-3) * X_std + X_mean).values
+
+        alpha_b = 3.0
+        beta_b = 3.0
+        X_prior_b = (
+            beta.rvs(alpha_b, beta_b, size=(100000, n_parameters)) * (X_max - X_min)
+            + X_min
+        )
 
     fig, axs = plt.subplots(
         5,
@@ -941,281 +1063,82 @@ def plot_histograms(
 
     cmap = sns.color_palette(palette, n_colors=3)
 
-    xmin, xmax = 1, 4
-    sns.histplot(
-        data=df,
-        x="SIAE",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        bins=np.linspace(xmin, xmax, 16),
-        palette=palette,
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 0],
-        legend=False,
-    )
-    # axs[0, 0].set_xlim(xmin, xmax)
-    xmin, xmax = 0.1, 0.9
-    sns.histplot(
-        data=df,
-        x="PPQ",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 1],
-        legend=False,
-    )
-    # axs[0, 1].set_xlim(xmin, xmax)
+    for key in p_dict.keys():
+        m_axs = p_dict[key]["axs"]
+        m_bins = p_dict[key]["bins"]
 
-    xmin, xmax = 0.005, 0.035
-    sns.histplot(
-        data=df,
-        x="TEFO",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 2],
-        legend=False,
-    )
-    # axs[0, 2].set_xlim(xmin, xmax)
+        sns.histplot(
+            data=df,
+            x=key,
+            hue="Ensemble",
+            hue_order=ensembles,
+            common_norm=False,
+            bins=m_bins,
+            palette=palette,
+            stat="density",
+            multiple="dodge",
+            alpha=0.8,
+            linewidth=0.2,
+            ax=axs[m_axs[0], m_axs[1]],
+            legend=False,
+        )
+        if key not in ["GCM", "OCM", "OCS", "TCT"]:
+            sns.kdeplot(
+                data=df,
+                x=key,
+                hue="Ensemble",
+                hue_order=ensembles,
+                clip=[m_bins[0], m_bins[-1]],
+                common_norm=False,
+                warn_singular=False,
+                palette=palette,
+                linewidth=lw * 1.25,
+                ax=axs[m_axs[0], m_axs[1]],
+                legend=False,
+            )
+        if (X_prior_b is not None) and (key in m_flow_keys):
+            X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_flow_keys)
+            X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
+            b = 0.5 * (b[1:] + b[:-1])
 
-    xmin, xmax = 3.0, 3.5
-    sns.histplot(
-        data=df,
-        x="SSAN",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[0, 3],
-        legend=False,
-    )
-    # axs[0, 3].set_xlim(xmin, xmax)
+            axs[m_axs[0], m_axs[1]].plot(
+                b,
+                X_prior_hist,
+                color="k",
+                linewidth=lw,
+                linestyle="dashed",
+            )
+        elif (X_prior_b is not None) and (key in m_star_keys):
 
-    xmin, xmax = -1000, 0
-    sns.histplot(
-        data=df,
-        x="ZMIN",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 0],
-        legend=False,
-    )
-    # axs[1, 0].set_xlim(xmin, xmax)
-
-    xmin, xmax = 0, 1000
-    sns.histplot(
-        data=df,
-        x="ZMAX",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 1],
-        legend=False,
-    )
-    # axs[1, 1].set_xlim(xmin, xmax)
-
-    xmin, xmax = 5, 15
-    sns.histplot(
-        data=df,
-        x="PHIMIN",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 2],
-        legend=False,
-    )
-    # axs[1, 2].set_xlim(xmin, xmax)
-
-    xmin, xmax = 40, 45
-    sns.histplot(
-        data=df,
-        x="PHIMAX",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[1, 3],
-        legend=False,
-    )
-    # axs[1, 3].set_xlim(xmin, xmax)
-
-    sns.histplot(
-        data=df,
-        x="GCM",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-0.25, 0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        legend=False,
-        ax=axs[2, 0],
-    )
-
-    xmin, xmax = 5, 7
-    sns.histplot(
-        data=df,
-        x="PRS",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[2, 1],
-        legend=False,
-    )
-    # axs[2, 1].set_xlim(xmin, xmax)
-
-    xmin, xmax = 4, 12
-    sns.histplot(
-        data=df,
-        x="FICE",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[2, 2],
-        legend=False,
-    )
-    # axs[2, 2].set_xlim(xmin, xmax)
-
-    xmin, xmax = 2, 6
-    sns.histplot(
-        data=df,
-        x="FSNOW",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[2, 3],
-        legend=False,
-    )
-    # axs[2, 3].set_xlim(xmin, xmax)
-
-    xmin, xmax = 0.2, 0.8
-    sns.histplot(
-        data=df,
-        x="RFR",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(xmin, xmax, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 0],
-        legend=False,
-    )
-    # axs[3, 0].set_xlim(xmin, xmax)
-
-    sns.histplot(
-        data=df,
-        x="OCM",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 1],
-        legend=False,
-    )
-
-    sns.histplot(
-        data=df,
-        x="OCS",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 2],
-        legend=False,
-    )
-    sns.histplot(
-        data=df,
-        x="TCT",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=[-1.25, -0.75, -0.25, 0.25, 0.75, 1.25],
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[3, 3],
-        legend=False,
-    )
-    sns.histplot(
-        data=df,
-        x="VCM",
-        hue="Ensemble",
-        hue_order=ensembles,
-        common_norm=False,
-        palette=palette,
-        bins=np.linspace(0.75, 1.25, 16),
-        stat="density",
-        multiple="dodge",
-        linewidth=0.25,
-        ax=axs[4, 0],
-        legend=False,
-    )
+            X_prior_b = X_prior[m_star_keys]
+            X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_star_keys)
+            X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
+            b = 0.5 * (b[1:] + b[:-1])
+            if key not in ["GCM", "OCM", "OCS", "TCT"]:
+                axs[m_axs[0], m_axs[1]].plot(
+                    b,
+                    X_prior_hist,
+                    color="k",
+                    linewidth=lw,
+                    linestyle="dashed",
+                )
+            else:
+                axs[m_axs[0], m_axs[1]].plot(
+                    b[::2],
+                    X_prior_hist[::2],
+                    "s",
+                    color="k",
+                )
+        else:
+            pass
+        # if (X_prior_b is not None) and (key in m_star_keys):
+        #     axs[m_axs[0], m_axs[1]].plot(
+        #         [0, 1],
+        #         [0.5, 0.5],
+        #         color="k",
+        #         lw=lw,
+        #         transform=axs[m_axs[0], m_axs[1]].transAxes,
+        #     )
 
     handles = [
         Patch(
@@ -1226,12 +1149,26 @@ def plot_histograms(
         )
         for k, ens in enumerate(ensembles)
     ]
+    if X_prior_b is not None:
+        l_p = Line2D(
+            [],
+            [],
+            c="k",
+            lw=lw,
+            ls="dashed",
+            label="Prior",
+        )
 
-    legend_1 = axs[4, 1].legend(handles=handles, loc="lower left")
+        handles.append(l_p)
+    legend_1 = axs[4, 2].legend(
+        handles=handles,
+        loc="lower left",
+        bbox_to_anchor=(0, -0.2),
+    )
     legend_1.get_frame().set_linewidth(0.0)
     legend_1.get_frame().set_alpha(0.0)
 
-    axs[4, 1].set_axis_off()
+    axs[3, 3].set_axis_off()
     axs[4, 2].set_axis_off()
     axs[4, 3].set_axis_off()
 
@@ -1252,8 +1189,11 @@ def plot_histograms(
         key = ax.get_xlabel()
         if key != "":
             ax.set_xlabel(keys_dict[key])
+            # ax.text(0, 0.9, keys_dict[key],
+            #         transform=ax.transAxes,
+            #         )
 
-    # fig.tight_layout()
+    fig.tight_layout()
     fig.savefig(out_filename)
     plt.close(fig)
 
@@ -1263,19 +1203,22 @@ def plot_prior_histograms(out_filename, df):
     return None
 
 
-def load_df(respone_file, samples_file):
+def load_df(respone_file, samples_file, return_samples=False):
 
     response = pd.read_csv(respone_file)
     response["SLE (cm)"] = -response["Mass (Gt)"] / 362.5 / 10
     response = response.astype({"RCP": int})
     samples = pd.read_csv(samples_file).rename(columns={"id": "Experiment"})
-    return pd.merge(response, samples, on="Experiment")
+    if return_samples:
+        return pd.merge(response, samples, on="Experiment"), samples
+    else:
+        return pd.merge(response, samples, on="Experiment")
 
 
 def resample_ensemble_by_data(
     observed,
     simulated,
-    rcps,
+    rcps=[26, 45, 85],
     calibration_start=2010,
     calibration_end=2020,
     fudge_factor=3,
@@ -1453,18 +1396,24 @@ palette_dict = {
     "Flow Calib.": "#31a354",
     "Mass Calib.": "#2c7fb8",
     "Flow+Mass Calib.": "0.0",
+    "ISMIP6": "#c51b8a",
+    "ISMIP6 Calib.": "0.0",
 }
 ts_fill_palette_dict = {
     "AS19": "0.80",
     "Flow Calib.": "0.70",
     "Mass Calib.": "#fee6ce",
     "Flow+Mass Calib.": "0.60",
+    "ISMIP6": "0.80",
+    "ISMIP6 Calib.": "0.60",
 }
 ts_median_palette_dict = {
     "AS19": "0.6",
     "Flow Calib.": "0.3",
     "Mass Calib.": "#e6550d",
     "Flow+Mass Calib.": "0.0",
+    "ISMIP6": "0.6",
+    "ISMIP6 Calib.": "0.0",
 }
 
 calibration_start = 2010
@@ -1537,17 +1486,17 @@ if __name__ == "__main__":
     # Load AS19 (original LES)
     as19 = load_df(options.as19_results_file, options.as19_samples_file)
     # Load AS19 (with calibrated ice dynamics)
-    calib = load_df(options.calibrated_results_file, options.calibrated_samples_file)
+    calib, calib_samples = load_df(
+        options.calibrated_results_file,
+        options.calibrated_samples_file,
+        return_samples=True,
+    )
 
+    ismip6 = pd.read_csv("ismip6_gis_ctrl.csv.gz")
     # Bayesian calibration: resampling
-    as19_resampled = resample_ensemble_by_data(observed, as19, rcps)
-    as19_calib_resampled = resample_ensemble_by_data(observed, calib, rcps)
-    # as19_calib_resampled_100, _ = resample_ensemble_by_data(
-    #     observed, calib, rcps, n_samples=100
-    # )
-    # as19_calib_resampled_2500, _ = resample_ensemble_by_data(
-    #     observed, calib, rcps, n_samples=2500
-    # )
+    as19_resampled = resample_ensemble_by_data(observed, as19)
+    as19_calib_resampled = resample_ensemble_by_data(observed, calib)
+
     as19["Ensemble"] = "AS19"
     calib["Ensemble"] = "Flow Calib."
     as19_resampled["Ensemble"] = "Mass Calib."
@@ -1569,9 +1518,13 @@ if __name__ == "__main__":
     year = 2100
     all_2100_df = all_df[(all_df["Year"] == year)]
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
-    q_df = make_quantile_df(all_2100_df, quantiles)
 
-    plot_histograms("marginal_posteriors_all.pdf", all_2100_df)
+    plot_histograms(
+        "marginal_posteriors_all.pdf",
+        all_2100_df,
+        X_prior=calib_samples,
+        ensembles=["Flow Calib.", "Flow+Mass Calib."],
+    )
 
     plot_partitioning(
         "historical_partitioning_calibrated.pdf", simulated=all_df, observed=observed_f
@@ -1608,26 +1561,49 @@ if __name__ == "__main__":
         years=years,
     )
 
+    q_df = make_quantile_df(all_2100_df, quantiles)
     make_quantile_table(q_df, quantiles=quantiles)
 
-    q_df["90%"] = q_df[0.95] - q_df[0.05]
-    q_df["68%"] = q_df[0.84] - q_df[0.16]
-    q_df.astype({"90%": np.float32, "68%": np.float32})
+    y_abs_dfs = []
+    y_rel_dfs = []
+    for year in [2020, 2100]:
+        q_df = make_quantile_df(all_df[(all_df["Year"] == year)], quantiles)
+        q_df["90%"] = q_df[0.95] - q_df[0.05]
+        q_df["68%"] = q_df[0.84] - q_df[0.16]
+        q_df.astype({"90%": np.float32, "68%": np.float32})
 
-    q_abs = q_df[q_df["Ensemble"] == "Flow+Mass Calib."][
-        ["90%", "68%", 0.5]
-    ].reset_index(drop=True) - q_df[q_df["Ensemble"] == "AS19"][
-        ["90%", "68%", 0.5]
-    ].reset_index(
-        drop=True
-    )
+        q_abs_dfs = []
+        q_rel_dfs = []
+        for a, b in zip(
+            ["Flow Calib.", "Flow+Mass Calib.", "Flow+Mass Calib."],
+            ["AS19", "Flow Calib.", "AS19"],
+        ):
+            q_abs = q_df[q_df["Ensemble"] == a][["90%", "68%", 0.5]].reset_index(
+                drop=True
+            ) - q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(drop=True)
 
-    q_rel = (
-        q_abs
-        / q_df[q_df["Ensemble"] == "AS19"][["90%", "68%", 0.5]].reset_index(drop=True)
-        * 100
-    )
+            q_rel = (
+                q_abs
+                / q_df[q_df["Ensemble"] == b][["90%", "68%", 0.5]].reset_index(
+                    drop=True
+                )
+                * 100
+            )
 
-    q_abs["RCP"] = rcpss
-    q_rel["RCP"] = rcpss
-    print(q_rel)
+            q_abs["Difference"] = f"{a} - {b}"
+            q_abs["RCP"] = rcpss
+            q_rel["Difference"] = f"{a} - {b}"
+            q_rel["RCP"] = rcpss
+            q_abs_dfs.append(q_abs)
+            q_rel_dfs.append(q_rel)
+
+        q_abs_df = pd.concat(q_abs_dfs)
+        q_rel_df = pd.concat(q_rel_dfs)
+        q_abs_df["Year"] = year
+        q_rel_df["Year"] = year
+
+        y_abs_dfs.append(q_abs_df)
+        y_rel_dfs.append(q_rel_df)
+
+    quantiles_abs_df = pd.concat(y_abs_dfs).round(2)
+    quantiles_rel_df = pd.concat(y_rel_dfs).round(2)

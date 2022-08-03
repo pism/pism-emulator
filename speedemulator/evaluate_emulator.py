@@ -25,12 +25,22 @@ import os
 from os.path import join
 from scipy.stats import dirichlet
 import torch
+import pylab as plt
+import pandas as pd
+import seaborn as sns
 
 from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import r2_score
+from scipy.stats import pearsonr
 
-from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
-from pismemulator.utils import plot_validation
+from tqdm import tqdm
 
+from pismemulator.nnemulator import (
+    NNEmulator,
+    PISMDataset,
+    PISMDataModule,
+)
 
 if __name__ == "__main__":
     __spec__ = None
@@ -41,14 +51,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_models", type=int, default=50)
     parser.add_argument(
         "--samples_file",
-        default="../data/samples/velocity_calibration_samples_20_lhs.csv",
+        default="../data/samples/velocity_calibration_samples_lhs_100.csv",
     )
     parser.add_argument(
         "--target_file",
         default="../data/observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc",
     )
-    parser.add_argument("--train_size", type=float, default=1.0)
-    parser.add_argument("--thinning_factor", type=int, default=1)
+    parser.add_argument("--sample_size", type=int, default=80)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -59,10 +68,10 @@ if __name__ == "__main__":
     num_models = args.num_models
     samples_file = args.samples_file
     target_file = args.target_file
-    train_size = args.train_size
-    thinning_factor = args.thinning_factor
+    sample_size = args.sample_size
 
     torch.manual_seed(0)
+    rng = np.random.default_rng(2021)
 
     dataset = PISMDataset(
         data_dir=data_dir,
@@ -73,61 +82,106 @@ if __name__ == "__main__":
     )
     X = dataset.X
     F = dataset.Y
-    n_samples = dataset.n_samples
+    n_members = len(F)
+    if sample_size <= n_members:
+        glaciers = rng.choice(range(n_members), size=sample_size, replace=False)
+    else:
+        glaciers = range(n_members)
+    print(f"Glaciers selected: {glaciers}")
 
-    for model_index in range(0, num_models):
-        print(f"Loading emulator {model_index}")
-        np.random.seed(model_index)
+    # Calculate the mean by looping over emulators
+    rmses = []
+    maes = []
+    pearson_rs = []
+    r2s = []
+    for m in tqdm(glaciers):
+        print(f"Loading ensemble member {m}")
+        F_val = np.zeros((num_models, F.shape[1]))
+        F_pred = np.zeros((num_models, F.shape[1]))
+        for model_index in tqdm(range(0, num_models)):
 
-        omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
-        omegas = omegas.type_as(X)
-        omegas_0 = torch.ones_like(omegas) / len(omegas)
+            emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
+            state_dict = torch.load(emulator_file)
+            e = NNEmulator(
+                state_dict["l_1.weight"].shape[1],
+                state_dict["V_hat"].shape[1],
+                state_dict["V_hat"],
+                state_dict["F_mean"],
+                state_dict["area"],
+                hparams,
+            )
+            e.load_state_dict(state_dict)
+            e.eval()
 
-        data_loader = PISMDataModule(
-            X,
-            F,
-            omegas,
-            omegas_0,
+            F_v = F[m].detach().numpy()
+            F_p = e(X[m], add_mean=True).detach().numpy()
+            F_val[:] = F_v
+            F_pred[:] = F_p
+
+        rmse = np.sqrt(
+            ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
+        )
+        mae = mean_absolute_error(10 ** F_pred.mean(axis=0), 10 ** F_val.mean(axis=0))
+        r = pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0))
+        r2 = r2_score(F_pred.mean(axis=0), F_val.mean(axis=0))
+        rmses.append(rmse)
+        maes.append(mae)
+        pearson_rs.append(r[0])
+        r2s.append(r2)
+        print(
+            f"MAE={mae:.0f} m/yr, RMSE={rmse:.0f} m/yr, Pearson r={r[0]:.4f}, r2={r2:.4f}"
         )
 
-        data_loader.prepare_data(q=16)
-        data_loader.setup(stage="fit")
-        F_mean = data_loader.F_mean
+    rmse_mean = np.sqrt((np.array(rmses) ** 2).mean())
+    mae_mean = np.array(maes).mean()
+    pearson_r_mean = np.array(pearson_rs).mean()
+    r2_mean = np.array(r2s).mean()
+    print(
+        f"MAE={mae_mean:.0f}m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
+    )
 
-        emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
-        state_dict = torch.load(emulator_file)
-        e = NNEmulator(
-            state_dict["l_1.weight"].shape[1],
-            state_dict["V_hat"].shape[1],
-            state_dict["V_hat"],
-            state_dict["F_mean"],
-            state_dict["area"],
-            hparams,
-        )
-        e.load_state_dict(state_dict)
-        e.eval()
+    # F_val = np.zeros((num_models, F.shape[0], F.shape[1]))
+    # F_pred = np.zeros((num_models, F.shape[0], F.shape[1]))
+    # for model_index in range(0, num_models):
+    #     print(f"Loading emulator {model_index}")
 
-        plot_validation(e, F_mean, dataset, data_loader, model_index, emulator_dir, validation=True)
+    #     emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
+    #     state_dict = torch.load(emulator_file)
+    #     e = NNEmulator(
+    #         state_dict["l_1.weight"].shape[1],
+    #         state_dict["V_hat"].shape[1],
+    #         state_dict["V_hat"],
+    #         state_dict["F_mean"],
+    #         state_dict["area"],
+    #         hparams,
+    #     )
+    #     e.load_state_dict(state_dict)
+    #     e.eval()
 
-        for idx in range(len(data_loader.all_data)):
-            (
-                X_val,
-                F_val,
-                _,
-                _,
-            ) = data_loader.all_data[idx]
+    #     F_v = F.detach().numpy()
+    #     F_p = e(X, add_mean=True).detach().numpy()
+    #     F_val[model_index, ...] = F_v
+    #     F_pred[model_index, ...] = F_p
 
-            F_val = (F_val + F_mean).detach().numpy()
-            F_pred = e(X_val, add_mean=True).detach().numpy()
+    #     del F_v, F_p, e
 
-            F_val_2d = np.zeros((dataset.ny, dataset.nx))
-            F_val_2d.put(dataset.sparse_idx_1d, F_val)
-
-            F_pred_2d = np.zeros((dataset.ny, dataset.nx))
-            F_pred_2d.put(dataset.sparse_idx_1d, F_pred)
-
-            F_p = np.ma.array(data=10 ** F_pred_2d, mask=dataset.mask_2d)
-            F_v = np.ma.array(data=10 ** F_val_2d, mask=dataset.mask_2d)
-            rmse = np.sqrt(mean_squared_error(F_p, F_v))
-            corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
-            print(model_index, idx, rmse, corr)
+    # # Calculate the mean velocity field (average over the number of ensemble members) for each emulator
+    # # calculate the root meant square for each emulator, and then get the mean
+    # print(
+    #     np.mean(
+    #         np.sqrt((10 ** F_val.mean(axis=0) - 10 ** F_pred.mean(axis=0)) ** 2).mean(
+    #             axis=1
+    #         )
+    #     )
+    # )
+    # # Calculate the mean velocity field (averaged over the num_models) for each ensemble memember,
+    # # calculate the root mean square difference for each ensemble memeber, and then get the mean
+    # print(
+    #     np.mean(
+    #         np.sqrt(
+    #             ((10 ** F_val.mean(axis=1) - 10 ** F_pred.mean(axis=1)) ** 2).mean(
+    #                 axis=1
+    #             )
+    #         )
+    #     )
+    # )

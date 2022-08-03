@@ -71,7 +71,8 @@ if __name__ == "__main__":
     X_std = samples.std(axis=0)
     X_keys = samples.keys()
 
-    n_samples, n_parameters = X.shape
+    n_samples = int(X.shape[0])
+    n_parameters = int(X.shape[1])
 
     X_min = (((X.min(axis=0) - X_mean) / X_std - 1e-3) * X_std + X_mean).values
     X_max = (((X.max(axis=0) - X_mean) / X_std + 1e-3) * X_std + X_mean).values
@@ -105,9 +106,15 @@ if __name__ == "__main__":
     posterior_df = pd.concat(X_list)
 
     X_posterior = posterior_df.drop(columns=["Model"]).values
+
+    print("P16", np.percentile(X_posterior, 16, axis=0))
+    print("P50", np.percentile(X_posterior, 50, axis=0))
+    print("P84", np.percentile(X_posterior, 84, axis=0))
+
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
 
+<<<<<<< HEAD
     prior_df = pd.DataFrame(data=X_prior, columns=X_keys)
 
     fig, axs = plt.subplots(nrows=2, ncols=int(n_parameters / 2), figsize=(5.4, 2.4))
@@ -130,6 +137,29 @@ if __name__ == "__main__":
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
     fig.savefig("prior_posterior.pdf")
+=======
+    # fig, axs = plt.subplots(nrows=2, ncols=int(n_parameters / 2), figsize=(5.4, 2.8))
+    # fig.subplots_adjust(hspace=0.0, wspace=0.0)
+    # for i in range(n_parameters):
+    #     min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
+    #     max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
+    #     bins = np.linspace(min_val, max_val, 30)
+    #     X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
+    #     X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
+    #     b = 0.5 * (b[1:] + b[:-1])
+    #     axs[i].plot(
+    #         b,
+    #         X_model_posterior_hist * 0.5,
+    #         color="0.5",
+    #         linewidth=lw * 0.25,
+    #         linestyle="solid",
+    #         alpha=0.5,
+    #     )
+
+    # figfile = f"{emulator_dir}/posterior.pdf"
+    # print(f"Saving figure to {figfile}")
+    # fig.savefig(figfile)
+>>>>>>> dev
 
     fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(5.4, 5.6))
     fig.subplots_adjust(hspace=0.0, wspace=0.0)
@@ -249,7 +279,14 @@ if __name__ == "__main__":
                     linestyle="solid",
                     label="Posterior",
                 )
+                print(X_keys[i], p16, p50, p84)
+                p16 = np.percentile(X_posterior[:, i], 16)
+                p50 = np.percentile(X_posterior[:, i], 50)
+                p84 = np.percentile(X_posterior[:, i], 84)
 
+                axs[i, j].axvline(p16, color="black", lw=0.5, ls="dotted")
+                axs[i, j].axvline(p84, color="black", lw=0.5, ls="dotted")
+                axs[i, j].axvline(p50, color="black", lw=1.0, ls="dotted")
                 axs[i, j].set_xlim(min_val, max_val)
 
             else:

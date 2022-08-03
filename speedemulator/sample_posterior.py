@@ -106,9 +106,10 @@ class MALASampler(object):
             H = torch.stack(
                 [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
             )
-            lamda, Q = torch.eig(H, eigenvectors=True)
-            lamda_prime = torch.sqrt(lamda[:, 0] ** 2 + eps)
-            lamda_prime_inv = 1.0 / torch.sqrt(lamda[:, 0] ** 2 + eps)
+            lamda, Q = torch.linalg.eig(H)
+            lamda, Q = lamda.type(torch.float), Q.type(torch.float)
+            lamda_prime = torch.sqrt(lamda**2 + eps)
+            lamda_prime_inv = 1.0 / torch.sqrt(lamda**2 + eps)
             H = Q @ torch.diag(lamda_prime) @ Q.T
             Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
             log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
@@ -222,13 +223,6 @@ class MALASampler(object):
                 print("Saving samples for model {0}".format(model_index))
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
-                np.save(
-                    open(
-                        posterior_dir + "X_posterior_model_{0}.npy".format(model_index),
-                        "wb",
-                    ),
-                    X_posterior.astype("float32"),
-                )
                 df = pd.DataFrame(
                     data=X_posterior.astype("float32") * dataset.X_std.cpu().numpy()
                     + dataset.X_mean.cpu().numpy(),
@@ -280,6 +274,7 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
+        target_corr_threshold=0,
     )
 
     X = dataset.X
@@ -307,11 +302,16 @@ if __name__ == "__main__":
 
     nu = 1.0
 
-    sigma = 10
-    rho = 1.0 / (1e4 ** 2)
+    if dataset.target_has_error:
+        sigma = dataset.Y_target_error
+        sigma[sigma < 10] = 10
+    else:
+        sigma = 10
+
+    rho = 1.0 / (1e4**2)
     point_area = (dataset.grid_resolution * thinning_factor) ** 2
     K = point_area * rho
-    sigma_hat = np.sqrt(sigma ** 2 / K ** 2)
+    sigma_hat = np.sqrt(sigma**2 / K**2)
 
     # Eq 52
     # this is 2.0 in the paper
