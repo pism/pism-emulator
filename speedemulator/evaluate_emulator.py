@@ -39,7 +39,7 @@ from pismemulator.nnemulator import (
     PISMDataset,
     PISMDataModule,
 )
-from pismemulator.utils import plot_validation
+
 from pismemulator.utils import param_keys_dict as keys_dict
 
 if __name__ == "__main__":
@@ -98,6 +98,7 @@ if __name__ == "__main__":
     # Calculate the mean by looping over emulators
     rmses = []
     maes = []
+    mbes = []
     pearson_rs = []
     r2s = []
 
@@ -137,14 +138,16 @@ if __name__ == "__main__":
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
         mae = mean_absolute_error(10 ** F_pred.mean(axis=0), 10 ** F_val.mean(axis=0))
+        mbe = (10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)).mean()
         r = pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0))
         r2 = r2_score(F_pred.mean(axis=0), F_val.mean(axis=0))
         rmses.append(rmse)
         maes.append(mae)
+        mbes.append(mbe)
         pearson_rs.append(r[0])
         r2s.append(r2)
         print(
-            f"MAE={mae:.0f} m/yr, RMSE={rmse:.0f} m/yr, Pearson r={r[0]:.4f}, r2={r2:.4f}"
+            f"MAE={mae:.2f} m/yr, MBE={mbe:.2f} m/yr, RMSE={rmse:.0f} m/yr, Pearson r={r[0]:.4f}, r2={r2:.4f}"
         )
 
         if m in plot_glaciers:
@@ -191,7 +194,7 @@ if __name__ == "__main__":
             axs[-1, k].text(
                 0.01,
                 0.75,
-                f"MAE: {mae:.0f} m/yr\nRMSE: {rmse:.0f} m/yr\nr$^2$: {r2:.3f}",
+                f"MAE = {mae:.1f} m/yr\nMBE = {mbe:.1f} m/yr\nRMSE = {rmse:.0f} m/yr\nr = {r2:.3f}",
                 c="k",
                 size=7,
                 transform=axs[-1, k].transAxes,
@@ -204,13 +207,14 @@ if __name__ == "__main__":
 
             k += 1
 
-    rmse_mean = np.sqrt((np.array(rmses) ** 2).mean())
+    rmse_mean = np.array(rmses).mean()
     mae_mean = np.array(maes).mean()
+    mbe_mean = np.array(mbes).mean()
     pearson_r_mean = np.array(pearson_rs).mean()
     r2_mean = np.array(r2s).mean()
     print("\n\nFinal Score:\n=======================================================")
     print(
-        f"MAE={mae_mean:.0f}m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
+        f"MAE={mae_mean:.2f}m/yr, MBE={mbe_mean:.2f} m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
     )
     print("\n")
     axs[0, 0].text(

@@ -31,7 +31,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 from pismemulator.nnemulator import NNEmulator, PISMDataset, PISMDataModule
-from pismemulator.utils import plot_eigenglaciers, plot_validation
+from pismemulator.utils import plot_eigenglaciers
 
 
 if __name__ == "__main__":
@@ -150,5 +150,3 @@ if __name__ == "__main__":
 
     trainer.fit(e, train_loader, val_loader)
     torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
-
-    plot_validation(e, dataset, model_index, emulator_dir)
