@@ -31,7 +31,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 from pismemulator.nnemulator import PISMDataset, PISMDataModule
-from pismemulator.nnemulator import NNEmulator as NNEmulator
+from pismemulator.nnemulator import DNNEmulator as NNEmulator
 from pismemulator.utils import plot_eigenglaciers
 
 
