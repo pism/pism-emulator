@@ -20,7 +20,7 @@
 import numpy as np
 from numpy.testing import assert_equal, assert_almost_equal, assert_array_almost_equal
 import torch
-from pismemulator.nnemulator import absolute_error, PISMDataset
+from pismemulator.nnemulator import absolute_error, PISMDataset, NNEmulator, DNNEmulator
 
 
 def test_absolute_error():
@@ -64,3 +64,20 @@ def test_dataset():
     assert_array_almost_equal(X, X_true, decimal=4)
     assert_array_almost_equal(Y, Y_true, decimal=4)
     assert_array_almost_equal(normed_area, normed_area_true, decimal=4)
+
+
+def test_emulator_equivalence():
+
+    """
+    Compare NNEmulator and DNNEmulator
+    """
+
+    dataset = PISMDataset(
+        data_dir="training_data",
+        samples_file="../data/samples/velocity_calibration_samples_100.csv",
+        target_file="test_data/test_vel_g9000m.nc",
+        thinning_factor=1,
+    )
+
+    X = dataset.X.detach().numpy()
+    Y = dataset.Y.detach().numpy()

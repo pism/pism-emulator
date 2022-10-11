@@ -31,7 +31,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 from pismemulator.nnemulator import PISMDataset, PISMDataModule
-from pismemulator.nnemulator import NNEmulator as NNEmulator
+from pismemulator.nnemulator import NNEmulator, DNNEmulator
 from pismemulator.utils import plot_eigenglaciers
 
 
@@ -41,6 +41,9 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--data_dir", default="../tests/training_data")
+    parser.add_argument(
+        "--emulator", choices=["NNEmulator", "DNNEmulator"], default="NNEmulator"
+    )
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=4)
