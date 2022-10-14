@@ -39,7 +39,6 @@ class DEMDataset(torch.utils.data.Dataset):
         target_file=None,
         target_var="surface_altitude",
         training_var="usurf",
-        thinning_factor=1,
         normalize_x=True,
         epsilon=0,
         return_numpy=False,
@@ -47,13 +46,12 @@ class DEMDataset(torch.utils.data.Dataset):
         self.training_files = training_files
         self.target_file = target_file
         self.target_var = target_var
-        self.thinning_factor = thinning_factor
         self.training_var = training_var
         self.epsilon = epsilon
         self.normalize_x = normalize_x
         self.return_numpy = return_numpy
-        self.load_target()
         self.load_data()
+        self.load_target()
 
     def __getitem__(self, i):
         return tuple(d[i] for d in [self.X, self.Y])
@@ -64,7 +62,6 @@ class DEMDataset(torch.utils.data.Dataset):
     def load_target(self):
         epsilon = self.epsilon
         return_numpy = self.return_numpy
-        thinning_factor = self.thinning_factor
         print("Loading observations data")
         print(f"       - {self.target_file}")
         with xr.open_dataset(self.target_file) as ds:
@@ -72,10 +69,11 @@ class DEMDataset(torch.utils.data.Dataset):
             mask = obs.isnull()
             m_mask = np.ones_like(mask)
             m_mask[mask == True] = 0
-            obs = obs[::thinning_factor, ::thinning_factor]
-            m_mask = m_mask[::thinning_factor, ::thinning_factor]
-            I = torch.from_numpy(m_mask.ravel())
-            R = torch.from_numpy(np.nan_to_num(obs.values.ravel(), 0))
+            # m_mask[self.mask_2d == True] = 0
+            I = torch.from_numpy(m_mask[self.sparse_idx_2d].ravel())
+            R = torch.from_numpy(
+                np.nan_to_num(obs.values[self.sparse_idx_2d].ravel(), 0)
+            )
             n_row, n_col = obs.shape
             self.I = I
             self.R = R
@@ -90,25 +88,36 @@ class DEMDataset(torch.utils.data.Dataset):
     def load_data(self):
         epsilon = self.epsilon
         return_numpy = self.return_numpy
-        thinning_factor = self.thinning_factor
 
         print("Loading training data")
+
+        m_file_0 = sorted(self.training_files)[0]
+        with xr.open_dataset(m_file_0) as ds:
+            data = ds.variables[self.training_var]
+            nt, ny, nx = data.shape
+            mask_2d = data[0].values == 0
+            idx_2d = (mask_2d == False).nonzero()
+            mask_3d = np.array([mask_2d] * nt)
+            idx_3d = (mask_3d == False).nonzero()
+        self.mask_2d = mask_2d
+        self.mask_3d = mask_3d
+        self.sparse_idx_2d = idx_2d
+        self.sparse_idx_3d = idx_3d
+        self.sparse_idx_1d = np.ravel_multi_index(idx_3d, mask_3d.shape)
+
         all_data = []
-        for idx, m_file in tqdm(enumerate(self.training_files)):
-            print(f"       - Loading {m_file}")
+        for idx, m_file in tqdm(enumerate(sorted(self.training_files))):
             with xr.open_dataset(m_file) as ds:
                 data = ds.variables[self.training_var]
                 data = np.squeeze(
                     np.nan_to_num(
-                        data.values[
-                            ::thinning_factor, ::thinning_factor, ::thinning_factor
-                        ],
+                        data.values,
                         nan=epsilon,
                     )
                 )
 
-                nt, ny, nx = data.shape
-                all_data.append(data.reshape(nt, -1))
+                data_1d = data[idx_3d].reshape(nt, -1)
+                all_data.append(data_1d)
                 ds.close()
         X = torch.from_numpy(np.concatenate(all_data, axis=0))
 
@@ -272,7 +281,7 @@ class LinearRegression(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
-b            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
         )
         # This is an approximation to Doug's version:
         scheduler = {

@@ -6,8 +6,8 @@ from torch import Tensor, tensor
 import numpy as np
 import pylab as plt
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torch.optim.lr_scheduler import ExponentialLR
-from torch.utils.data import DataLoader, TensorDataset
 
 from pismemulator.metrics import L2MeanSquaredError
 from pismemulator.svdinterpolation import LinearRegression, DEMDataset, DEMDataModule
@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 import matplotlib
 
-matplotlib.use("agg")
+# matplotlib.use("agg")
 
 
 def cart2pol(x, y):
@@ -85,7 +85,6 @@ if __name__ == "__main__":
         default="aerodem_1978_1987_wgs84_g1800m.nc",
     )
     parser.add_argument("--train_size", type=float, default=0.9)
-    parser.add_argument("--thinning_factor", type=int, default=1)
     parser.add_argument("--outfile", type=str, default="dem_reconstructed.nc")
 
     parser = LinearRegression.add_model_specific_args(parser)
@@ -102,12 +101,10 @@ if __name__ == "__main__":
     target_file = args.target_file
     train_size = args.train_size
     training_files = args.training_files
-    thinning_factor = args.thinning_factor
 
     dataset = DEMDataset(
         training_files=training_files,
         target_file=target_file,
-        thinning_factor=thinning_factor,
     )
 
     data_loader = DEMDataModule(
@@ -120,16 +117,24 @@ if __name__ == "__main__":
     )
     data_loader.setup()
     m = LinearRegression(q, 1, hparams)
+
+    early_stop_callback = EarlyStopping(
+        monitor="val_loss", min_delta=1e2, patience=10, verbose=False, mode="max"
+    )
+
     trainer = pl.Trainer.from_argparse_args(
         args,
+        callbacks=[early_stop_callback],
+        check_val_every_n_epoch=10,
     )
 
     V = data_loader.V
     S = data_loader.S
-    nx = dataset.obs_nx
-    ny = dataset.obs_ny
     lamda = S**2
     V_hat = V @ torch.diag(torch.sqrt(lamda))
+    nx = dataset.obs_nx
+    ny = dataset.obs_ny
+
     nrows = 2
     ncols = 3
 
@@ -137,9 +142,10 @@ if __name__ == "__main__":
         nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=[12, 14]
     )
     for k, ax in enumerate(axs.ravel()):
-        eigen_glacier = V_hat[:, k].reshape(ny, nx)
-        mask = eigen_glacier == 0
-        eigen_glacier = np.ma.array(data=eigen_glacier, mask=mask)
+        V_k = V_hat[:, k]
+        data = np.zeros((ny, nx))
+        data.put(dataset.sparse_idx_2d, V_k)
+        eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
         ax.imshow(
             eigen_glacier,
             origin="lower",
@@ -151,9 +157,10 @@ if __name__ == "__main__":
     fig.savefig(f"eigen_glaciers.pdf")
 
     for k in range(3):
-        eigen_glacier = V_hat[:, k].reshape(ny, nx)
-        mask = eigen_glacier == 0
-        eigen_glacier = np.ma.array(data=eigen_glacier, mask=mask)
+        V_k = V_hat[:, k]
+        data = np.zeros((ny, nx))
+        data.put(dataset.sparse_idx_2d, V_k)
+        eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
 
         fig = plt.figure(figsize=[5, 8])
         ax = fig.add_subplot(111)
@@ -167,13 +174,18 @@ if __name__ == "__main__":
 
         fig.savefig(f"eigen_glacier_{k}.pdf")
 
+    # Train the model
     trainer.fit(m, data_loader.train_dataloader(), data_loader.val_dataloader())
+    # Get the linear weights
     w = m.linear.weight
 
     M = (V * S) @ w.reshape(-1)
-
-    R_filled = M.detach().numpy().reshape(1, ny, nx)
-    R_filled += dataset.X_mean.detach().numpy().reshape(1, ny, nx)
+    M = M.detach().numpy()
+    R_filled = np.zeros((1, ny, nx))
+    R_filled.put(dataset.sparse_idx_2d, M)
+    Xm = np.zeros((1, ny, nx))
+    Xm.put(dataset.X_mean, dataset.sparse_idx_2d)
+    R_filled += Xm
     R_filled[R_filled < 0] = 0
     time = pd.date_range("1980-1-1", periods=1)
 
