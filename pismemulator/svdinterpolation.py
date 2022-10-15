@@ -39,7 +39,7 @@ class DEMDataset(torch.utils.data.Dataset):
         target_file=None,
         target_var="surface_altitude",
         training_var="usurf",
-        normalize_x=True,
+        normalize_x=False,
         epsilon=0,
         return_numpy=False,
     ):
@@ -69,7 +69,6 @@ class DEMDataset(torch.utils.data.Dataset):
             mask = obs.isnull()
             m_mask = np.ones_like(mask)
             m_mask[mask == True] = 0
-            # m_mask[self.mask_2d == True] = 0
             I = torch.from_numpy(m_mask[self.sparse_idx_2d].ravel())
             R = torch.from_numpy(
                 np.nan_to_num(obs.values[self.sparse_idx_2d].ravel(), 0)
@@ -97,32 +96,31 @@ class DEMDataset(torch.utils.data.Dataset):
             nt, ny, nx = data.shape
             mask_2d = data[0].values == 0
             idx_2d = (mask_2d == False).nonzero()
-            mask_3d = np.array([mask_2d] * nt)
-            idx_3d = (mask_3d == False).nonzero()
         self.mask_2d = mask_2d
-        self.mask_3d = mask_3d
         self.sparse_idx_2d = idx_2d
-        self.sparse_idx_3d = idx_3d
-        self.sparse_idx_1d = np.ravel_multi_index(idx_3d, mask_3d.shape)
+        self.sparse_idx_1d = np.ravel_multi_index(idx_2d, mask_2d.shape)
 
         all_data = []
         for idx, m_file in tqdm(enumerate(sorted(self.training_files))):
             with xr.open_dataset(m_file) as ds:
                 data = ds.variables[self.training_var]
-                data = np.squeeze(
-                    np.nan_to_num(
-                        data.values,
-                        nan=epsilon,
-                    )
-                )
-
-                data_1d = data[idx_3d].reshape(nt, -1)
+                # data = np.squeeze(
+                #     np.nan_to_num(
+                #         data.values,
+                #         nan=epsilon,
+                #     )
+                # )
+                # print(data.values[0].shape)
+                # for k in range(nt):
+                #     d = data.values[k]
+                #     print(d[self.sparse_idx_2d].max())
+                data_1d = [data.values[k][self.sparse_idx_2d] for k in range(nt)]
+                data_1d = np.concatenate(data_1d).reshape(nt, -1)
                 all_data.append(data_1d)
                 ds.close()
         X = torch.from_numpy(np.concatenate(all_data, axis=0))
-
-        X_mean = X.mean(axis=0)
-        X_std = X.std(axis=0)
+        X_mean = X.mean()
+        X_std = X.std()
         self.X_mean = X_mean
         self.X_std = X_std
 

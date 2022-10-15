@@ -119,7 +119,7 @@ if __name__ == "__main__":
     m = LinearRegression(q, 1, hparams)
 
     early_stop_callback = EarlyStopping(
-        monitor="val_loss", min_delta=1e2, patience=10, verbose=False, mode="max"
+        monitor="val_loss", min_delta=1e2, patience=10, verbose=False
     )
 
     trainer = pl.Trainer.from_argparse_args(
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     for k, ax in enumerate(axs.ravel()):
         V_k = V_hat[:, k]
         data = np.zeros((ny, nx))
-        data.put(dataset.sparse_idx_2d, V_k)
+        data.put(dataset.sparse_idx_1d, V_k)
         eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
         ax.imshow(
             eigen_glacier,
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     for k in range(3):
         V_k = V_hat[:, k]
         data = np.zeros((ny, nx))
-        data.put(dataset.sparse_idx_2d, V_k)
+        data.put(dataset.sparse_idx_1d, V_k)
         eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
 
         fig = plt.figure(figsize=[5, 8])
@@ -183,9 +183,9 @@ if __name__ == "__main__":
     M = M.detach().numpy()
     R_filled = np.zeros((1, ny, nx))
     R_filled.put(dataset.sparse_idx_2d, M)
-    Xm = np.zeros((1, ny, nx))
-    Xm.put(dataset.X_mean, dataset.sparse_idx_2d)
-    R_filled += Xm
+    # Xm = np.zeros((1, ny, nx))
+    # Xm.put(dataset.X_mean, dataset.sparse_idx_2d)
+    # R_filled += Xm
     R_filled[R_filled < 0] = 0
     time = pd.date_range("1980-1-1", periods=1)
 
