@@ -133,7 +133,7 @@ if __name__ == "__main__":
             F_v = F[m].detach().numpy()
             F_p = e(X_val, add_mean=True).detach().numpy()
             F_val[:] = F_v
-            F_pred[:] = F_p
+            F_pred[:] = F_p[dataset.sparse_idx_1d]
         rmse = np.sqrt(
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
@@ -205,7 +205,7 @@ if __name__ == "__main__":
             axs[2, k].set_axis_off()
             axs[-1, k].set_axis_off()
 
-            k += 1
+        k += 1
 
     rmse_mean = np.array(rmses).mean()
     mae_mean = np.array(maes).mean()
