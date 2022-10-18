@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2022 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -39,7 +39,7 @@ class DEMDataset(torch.utils.data.Dataset):
         target_file=None,
         target_var="surface_altitude",
         training_var="usurf",
-        normalize_x=False,
+        normalize_x=True,
         epsilon=0,
         return_numpy=False,
     ):

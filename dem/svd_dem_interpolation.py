@@ -76,6 +76,7 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
+    parser.add_argument("--add_mean", default=False, action="store_true")
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--training_files", nargs="*", default=None)
     parser.add_argument("--num_workers", type=int, default=0)
@@ -92,6 +93,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     hparams = vars(args)
 
+    add_mean = args.add_mean
     batch_size = args.batch_size
     checkpoint = args.checkpoint
     max_epochs = args.max_epochs
@@ -182,10 +184,11 @@ if __name__ == "__main__":
     M = (V * S) @ w.reshape(-1)
     M = M.detach().numpy()
     R_filled = np.zeros((1, ny, nx))
-    R_filled.put(dataset.sparse_idx_2d, M)
-    # Xm = np.zeros((1, ny, nx))
-    # Xm.put(dataset.X_mean, dataset.sparse_idx_2d)
-    # R_filled += Xm
+    R_filled.put(dataset.sparse_idx_1d, M)
+    if add_mean:
+        Xm = np.zeros((1, ny, nx))
+        Xm.put(dataset.sparse_idx_1d, dataset.X_mean)
+        R_filled += Xm
     R_filled[R_filled < 0] = 0
     time = pd.date_range("1980-1-1", periods=1)
 
@@ -199,37 +202,37 @@ if __name__ == "__main__":
         },
     ).to_netcdf(outfile, unlimited_dims="time")
 
-    R_series = pd.Series(R_filled.ravel())
+    # R_series = pd.Series(R_filled.ravel())
 
-    for k in range(0, 10):
-        obs_dem = dataset.Obs
-        obs_mask = dataset.obs_mask
-        obs_hs = hillshade(obs_dem, 1800)
-        obs_hs = np.ma.array(data=obs_hs, mask=obs_mask)
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.imshow(obs_hs, origin="lower", cmap="gray", vmin=0, vmax=255)
-        plt.axis("off")
-        fig.savefig(f"image_{k:03d}.png", dpi=300)
-        k += 1
-        plt.close(plt.gcf())
-        del fig, ax
+    # for k in range(0, 10):
+    #     obs_dem = dataset.Obs
+    #     obs_mask = dataset.obs_mask
+    #     obs_hs = hillshade(obs_dem, 1800)
+    #     obs_hs = np.ma.array(data=obs_hs, mask=obs_mask)
+    #     fig = plt.figure()
+    #     ax = fig.add_subplot(111)
+    #     ax.imshow(obs_hs, origin="lower", cmap="gray", vmin=0, vmax=255)
+    #     plt.axis("off")
+    #     fig.savefig(f"image_{k:03d}.png", dpi=300)
+    #     k += 1
+    #     plt.close(plt.gcf())
+    #     del fig, ax
 
-    for frac in np.linspace(0.8, 1, 100):
-        Sub = R_series.sample(frac=frac)
-        R_f = R_filled
-        R_s = np.zeros_like(R_f.ravel())
-        mask = R_f.reshape(ny, nx) == 0
-        R_s[Sub.index] = Sub.values
-        dem = R_s.reshape(ny, nx)
-        dem_mask = dem == 0
-        dem_hs = hillshade(dem, 1800)
-        dem_hs = np.ma.array(data=dem_hs, mask=(mask | dem_mask))
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.imshow(dem_hs, origin="lower", cmap="gray", vmin=0, vmax=255)
-        plt.axis("off")
-        fig.savefig(f"image_{k:03d}.png", dpi=300)
-        k += 1
-        plt.close(plt.gcf())
-        del fig, ax
+    # for frac in np.linspace(0.8, 1, 100):
+    #     Sub = R_series.sample(frac=frac)
+    #     R_f = R_filled
+    #     R_s = np.zeros_like(R_f.ravel())
+    #     mask = R_f.reshape(ny, nx) == 0
+    #     R_s[Sub.index] = Sub.values
+    #     dem = R_s.reshape(ny, nx)
+    #     dem_mask = dem == 0
+    #     dem_hs = hillshade(dem, 1800)
+    #     dem_hs = np.ma.array(data=dem_hs, mask=(mask | dem_mask))
+    #     fig = plt.figure()
+    #     ax = fig.add_subplot(111)
+    #     ax.imshow(dem_hs, origin="lower", cmap="gray", vmin=0, vmax=255)
+    #     plt.axis("off")
+    #     fig.savefig(f"image_{k:03d}.png", dpi=300)
+    #     k += 1
+    #     plt.close(plt.gcf())
+    #     del fig, ax
