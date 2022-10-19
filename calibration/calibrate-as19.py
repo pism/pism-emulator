@@ -1492,7 +1492,7 @@ if __name__ == "__main__":
         return_samples=True,
     )
 
-    ismip6 = pd.read_csv("ismip6_gis_ctrl.csv.gz")
+    #    ismip6 = pd.read_csv("ismip6_gis_ctrl.csv.gz")
     # Bayesian calibration: resampling
     as19_resampled = resample_ensemble_by_data(observed, as19)
     as19_calib_resampled = resample_ensemble_by_data(observed, calib)
