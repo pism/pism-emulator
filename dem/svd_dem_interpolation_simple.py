@@ -12,12 +12,12 @@ from sklearn.model_selection import train_test_split
 from torch.autograd import Variable
 from torchmetrics import MeanSquaredError
 
-training_files = glob("/Users/andy/ragis/ex_*.nc")
+training_files = glob("usurf_gris_g1800m_v5_RAGIS_id_0_1980-1-1_2020-1-1_YM.nc")
 epsilon = 0
 training_var = "usurf"
 thinning_factor = 1
 # Number of principal components
-q = 50
+q = 10
 
 all_data = []
 for idx, m_file in enumerate(training_files):
@@ -36,8 +36,8 @@ for idx, m_file in enumerate(training_files):
         ds.close()
 data = np.concatenate(all_data, axis=0)
 
-with xr.open_dataset("aerodem_1978_1987_mean_g1800m.nc") as ds:
-    obs = ds.variables["surface"]
+with xr.open_dataset("aerodem_1978_1987_wgs84_g1800m.nc") as ds:
+    obs = ds.variables["surface_altitude"]
     mask = obs.isnull()
     m_mask = np.ones_like(mask)
     m_mask[mask == True] = 0
@@ -91,6 +91,7 @@ K_reg = 1
 
 inputs = V_i * S
 labels = R_i.reshape(-1, 1)
+print(V.shape, S.shape, inputs.shape, labels.shape)
 
 for epoch in range(epochs):
     # Converting inputs and labels to Variable
