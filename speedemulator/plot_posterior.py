@@ -15,8 +15,6 @@ from matplotlib.ticker import NullFormatter
 from matplotlib.patches import Polygon
 from matplotlib.lines import Line2D
 
-import seaborn as sns
-
 from scipy.stats import beta, gaussian_kde
 
 from pismemulator.utils import param_keys_dict as keys_dict
