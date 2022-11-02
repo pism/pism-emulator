@@ -114,28 +114,6 @@ if __name__ == "__main__":
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
 
-    # fig, axs = plt.subplots(nrows=2, ncols=int(n_parameters / 2), figsize=(5.4, 2.8))
-    # fig.subplots_adjust(hspace=0.0, wspace=0.0)
-    # for i in range(n_parameters):
-    #     min_val = min(X_prior[:, i].min(), X_posterior[:, i].min())
-    #     max_val = max(X_prior[:, i].max(), X_posterior[:, i].max())
-    #     bins = np.linspace(min_val, max_val, 30)
-    #     X_prior_hist, b = np.histogram(X_prior[:, i], bins, density=True)
-    #     X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
-    #     b = 0.5 * (b[1:] + b[:-1])
-    #     axs[i].plot(
-    #         b,
-    #         X_model_posterior_hist * 0.5,
-    #         color="0.5",
-    #         linewidth=lw * 0.25,
-    #         linestyle="solid",
-    #         alpha=0.5,
-    #     )
-
-    # figfile = f"{emulator_dir}/posterior.pdf"
-    # print(f"Saving figure to {figfile}")
-    # fig.savefig(figfile)
-
     fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(5.4, 5.6))
     fig.subplots_adjust(hspace=0.0, wspace=0.0)
     for i in range(n_parameters):
