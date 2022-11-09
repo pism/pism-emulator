@@ -1,20 +1,16 @@
 #!/bin/env python3
 
-from argparse import ArgumentParser
-
-import numpy as np
 import os
+from argparse import ArgumentParser
 from os.path import join
-
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pylab as plt
-
-from matplotlib.ticker import NullFormatter
-from matplotlib.patches import Polygon
 from matplotlib.lines import Line2D
-
+from matplotlib.patches import Polygon
+from matplotlib.ticker import NullFormatter
 from scipy.stats import beta, gaussian_kde
 
 from pismemulator.utils import param_keys_dict as keys_dict
@@ -230,10 +226,10 @@ if __name__ == "__main__":
                     linestyle="solid",
                     label="Posterior",
                 )
-                print(X_keys[i], p16, p50, p84)
                 p16 = np.percentile(X_posterior[:, i], 16)
                 p50 = np.percentile(X_posterior[:, i], 50)
                 p84 = np.percentile(X_posterior[:, i], 84)
+                print(X_keys[i], p16, p50, p84)
 
                 axs[i, j].axvline(p16, color="black", lw=0.5, ls="dotted")
                 axs[i, j].axvline(p84, color="black", lw=0.5, ls="dotted")

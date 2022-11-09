@@ -22,6 +22,7 @@ from argparse import ArgumentParser
 
 import numpy as np
 import os
+from os import mkdir
 from os.path import isdir, join
 from scipy.stats import dirichlet
 import torch

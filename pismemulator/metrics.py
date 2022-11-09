@@ -20,8 +20,8 @@ from typing import Any, Tuple
 
 import torch
 from torch import Tensor, tensor
-from torchmetrics.utilities.checks import _check_same_shape
 from torchmetrics import Metric
+from torchmetrics.utilities.checks import _check_same_shape
 
 
 def _area_absolute_error_update(
@@ -207,7 +207,7 @@ class L2MeanSquaredError(Metric):
     higher_is_better = False
     full_state_update = False
     sum_squared_error: Tensor
-    total: Tensor
+    total: int
 
     def __init__(
         self,
@@ -301,5 +301,5 @@ def l2_mean_squared_error(
         >>> mean_squared_error(x, y, w, k)
         tensor(0.2609)
     """
-    sum_squared_error, n_obs = _l2_mean_squared_error_update(preds, target, weight)
+    sum_squared_error, n_obs = _l2_mean_squared_error_update(preds, target, weight, K)
     return _l2_mean_squared_error_compute(sum_squared_error, n_obs, squared=squared)

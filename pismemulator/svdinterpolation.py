@@ -30,6 +30,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader, TensorDataset
 
 from pismemulator.metrics import L2MeanSquaredError
+from typing import Optional
 
 
 class DEMDataset(torch.utils.data.Dataset):
@@ -160,7 +161,7 @@ class DEMDataModule(pl.LightningDataModule):
 
         return parent_parser
 
-    def setup(self, stage: str = None):
+    def setup(self, stage: Optional[str] = None):
 
         self.get_eigenglaciers(q=self.q)
         self.V_i = self.V[self.I] * self.S

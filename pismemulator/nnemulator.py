@@ -16,32 +16,29 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import re
 from collections import OrderedDict
 from glob import glob
+from os.path import join
+from typing import Optional
+
 import numpy as np
 import pandas as pd
-from os.path import join
-import re
-from sklearn.model_selection import train_test_split
-from tqdm import tqdm
-import xarray as xr
 import pyro
-
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import xarray as xr
+from sklearn.model_selection import train_test_split
 from torch import Tensor
-from torchmetrics.utilities.checks import _check_same_shape
-from torchmetrics import Metric
-import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
+from torchmetrics import Metric
+from torchmetrics.utilities.checks import _check_same_shape
+from tqdm import tqdm
 
-from pismemulator.metrics import (
-    AbsoluteError,
-    absolute_error,
-    AreaAbsoluteError,
-    area_absolute_error,
-)
+from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
+                                  absolute_error, area_absolute_error)
 
 
 class PDDEmulator(pl.LightningModule):
@@ -658,7 +655,7 @@ class PISMDataModule(pl.LightningDataModule):
         self.train_size = train_size
         self.num_workers = num_workers
 
-    def setup(self, stage: str = None):
+    def setup(self, stage: Optional[str] = None):
 
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
@@ -1055,82 +1052,7 @@ class PDDDataModule(pl.LightningDataModule):
         self.train_size = train_size
         self.num_workers = num_workers
 
-    def setup(self, stage: str = None):
-
-        all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
-        self.all_data = all_data
-
-        training_data, val_data = train_test_split(
-            all_data, train_size=self.train_size, random_state=0
-        )
-        self.training_data = training_data
-        self.test_data = training_data
-
-        self.val_data = val_data
-        train_all_loader = DataLoader(
-            dataset=all_data,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-        self.train_all_loader = train_all_loader
-        val_all_loader = DataLoader(
-            dataset=all_data,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-        self.val_all_loader = val_all_loader
-        train_loader = DataLoader(
-            dataset=training_data,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-        self.train_loader = train_loader
-        self.test_loader = train_loader
-        val_loader = DataLoader(
-            dataset=val_data,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-        )
-        self.val_loader = val_loader
-
-    def prepare_data(self, **kwargs):
-        pass
-
-    def train_dataloader(self):
-        return self.train_loader
-
-    def validation_dataloader(self):
-        return self.val_loader
-
-
-class PDDDataModule(pl.LightningDataModule):
-    def __init__(
-        self,
-        X,
-        Y,
-        omegas,
-        omegas_0,
-        batch_size: int = 128,
-        train_size: float = 0.9,
-        num_workers: int = 0,
-    ):
-        super().__init__()
-        self.X = X
-        self.Y = Y
-        self.omegas = omegas
-        self.omegas_0 = omegas_0
-        self.batch_size = batch_size
-        self.train_size = train_size
-        self.num_workers = num_workers
-
-    def setup(self, stage: str = None):
+    def setup(self, stage: Optional[str] = None):
 
         all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
         self.all_data = all_data
