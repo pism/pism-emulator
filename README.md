@@ -1,7 +1,10 @@
 # pism-emulator
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6257002.svg)]( https://doi.org/10.5281/zenodo.6257002) [![License: GPL-3.0](https://img.shields.io:/github/license/pism/pism-emulator)](https://opensource.org/licenses/GPL-3.0)
-
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6257002.svg)]( https://doi.org/10.5281/zenodo.6257002)
+[![License: GPL-3.0](https://img.shields.io:/github/license/pism/pism-emulator)](https://opensource.org/licenses/GPL-3.0)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![flake8](https://img.shields.io/badge/flake8-enabled-green)](https://github.com/PyCQA/flake8)
+[![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 ## Introduction
 
 pism-emulator is the codebase for the two-step Bayesian calibration process proposed by Aschwanden and Brinkerhoff [1]. The goal is to condition ensemble predictions of Greenland's contribution to future sea-level on contemporary [surface speeds](https://nsidc.org/data/NSIDC-0670/versions/1) and [cumulative mass loss](http://imbie.org).
