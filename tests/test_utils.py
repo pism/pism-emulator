@@ -16,42 +16,23 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import pytest
-
 import numpy as np
-from numpy.testing import assert_array_almost_equal
 import pandas as pd
+import pytest
 import scipy
+from numpy.testing import assert_array_almost_equal
 
-from pismemulator.utils import calc_bic
-from pismemulator.utils import draw_samples
-from pismemulator.utils import gelman_rubin
-from pismemulator.utils import kl_divergence
-from pismemulator.utils import prepare_data
-from pismemulator.utils import rmsd
-from pismemulator.utils import stepwise_bic
+from pismemulator.utils import (calc_bic, draw_samples, gelman_rubin,
+                                kl_divergence, prepare_data, rmsd,
+                                stepwise_bic)
 
 
 def test_calc_bic():
 
-    X = np.array([[1, 4, 9], [2, 0, -1]])
-    Y = X ** 2 - 1
+    X = np.array([[1.0, 4.0, 9.0], [2.0, 0.0, -1.0]])
+    Y = X**2 - 1
     bic = calc_bic(X, Y)
     assert_array_almost_equal(bic, -125.68336950813814, decimal=2), "foo"
-
-
-def test_draw_samples(saltsamples):
-
-    distributions = {
-        "X1": scipy.stats.distributions.randint(0, 2),
-        "X2": scipy.stats.distributions.truncnorm(-4 / 4.0, 4.0 / 4, loc=8, scale=4),
-        "X3": scipy.stats.distributions.uniform(loc=5, scale=2),
-    }
-
-    # We can only test Saltelli because LHS is not repeatable
-    assert_array_almost_equal(
-        draw_samples(distributions, n_samples=2, method="saltelli").values, saltsamples.drop(columns="id").values
-    )
 
 
 def test_kl_divergence(pq):
@@ -115,7 +96,15 @@ def test_stepwise_bic(dp16data):
 
     # From Edwards et al (2019)
     dp16_no_interactions = ["OCFAC", "CREVLIQ", "VCLIF", "BIAS"]
-    dp16_with_interactions = ["OCFAC", "CREVLIQ", "VCLIF", "BIAS", "CREVLIQ*VCLIF", "OCFAC*BIAS", "OCFAC*VCLIF"]
+    dp16_with_interactions = [
+        "OCFAC",
+        "CREVLIQ",
+        "VCLIF",
+        "BIAS",
+        "CREVLIQ*VCLIF",
+        "OCFAC*BIAS",
+        "OCFAC*VCLIF",
+    ]
     dp16_no_varnames = ["X0", "X1", "X2", "X3", "X1*X2", "X0*X3", "X0*X2"]
 
     # Write Assertion exceptions and useful error messages

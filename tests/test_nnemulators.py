@@ -18,19 +18,12 @@
 
 
 import numpy as np
-from numpy.testing import assert_equal, assert_almost_equal, assert_array_almost_equal
 import torch
-from pismemulator.nnemulator import absolute_error, PISMDataset, NNEmulator, DNNEmulator
+from numpy.testing import (assert_almost_equal, assert_array_almost_equal,
+                           assert_equal)
 
-
-def test_absolute_error():
-
-    x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-    y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-    o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-    a = torch.tensor([0.25, 0.25])
-    ae = absolute_error(x, y, o, a)
-    assert_almost_equal(ae, 0.4000, decimal=4)
+from pismemulator.nnemulator import (DNNEmulator, NNEmulator, PISMDataset,
+                                     absolute_error)
 
 
 def test_dataset():
@@ -71,13 +64,40 @@ def test_emulator_equivalence():
     """
     Compare NNEmulator and DNNEmulator
     """
+    torch.manual_seed(0)
 
-    dataset = PISMDataset(
-        data_dir="training_data",
-        samples_file="../data/samples/velocity_calibration_samples_100.csv",
-        target_file="test_data/test_vel_g9000m.nc",
-        thinning_factor=1,
+    n_parameters = 5
+    n_eigenglaciers = 10
+    n_grid_points = 1000
+
+    V_hat = torch.rand(n_grid_points, n_eigenglaciers)
+    F_mean = torch.rand(n_grid_points)
+    area = torch.ones_like(F_mean) / n_grid_points
+    hparams = {
+        "max_epochs": 100,
+        "batch_size": 128,
+        "n_hidden": 128,
+        "n_hidden_1": 128,
+        "n_hidden_2": 128,
+        "n_hidden_3": 128,
+        "n_hidden_4": 128,
+        "n_layers": 4,
+    }
+
+    e = NNEmulator(
+        n_parameters,
+        n_eigenglaciers,
+        V_hat,
+        F_mean,
+        area,
+        hparams,
     )
 
-    X = dataset.X.detach().numpy()
-    Y = dataset.Y.detach().numpy()
+    de = DNNEmulator(
+        n_parameters,
+        n_eigenglaciers,
+        V_hat,
+        F_mean,
+        area,
+        hparams,
+    )

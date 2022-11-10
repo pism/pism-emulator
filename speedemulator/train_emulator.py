@@ -18,29 +18,39 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import os
 from argparse import ArgumentParser
+from os.path import abspath, dirname, join, realpath
 
 import numpy as np
-import os
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-import torch
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (
-    ModelCheckpoint,
-)
-from pytorch_lightning.loggers import TensorBoardLogger
-from pismemulator.nnemulator import PISMDataset, PISMDataModule
-from pismemulator.nnemulator import NNEmulator, DNNEmulator
+from pismemulator.nnemulator import (DNNEmulator, NNEmulator, PISMDataModule,
+                                     PISMDataset)
 from pismemulator.utils import plot_eigenglaciers
 
+
+def current_script_directory():
+    import inspect
+
+    filename = inspect.stack(0)[0][1]
+    return realpath(dirname(filename))
+
+
+script_directory = current_script_directory()
 
 if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
-    parser.add_argument("--data_dir", default="../tests/training_data")
+    parser.add_argument(
+        "--data_dir", default=abspath(join(script_directory, "../tests/training_data"))
+    )
     parser.add_argument(
         "--emulator", choices=["NNEmulator", "DNNEmulator"], default="NNEmulator"
     )
@@ -50,11 +60,21 @@ if __name__ == "__main__":
     parser.add_argument("--n_layers", type=int, default=5)
     parser.add_argument("--q", type=int, default=100)
     parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
+        "--samples_file",
+        default=abspath(
+            join(
+                script_directory, "../data/samples/velocity_calibration_samples_100.csv"
+            )
+        ),
     )
     parser.add_argument(
         "--target_file",
-        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
+        default=abspath(
+            join(
+                script_directory,
+                "../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
+            )
+        ),
     )
     parser.add_argument("--train_size", type=float, default=1.0)
     parser.add_argument("--thinning_factor", type=int, default=1)

@@ -464,6 +464,7 @@ class PISMDataset(torch.utils.data.Dataset):
         epsilon = self.epsilon
         return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
+        print(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file)
         data = ds.variables[self.target_var].squeeze()
         mask = data.isnull()

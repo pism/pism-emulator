@@ -18,22 +18,22 @@
 
 # utils.py contains generic functions to read data or perform statistical analyses.
 
-import collections
+import sys
 from math import sqrt
-from matplotlib.colors import LogNorm
-import numpy as np
-import pandas as pd
 from os import mkdir
 from os.path import isdir, join
-from pyDOE import lhs
-import pylab as plt
-from SALib.sample import saltelli
-from scipy.stats.distributions import truncnorm, gamma, uniform, randint
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from typing import Union
 
-import sys
+import numpy as np
+import pandas as pd
+import pylab as plt
 import xarray as xr
+from matplotlib.colors import LogNorm
+from pyDOE import lhs
+from SALib.sample import saltelli
+from scipy.stats.distributions import gamma, randint, truncnorm, uniform
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 np.random.seed(0)
 
@@ -339,7 +339,10 @@ def plot_eigenglaciers(
     fig.savefig(join(fig_dir, f"eigenglaciers_{model_index}.pdf"))
 
 
-def calc_bic(X, Y):
+def calc_bic(
+    X: Union[list, np.ndarray, pd.core.frame.DataFrame],
+    Y: Union[list, np.ndarray, pd.core.frame.DataFrame],
+):
     """
     Bayesian Information Criterion
 
@@ -365,11 +368,6 @@ def calc_bic(X, Y):
     BIC : scalar
           The Bayesian Information Criterion (BIC)
     """
-
-    if not isinstance(X, (collections.Sequence, np.ndarray, pd.core.frame.DataFrame)):
-        raise TypeError("Not like an array.")
-    if not isinstance(Y, (collections.Sequence, np.ndarray, pd.core.series.Series)):
-        raise TypeError("Not like an array.")
 
     lm = LinearRegression(normalize=False)
     lm.fit(X, Y)
