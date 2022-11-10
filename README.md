@@ -7,7 +7,7 @@
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 ## Introduction
 
-pism-emulator is the codebase for the two-step Bayesian calibration process proposed by Aschwanden and Brinkerhoff [1]. The goal is to condition ensemble predictions of Greenland's contribution to future sea-level on contemporary [surface speeds](https://nsidc.org/data/NSIDC-0670/versions/1) and [cumulative mass loss](http://imbie.org).
+pism-emulator is the codebase for the two-step Bayesian calibration process proposed by Aschwanden and Brinkerhoff [1]. The goal is to condition ensemble predictions of Greenland's contribution to future sea-level on contemporary [surface speeds](https://nsidc.org/data/NSIDC-0670/versions/1) and [cumulative mass loss](http://imbie.org). However, the method is model-agnostic and instead of surface speeds and mass loss, one can use other calibration targets.
 
 ## Methods
 
@@ -57,6 +57,23 @@ The two-step Bayesian calibration requires requires running the high-fidelity ic
 
 No need to download large data sets. A low-resolution working example is provided as a notebook [`minimal_example.ipynb`](https://github.com/pism/pism-emulator/blob/master/notebooks/minimal_example.ipyng)
 
+## Extending pism-emulator
+
+The surrogate model is ice sheet-model agnostic. If you wish to use a training data from an ice sheet model other than PISM, you need to implement your own `Dataset` and `DataModule` classes, see `class PISMDataset(torch.utils.data.Dataset)` and `class PISMDataModule(pl.LightningDataModule)` for reference.
+
 ## References
 
-Aschwanden, A. and D. J. Brinkerhoff: Calibrated mass loss projections from the Greenland Ice Sheet (revised)
+Aschwanden, A., & Brinkerhoff, D. J. (2022). Calibrated mass loss predictions for the Greenland Ice Sheet. Geophysical Research Letters, 49, e2022GL099058. https://doi.org/10.1029/2022GL099058
+
+@article{https://doi.org/10.1029/2022GL099058,
+author = {Aschwanden, A. and Brinkerhoff, D. J.},
+title = {Calibrated Mass Loss Predictions for the Greenland Ice Sheet},
+journal = {Geophysical Research Letters},
+volume = {49},
+number = {19},
+pages = {e2022GL099058},
+keywords = {ice sheet modeling, Bayesian calibration, data assimilation, sea level rise, Greenland, uncertainty quantification},
+doi = {https://doi.org/10.1029/2022GL099058},
+abstract = {Abstract The potential contribution of ice sheets remains the largest source of uncertainty in predicting sea-level due to the limited predictive skill of numerical ice sheet models, yet effective planning necessitates that these predictions are credible and accompanied by a defensible assessment of uncertainty. While the use of large ensembles of simulations allows probabilistic assessments, there is no guarantee that these simulations are aligned with observations. Here, we present a probabilistic prediction of 21st century mass loss from the Greenland Ice Sheet calibrated with observations of surface speeds and mass change using a novel two-stage surrogate-based approach. Our results suggest a sea-level contribution ranging from 4 to 30 cm at the year 2100, proviso the assumption that our chosen ice sheet model’s physics represent reality.},
+year = {2022}
+}
