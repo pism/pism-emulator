@@ -29,8 +29,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-from pismemulator.nnemulator import (DNNEmulator, NNEmulator, PISMDataModule,
-                                     PISMDataset)
+from pismemulator.nnemulator import DNNEmulator, NNEmulator, PISMDataModule, PISMDataset
 from pismemulator.utils import plot_eigenglaciers
 
 
@@ -63,7 +62,7 @@ if __name__ == "__main__":
         "--samples_file",
         default=abspath(
             join(
-                script_directory, "../data/samples/velocity_calibration_samples_100.csv"
+                script_directory, "../data/samples/velocity_calibration_samples_50.csv"
             )
         ),
     )
