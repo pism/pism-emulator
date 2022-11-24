@@ -12,21 +12,32 @@ with open(str(Path(".", "VERSION").absolute())) as version_file:
 packages = ["pismemulator"]
 
 # Dependencies of pism-emulator
-requirements = [
-    "numpy>=1.10.0",
-    "scipy>=0.18.0",
-    "sklearn",
-    "PyDOE",
-    "SALib",
-    "pandas>=0.18.1",
-    "pathlib",
-    "matplotlib>=2.2.2",
-    "openpyxl>=3.0.0",
-    "seaborn>=0.8",
-    "xarray",
-    "torch",
-    "pytorch-lightning",
-]
+requirements = (
+    [
+        "numpy>=1.10.0",
+        "scipy>=0.18.0",
+        "sklearn",
+        "PyDOE",
+        "SALib",
+        "pandas>=0.18.1",
+        "pathlib",
+        "matplotlib>=2.2.2",
+        "openpyxl>=3.0.0",
+        "seaborn>=0.8",
+        "xarray",
+        "torch",
+        "pytorch-lightning",
+        "torchvision",
+        "torchaudio",
+        "torchinfo",
+        "tqdm",
+        "Pillow",
+        "scipy",
+        "pyro-ppl",
+        "scikit-learn",
+        "netcdf4",
+    ],
+)
 
 setup(
     name="pismemulator",
