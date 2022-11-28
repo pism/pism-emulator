@@ -1,22 +1,17 @@
 #!/bin/env python3
 
-from argparse import ArgumentParser
-
-import numpy as np
 import os
+from argparse import ArgumentParser
 from os.path import join
-
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pylab as plt
-
-from matplotlib.ticker import NullFormatter
-from matplotlib.patches import Polygon
-from matplotlib.lines import Line2D
-
 import seaborn as sns
-
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon
+from matplotlib.ticker import NullFormatter
 from scipy.stats import beta, gaussian_kde
 
 from pismemulator.utils import param_keys_dict as keys_dict

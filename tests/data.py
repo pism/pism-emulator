@@ -1,6 +1,6 @@
 from io import StringIO
-import pandas as pd
 
+import pandas as pd
 
 # Test data from DeConto and Pollard (2016):
 # Contribution of Antarctica to past and future sea-level rise

@@ -8,7 +8,7 @@ ymax=-635600
 
 
 for GRID in 9000 1800; do
-    rm -rf greenland_vel_mosaic250_*_v1_g${GRID}m*.nc 
+    rm -rf greenland_vel_mosaic250_*_v1_g${GRID}m*.nc
     for var in vx vy ex ey; do
         gdalwarp -overwrite  -r average -s_srs EPSG:3413 -t_srs EPSG:3413 -te $xmin $ymin $xmax $ymax -tr $GRID $GRID greenland_vel_mosaic250_${var}_v1.tif greenland_vel_mosaic250_${var}_v1_g${GRID}m_i.nc
         cdo setattribute,$var@units="m year-'" -chname,Band1,$var greenland_vel_mosaic250_${var}_v1_g${GRID}m_i.nc greenland_vel_mosaic250_${var}_v1_g${GRID}m.nc

@@ -18,9 +18,10 @@
 
 
 import numpy as np
-from numpy.testing import assert_equal, assert_almost_equal, assert_array_almost_equal
 import torch
-from pismemulator.nnemulator import absolute_error, PISMDataset
+from numpy.testing import assert_almost_equal, assert_array_almost_equal, assert_equal
+
+from pismemulator.nnemulator import PISMDataset, absolute_error
 
 
 def test_absolute_error():

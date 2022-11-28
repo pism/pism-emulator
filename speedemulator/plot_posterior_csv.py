@@ -1,22 +1,17 @@
 #!/bin/env python3
 
-from argparse import ArgumentParser
-
-import numpy as np
 import os
+from argparse import ArgumentParser
 from os.path import join
-
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pylab as plt
-
-from matplotlib.ticker import NullFormatter
-from matplotlib.patches import Polygon
-from matplotlib.lines import Line2D
-
 import seaborn as sns
-
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon
+from matplotlib.ticker import NullFormatter
 from scipy.stats import beta, gaussian_kde
 
 from pismemulator.utils import param_keys_dict as keys_dict
@@ -106,7 +101,7 @@ if __name__ == "__main__":
 
     X_posterior = posterior_df.drop(columns=["Model"]).values
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-    Cn_0 = (np.sign(C_0) * C_0 ** 2 + 1) / 2.0
+    Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
 
     fig, axs = plt.subplots(nrows=n_parameters, ncols=n_parameters, figsize=(5.4, 5.6))
     fig.subplots_adjust(hspace=0.0, wspace=0.0)

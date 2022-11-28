@@ -14,10 +14,9 @@ jobs:
           name: Run tests
           command: |
             pytest -v -W ignore::UserWarning ./tests
-            
+
 workflows:
   version: 2
   build_and_test:
     jobs:
       - build
-      

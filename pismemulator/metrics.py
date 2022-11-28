@@ -18,8 +18,8 @@
 
 import torch
 from torch import Tensor
-from torchmetrics.utilities.checks import _check_same_shape
 from torchmetrics import Metric
+from torchmetrics.utilities.checks import _check_same_shape
 
 
 def _area_absolute_error_update(

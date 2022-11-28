@@ -18,22 +18,19 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import os
 from argparse import ArgumentParser
 
 import numpy as np
-import os
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-import torch
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (
-    ModelCheckpoint,
-)
-from pytorch_lightning.loggers import TensorBoardLogger
-from pismemulator.nnemulator import PISMDataset, PISMDataModule
 from pismemulator.nnemulator import NNEmulator as NNEmulator
+from pismemulator.nnemulator import PISMDataModule, PISMDataset
 from pismemulator.utils import plot_eigenglaciers
-
 
 if __name__ == "__main__":
     __spec__ = None

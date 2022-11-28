@@ -19,21 +19,21 @@
 # utils.py contains generic functions to read data or perform statistical analyses.
 
 import collections
+import sys
 from math import sqrt
-from matplotlib.colors import LogNorm
-import numpy as np
-import pandas as pd
 from os import mkdir
 from os.path import isdir, join
-from pyDOE import lhs
-import pylab as plt
-from SALib.sample import saltelli
-from scipy.stats.distributions import truncnorm, gamma, uniform, randint
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-import sys
+import numpy as np
+import pandas as pd
+import pylab as plt
 import xarray as xr
+from matplotlib.colors import LogNorm
+from pyDOE import lhs
+from SALib.sample import saltelli
+from scipy.stats.distributions import gamma, randint, truncnorm, uniform
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 np.random.seed(0)
 

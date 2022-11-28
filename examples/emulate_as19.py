@@ -21,24 +21,26 @@
 # This scripts emulates the "true" ensemble using the 500 member ensembe
 # of Aschwanden et al. (2019) as training data
 
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-import GPy as gp
-from matplotlib.patches import Rectangle
-import numpy as np
 import os
-import pylab as plt
-from scipy import stats
-import seaborn as sns
 import sys
-from pismemulator.utils import gelman_rubin
-from pismemulator.utils import golden_ratio
-from pismemulator.utils import kl_divergence
-from pismemulator.utils import prepare_data
-from pismemulator.utils import rmsd
-from pismemulator.utils import set_size
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+
+import GPy as gp
+import numpy as np
+import pylab as plt
+import seaborn as sns
+from matplotlib.patches import Rectangle
+from scipy import stats
 
 from pismemulator.emulate import emulate_gp
-
+from pismemulator.utils import (
+    gelman_rubin,
+    golden_ratio,
+    kl_divergence,
+    prepare_data,
+    rmsd,
+    set_size,
+)
 
 if __name__ == "__main__":
 
@@ -62,7 +64,12 @@ if __name__ == "__main__":
         default=320,
     )
     parser.add_argument(
-        "-b", "--bin_width", dest="bin_width", help="Width of histogram bins. Default=1cm", type=float, default=1.0
+        "-b",
+        "--bin_width",
+        dest="bin_width",
+        help="Width of histogram bins. Default=1cm",
+        type=float,
+        default=1.0,
     )
 
     options = parser.parse_args()
@@ -105,7 +112,12 @@ if __name__ == "__main__":
     # Use the "best" emulator and train the emlator with the AS19 samples / response, then
     # run the emlator
     p_as19, status = emulate_gp(
-        samples, response, X_true, kernel=gp.kern.ExpQuad, stepwise=False, optimizer_options={"max_iters": 4000},
+        samples,
+        response,
+        X_true,
+        kernel=gp.kern.ExpQuad,
+        stepwise=False,
+        optimizer_options={"max_iters": 4000},
     )
 
     # p_as[0] are the posterior mean
@@ -114,7 +126,9 @@ if __name__ == "__main__":
     # Histogram and PDF of the emulated AS19 ensemble estimated using a Gaussian KDE
     p_as19 = np.squeeze(p_as19[0])
     P_as19_hist = np.histogram(p_as19, bins=bins, density=True)[0]
-    p_as19_kernel = stats.gaussian_kde(np.squeeze(p_as19), bw_method=2 / p_as19.std(ddof=1))
+    p_as19_kernel = stats.gaussian_kde(
+        np.squeeze(p_as19), bw_method=2 / p_as19.std(ddof=1)
+    )
     P_as19_kde = p_as19_kernel.evaluate(bins[:-1])
 
     percentiles = [5, 16, 50, 84, 95]
@@ -191,7 +205,14 @@ if __name__ == "__main__":
     for pctl in percentiles:
         pc = np.percentile(p, pctl)
         ypc = p_kernel.evaluate(pc)
-        ax.plot([pc, pc], [0, ypc], linewidth=1.0, linestyle="dotted", color="k", transform=ax.transData)
+        ax.plot(
+            [pc, pc],
+            [0, ypc],
+            linewidth=1.0,
+            linestyle="dotted",
+            color="k",
+            transform=ax.transData,
+        )
         qc = np.percentile(q, pctl)
         ax.plot(
             [qc, qc],
@@ -211,7 +232,10 @@ if __name__ == "__main__":
             transform=ax.transData,
         )
         ax.annotate(
-            r"""rmsd={:2.2f}cm""".format(rmsd(p, p_as19)), (0.6, 0.6), xytext=(0.6, 0.4), xycoords="axes fraction"
+            r"""rmsd={:2.2f}cm""".format(rmsd(p, p_as19)),
+            (0.6, 0.6),
+            xytext=(0.6, 0.4),
+            xycoords="axes fraction",
         )
 
     ax.set_ylabel("Probability (1)")

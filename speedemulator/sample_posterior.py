@@ -1,18 +1,16 @@
 #!/bin/env python3
 
+import os
 from argparse import ArgumentParser
+from os.path import join
 
 import numpy as np
-import os
-from os.path import join
+import pandas as pd
+import torch
 from scipy.special import gamma
 from scipy.stats import beta
 
-import torch
-
 from pismemulator.nnemulator import NNEmulator, PISMDataset
-
-import pandas as pd
 
 
 class MALASampler(object):
