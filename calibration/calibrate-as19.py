@@ -2,24 +2,23 @@
 
 # Copyright (C) 2020-22 Andy Aschwanden, Douglas J. Brinkerhoff
 
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
-from matplotlib import colors
-import numpy as np
-import pylab as plt
-import pandas as pd
-import seaborn as sns
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from functools import reduce
 from itertools import cycle
 
-from pismemulator.utils import load_imbie, load_imbie_csv
-from pismemulator.utils import param_keys_dict as keys_dict
-
+import numpy as np
+import pandas as pd
+import pylab as plt
+import seaborn as sns
+from matplotlib import colors
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from scipy.interpolate import interp1d
 from scipy.stats import beta
+from scipy.stats.distributions import gamma, randint, truncnorm, uniform
 
-from scipy.stats.distributions import truncnorm, gamma, uniform, randint
+from pismemulator.utils import load_imbie, load_imbie_csv
+from pismemulator.utils import param_keys_dict as keys_dict
 
 
 def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):

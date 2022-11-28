@@ -18,35 +18,29 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-from argparse import ArgumentParser
-
-import numpy as np
 import os
+from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pylab as plt
+import pytorch_lightning as pl
+import seaborn as sns
+import torch
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon
+from matplotlib.ticker import NullFormatter
 from pyDOE import lhs
-from scipy.stats import dirichlet
-from scipy.stats import gaussian_kde
-from scipy.stats.distributions import uniform
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.special import gamma
+from scipy.stats import dirichlet, gaussian_kde
+from scipy.stats.distributions import uniform
 from sklearn.metrics import mean_squared_error
 
-import pylab as plt
-from matplotlib.ticker import NullFormatter
-from matplotlib.patches import Polygon
-from matplotlib.lines import Line2D
-import seaborn as sns
-
-
-import torch
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (
-    ModelCheckpoint,
-)
-from pytorch_lightning.loggers import TensorBoardLogger
-from pismemulator.nnemulator import PDDEmulator, TorchPDDModel, PDDDataModule
+from pismemulator.nnemulator import PDDDataModule, PDDEmulator, TorchPDDModel
 from pismemulator.utils import load_hirham_climate
 
 np.random.seed(2)

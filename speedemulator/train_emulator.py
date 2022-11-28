@@ -29,7 +29,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-from pismemulator.nnemulator import DNNEmulator, NNEmulator, PISMDataModule, PISMDataset
+from pismemulator.nnemulator import (DNNEmulator, NNEmulator, PISMDataModule,
+                                     PISMDataset)
 from pismemulator.utils import plot_eigenglaciers
 
 

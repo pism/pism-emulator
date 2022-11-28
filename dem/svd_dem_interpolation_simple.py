@@ -1,15 +1,15 @@
 from argparse import ArgumentParser
+from glob import glob
 
-import xarray as xr
-import torch
 import numpy as np
 import pylab as plt
-from glob import glob
 import pytorch_lightning as pl
-from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
-from torch.utils.data import DataLoader, TensorDataset
+import torch
+import xarray as xr
 from sklearn.model_selection import train_test_split
 from torch.autograd import Variable
+from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
+from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics import MeanSquaredError
 
 training_files = glob("usurf_gris_g1800m_v5_RAGIS_id_0_1980-1-1_2020-1-1_YM.nc")

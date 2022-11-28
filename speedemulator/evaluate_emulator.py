@@ -18,29 +18,20 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-from argparse import ArgumentParser
-
-import numpy as np
 import os
+from argparse import ArgumentParser
 from os import mkdir
 from os.path import isdir, join
-from scipy.stats import dirichlet
-import torch
+
+import numpy as np
 import pylab as plt
+import torch
 from matplotlib.colors import LogNorm
-
-from sklearn.metrics import mean_absolute_error
-from sklearn.metrics import r2_score
-from scipy.stats import pearsonr
-
+from scipy.stats import dirichlet, pearsonr
+from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm import tqdm
 
-from pismemulator.nnemulator import (
-    NNEmulator,
-    PISMDataset,
-    PISMDataModule,
-)
-
+from pismemulator.nnemulator import NNEmulator, PISMDataModule, PISMDataset
 from pismemulator.utils import param_keys_dict as keys_dict
 
 if __name__ == "__main__":

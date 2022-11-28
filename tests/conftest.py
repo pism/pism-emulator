@@ -1,8 +1,8 @@
-import numpy as np
 from io import StringIO
-import pytest
-import pandas as pd
 
+import numpy as np
+import pandas as pd
+import pytest
 
 # Test data from DeConto and Pollard (2016):
 # Contribution of Antarctica to past and future sea-level rise

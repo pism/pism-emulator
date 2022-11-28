@@ -18,13 +18,14 @@
 
 
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, TensorDataset
 import pytorch_lightning as pl
+import torch
+from numpy.testing import (assert_almost_equal, assert_array_almost_equal,
+                           assert_equal)
 from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, TensorDataset
 
-from numpy.testing import assert_almost_equal, assert_array_almost_equal, assert_equal
 from pismemulator.nnemulator import DNNEmulator, NNEmulator, PISMDataset
 
 

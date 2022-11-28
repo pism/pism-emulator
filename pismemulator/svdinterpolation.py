@@ -17,20 +17,20 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 from collections import OrderedDict
-import numpy as np
-from sklearn.model_selection import train_test_split
-from tqdm import tqdm
-import xarray as xr
+from typing import Optional
 
+import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import xarray as xr
+from sklearn.model_selection import train_test_split
 from torch import Tensor
-import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 from pismemulator.metrics import L2MeanSquaredError
-from typing import Optional
 
 
 class DEMDataset(torch.utils.data.Dataset):

@@ -53,19 +53,14 @@ import time
 from getpass import getpass
 
 try:
-    from urllib.parse import urlparse
-    from urllib.request import urlopen, Request, build_opener, HTTPCookieProcessor
     from urllib.error import HTTPError, URLError
+    from urllib.parse import urlparse
+    from urllib.request import (HTTPCookieProcessor, Request, build_opener,
+                                urlopen)
 except ImportError:
+    from urllib2 import (HTTPCookieProcessor, HTTPError, Request, URLError,
+                         build_opener, urlopen)
     from urlparse import urlparse
-    from urllib2 import (
-        urlopen,
-        Request,
-        HTTPError,
-        URLError,
-        build_opener,
-        HTTPCookieProcessor,
-    )
 
 short_name = "NSIDC-0670"
 version = "1"
