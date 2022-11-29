@@ -226,10 +226,17 @@ class MALASampler(object):
                     + dataset.X_mean.cpu().numpy(),
                     columns=dataset.X_keys,
                 )
-                df.to_csv(
-                    posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
-                    compression="infer",
-                )
+                if format == "parquet":
+                    df.to_parquet(
+                        posterior_dir
+                        + "X_posterior_model_{0}.parquet".format(model_index),
+                    )
+                else:
+                    df.to_csv(
+                        posterior_dir
+                        + "X_posterior_model_{0}.csv.gz".format(model_index),
+                        compression="infer",
+                    )
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
@@ -240,6 +247,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--format", choices=["csv", "parquet"], default="csv")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
@@ -259,6 +267,7 @@ if __name__ == "__main__":
 
     data_dir = args.data_dir
     device = args.device
+    format = args.format
     emulator_dir = args.emulator_dir
     model_index = args.model_index
     n_posterior_samples = args.num_posterior_samples

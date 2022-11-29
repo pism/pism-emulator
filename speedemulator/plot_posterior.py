@@ -87,9 +87,9 @@ if __name__ == "__main__":
     X_list = []
     p = Path(f"{emulator_dir}/posterior_samples/")
     print("Loading posterior samples\n")
-    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
+    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.parquet"))):
         print(f"  -- {m_file}")
-        df = pd.read_csv(m_file).sample(frac=frac)
+        df = pd.read_parquet(m_file).sample(frac=frac)
         if "Unnamed: 0" in df.columns:
             df.drop(columns=["Unnamed: 0"], inplace=True)
         model = m_file.name.split("_")[-1].split(".")[0]

@@ -27,6 +27,7 @@ requirements = [
     "xarray",
     "torch",
     "pytorch-lightning",
+    "pyarrow",
 ]
 
 setup(
