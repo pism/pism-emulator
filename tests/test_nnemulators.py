@@ -20,8 +20,7 @@
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from numpy.testing import (assert_almost_equal, assert_array_almost_equal,
-                           assert_equal)
+from numpy.testing import assert_almost_equal, assert_array_almost_equal, assert_equal
 from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
@@ -35,7 +34,7 @@ def test_dataset():
 
     dataset = PISMDataset(
         data_dir="training_data",
-        samples_file="../data/samples/velocity_calibration_samples_100.csv",
+        samples_file="data/samples/velocity_calibration_samples_100.csv",
         target_file="tests/test_data/test_vel_g9000m.nc",
         thinning_factor=1,
     )
