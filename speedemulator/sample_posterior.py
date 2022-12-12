@@ -7,10 +7,54 @@ from os.path import join
 import numpy as np
 import pandas as pd
 import torch
+from torch.autograd import Variable
 from scipy.special import gamma
 from scipy.stats import beta
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset
+
+
+def torch_find_MAP(X, X_min, X_max, Y_target, model):
+    Y_pred = 10 ** model(X, add_mean=True)
+    r = Y_pred - Y_target
+    t = Variable(r / sigma_hat).type(torch.FloatTensor)
+    X_bar = Variable(X, requires_grad=True)
+
+    learning_rate = 0.1
+    for it in range(51):
+        X_bar.data = (X_bar.data - X_min) / (X_max - X_min)
+        likelihood_dist = torch.distributions.StudentT(nu)
+        log_likelihood = (
+            likelihood_dist.log_prob(t**2).sum() - np.log(sigma_hat).sum()
+        )
+        prior_dist = torch.distributions.Beta(alpha_b, beta_b)
+        log_prior = (
+            prior_dist.log_prob(X_bar).sum()
+            * torch.lgamma(torch.tensor(alpha_b + beta_b))
+            / (torch.lgamma(torch.tensor(alpha_b)) * torch.lgamma(torch.tensor(beta_b)))
+        )
+        NLL = -(log_likelihood + log_prior)
+        NLL.backward()
+
+        if it % 10 == 0:
+            print(f"iter: {it:d}, log(P): {NLL:.1f}\n")
+            print(
+                "".join(
+                    [
+                        f"{key}: {(val * std + mean):.3f}\n"
+                        for key, val, std, mean in zip(
+                            dataset.X_keys,
+                            X_bar.data.cpu().numpy(),
+                            dataset.X_std,
+                            dataset.X_mean,
+                        )
+                    ]
+                )
+            )
+
+        X_bar.data -= learning_rate * X_bar.grad.data
+        X_bar.grad.data.zero_()
+    return X_bar
 
 
 class MALASampler(object):
@@ -30,7 +74,7 @@ class MALASampler(object):
         self.beta_b = beta_b
         self.emulator_dir = emulator_dir
 
-    def find_MAP(self, X, Y_target, X_min, X_max, n_iters=50, print_interval=10):
+    def find_MAP(self, X, Y_target, X_min, X_max, n_iters=51, print_interval=10):
         print("***********************************************")
         print("***********************************************")
         print("Finding MAP point")
@@ -86,11 +130,21 @@ class MALASampler(object):
             - np.log(np.sqrt(np.pi * nu) * sigma_hat)
             - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
         )
+
+        # Likelihood
+        L1 = torch.sum(
+            np.log(gamma((nu + 1) / 2.0))
+            - np.log(gamma(nu / 2.0))
+            - np.log(np.sqrt(np.pi * nu) * sigma_hat)
+            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
+        )
+
+        # Prior
         L2 = torch.sum(
             (self.alpha_b - 1) * torch.log(X_bar)
             + (self.beta_b - 1) * torch.log(1 - X_bar)
         )
-
+        print(L1, L2, self.alpha * L1)
         return -(self.alpha * L1 + L2)
 
     def get_log_like_gradient_and_hessian(
@@ -311,7 +365,7 @@ if __name__ == "__main__":
     K = point_area * rho
     sigma_hat = np.sqrt(sigma**2 / K**2)
 
-    # Eq 52
+    # Eq 23 in SI
     # this is 2.0 in the paper
     alpha_b = 3.0
     beta_b = 3.0
@@ -320,13 +374,10 @@ if __name__ == "__main__":
         * (X_max - X_min)
         + X_min
     )
+    # Initial condition for MAP. Note that using 0 yields similar results
     X_0 = torch.tensor(
         X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
     )
-    # This is required for
-    # X_bar = (X - X_min) / (X_max - X_min)
-    # to work
-
     X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
     X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
 
@@ -340,12 +391,12 @@ if __name__ == "__main__":
 
     mala = MALASampler(e, emulator_dir=emulator_dir)
     X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
-    # To reproduce the paper, n_iters should be 10^5
-    X_posterior = mala.MALA(
-        X_map,
-        U_target,
-        n_iters=n_iters,
-        model_index=int(model_index),
-        save_interval=1000,
-        print_interval=100,
-    )
+    # # To reproduce the paper, n_iters should be 10^5
+    # X_posterior = mala.MALA(
+    #     X_map,
+    #     U_target,
+    #     n_iters=n_iters,
+    #     model_index=int(model_index),
+    #     save_interval=1000,
+    #     print_interval=100,
+    # )
