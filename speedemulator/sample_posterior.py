@@ -33,6 +33,7 @@ def torch_find_MAP(X, X_min, X_max, Y_target, model):
             * torch.lgamma(torch.tensor(alpha_b + beta_b))
             / (torch.lgamma(torch.tensor(alpha_b)) * torch.lgamma(torch.tensor(beta_b)))
         )
+        print(log_likelihood, log_prior)
         NLL = -(log_likelihood + log_prior)
         NLL.backward()
 
@@ -84,6 +85,7 @@ class MALASampler(object):
         alphas = np.logspace(-4, 0, 11)
         # Find MAP point
         for i in range(n_iters):
+            print(X)
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
                 X, Y_target, X_min, X_max, compute_hessian=True
             )
@@ -124,12 +126,6 @@ class MALASampler(object):
         # model result is in log space
         Y_pred = 10 ** self.model(X, add_mean=True)
         r = Y_pred - Y_target
-        L1 = torch.sum(
-            np.log(gamma((nu + 1) / 2.0))
-            - np.log(gamma(nu / 2.0))
-            - np.log(np.sqrt(np.pi * nu) * sigma_hat)
-            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
-        )
 
         # Likelihood
         L1 = torch.sum(
@@ -144,7 +140,6 @@ class MALASampler(object):
             (self.alpha_b - 1) * torch.log(X_bar)
             + (self.beta_b - 1) * torch.log(1 - X_bar)
         )
-        print(L1, L2, self.alpha * L1)
         return -(self.alpha * L1 + L2)
 
     def get_log_like_gradient_and_hessian(

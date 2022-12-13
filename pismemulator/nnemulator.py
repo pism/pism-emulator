@@ -37,8 +37,12 @@ from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 from tqdm import tqdm
 
-from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
-                                  absolute_error, area_absolute_error)
+from pismemulator.metrics import (
+    AbsoluteError,
+    AreaAbsoluteError,
+    absolute_error,
+    area_absolute_error,
+)
 
 
 class PDDEmulator(pl.LightningModule):
@@ -126,7 +130,7 @@ class PDDEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
         }
 
         return [optimizer], [scheduler]
@@ -250,7 +254,7 @@ class DNNEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
         }
 
         return [optimizer], [scheduler]
@@ -380,7 +384,7 @@ class NNEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
         }
 
         return [optimizer], [scheduler]
