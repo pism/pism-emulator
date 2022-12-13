@@ -22,10 +22,10 @@ import os
 from argparse import ArgumentParser
 
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
+from lightning.callbacks import ModelCheckpoint
+from lightning.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
 from pismemulator.nnemulator import DNNEmulator as NNEmulator

@@ -3,7 +3,7 @@ from glob import glob
 
 import numpy as np
 import pylab as plt
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import xarray as xr
 from sklearn.model_selection import train_test_split

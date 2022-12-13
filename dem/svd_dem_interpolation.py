@@ -4,17 +4,16 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import pylab as plt
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import xarray as xr
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from lightning.callbacks.early_stopping import EarlyStopping
 from sklearn.model_selection import train_test_split
 from torch import Tensor, tensor
 from torch.optim.lr_scheduler import ExponentialLR
 
 from pismemulator.metrics import L2MeanSquaredError
-from pismemulator.svdinterpolation import (DEMDataModule, DEMDataset,
-                                           LinearRegression)
+from pismemulator.svdinterpolation import DEMDataModule, DEMDataset, LinearRegression
 
 # matplotlib.use("agg")
 

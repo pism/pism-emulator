@@ -33,8 +33,8 @@ def test_dataset():
     """"""
 
     dataset = PISMDataset(
-        data_dir="training_data",
-        samples_file="data/samples/velocity_calibration_samples_100.csv",
+        data_dir="tests/training_data",
+        samples_file="data/samples/velocity_calibration_samples_50.csv",
         target_file="tests/test_data/test_vel_g9000m.nc",
         thinning_factor=1,
     )
@@ -42,11 +42,11 @@ def test_dataset():
     X = dataset.X.detach().numpy()
     Y = dataset.Y.detach().numpy()
 
-    with np.load("test_samples.npz") as data:
+    with np.load("tests/test_samples.npz") as data:
         X_true = data["arr_0"]
-    with np.load("test_responses.npz") as data:
+    with np.load("tests/test_responses.npz") as data:
         Y_true = data["arr_0"]
-    with np.load("test_areas.npz") as data:
+    with np.load("tests/test_areas.npz") as data:
         normed_area_true = data["arr_0"]
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters

@@ -25,7 +25,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import pyro
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn as nn
 import xarray as xr
@@ -117,7 +117,7 @@ class PDDEmulator(pl.LightningModule):
 
     @staticmethod
     def add_model_specific_args(parent_parser):
-        parser = parent_parser.add_argument_group("NNEmulator")
+        parser = parent_parser.add_argument_group("PDDEmulator")
         parser.add_argument("--batch_size", type=int, default=128)
         parser.add_argument("--n_hidden", default=128)
         parser.add_argument("--learning_rate", type=float, default=0.1)
