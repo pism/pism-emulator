@@ -1,9 +1,9 @@
 from argparse import ArgumentParser
 from glob import glob
 
+import lightning as pl
 import numpy as np
 import pylab as plt
-import lightning as pl
 import torch
 import xarray as xr
 from sklearn.model_selection import train_test_split

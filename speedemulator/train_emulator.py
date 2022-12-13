@@ -22,8 +22,8 @@ import os
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
 
-import numpy as np
 import lightning as pl
+import numpy as np
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger

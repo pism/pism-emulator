@@ -7,9 +7,9 @@ from os.path import join
 import numpy as np
 import pandas as pd
 import torch
-from torch.autograd import Variable
 from scipy.special import gamma
 from scipy.stats import beta
+from torch.autograd import Variable
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset
 

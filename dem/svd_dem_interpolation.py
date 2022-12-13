@@ -1,10 +1,10 @@
 from argparse import ArgumentParser
 
+import lightning as pl
 import matplotlib
 import numpy as np
 import pandas as pd
 import pylab as plt
-import lightning as pl
 import torch
 import xarray as xr
 from lightning.callbacks.early_stopping import EarlyStopping

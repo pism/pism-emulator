@@ -21,8 +21,8 @@
 import os
 from argparse import ArgumentParser
 
-import numpy as np
 import lightning as pl
+import numpy as np
 import torch
 from lightning.callbacks import ModelCheckpoint
 from lightning.loggers import TensorBoardLogger

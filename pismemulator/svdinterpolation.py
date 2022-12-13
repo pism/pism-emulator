@@ -19,8 +19,8 @@
 from collections import OrderedDict
 from typing import Optional
 
-import numpy as np
 import lightning as pl
+import numpy as np
 import torch
 import torch.nn as nn
 import xarray as xr

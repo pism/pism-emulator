@@ -22,10 +22,10 @@ from glob import glob
 from os.path import join
 from typing import Optional
 
+import lightning as pl
 import numpy as np
 import pandas as pd
 import pyro
-import lightning as pl
 import torch
 import torch.nn as nn
 import xarray as xr
