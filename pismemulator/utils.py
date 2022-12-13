@@ -62,7 +62,7 @@ param_keys_dict = {
     "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
     "z_min": "$z_{\mathrm{min}}$ (m)",
     "z_max": "$z_{\mathrm{max}}$ (m)",
-    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$ (m yr$^{-1}$",
+    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$ (m yr$^{-1}$)",
     "SIAe": "$E_{\mathrm{SIA}}$ (1)",
     "SSAe": "$E_{\mathrm{SSA}}$ (1)",
     "topg_to_phi_base": "$b_{\mathrm{base}}$ (m)",

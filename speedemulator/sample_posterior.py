@@ -85,10 +85,10 @@ class MALASampler(object):
         alphas = np.logspace(-4, 0, 11)
         # Find MAP point
         for i in range(n_iters):
-            print(X)
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
                 X, Y_target, X_min, X_max, compute_hessian=True
             )
+            print(g)
             p = Hinv @ -g
             alpha_index = np.nanargmin(
                 [
