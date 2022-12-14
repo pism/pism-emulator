@@ -25,11 +25,12 @@ from os.path import abspath, dirname, join, realpath
 import lightning as pl
 import numpy as np
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-from pismemulator.nnemulator import DNNEmulator, NNEmulator, PISMDataModule, PISMDataset
+from pismemulator.nnemulator import (DNNEmulator, NNEmulator, PISMDataModule,
+                                     PISMDataset)
 from pismemulator.utils import plot_eigenglaciers
 
 
@@ -147,7 +148,11 @@ if __name__ == "__main__":
             dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
         )
         callbacks.append(checkpoint_callback)
+
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
+
+    timer = Timer()
+    callbacks.append(timer)
 
     e = NNEmulator(
         n_parameters,
@@ -172,4 +177,5 @@ if __name__ == "__main__":
         val_loader = data_loader.val_loader
 
     trainer.fit(e, train_loader, val_loader)
+    print(f"Training took {timer.time_elapsed():.0f}s")
     torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")

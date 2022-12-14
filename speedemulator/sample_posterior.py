@@ -88,8 +88,10 @@ class MALASampler(object):
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
                 X, Y_target, X_min, X_max, compute_hessian=True
             )
-            print(g)
+            # - f'(x) / f''(x)
+            # g = f'(x), Hinv = 1 / f''(x)
             p = Hinv @ -g
+            # Line search
             alpha_index = np.nanargmin(
                 [
                     self.get_log_like_gradient_and_hessian(

@@ -17,10 +17,11 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 
+import lightning as pl
 import numpy as np
-import pytorch_lightning as pl
 import torch
-from numpy.testing import assert_almost_equal, assert_array_almost_equal, assert_equal
+from numpy.testing import (assert_almost_equal, assert_array_almost_equal,
+                           assert_equal)
 from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset

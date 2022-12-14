@@ -22,15 +22,9 @@ import pytest
 import scipy
 from numpy.testing import assert_array_almost_equal
 
-from pismemulator.utils import (
-    calc_bic,
-    draw_samples,
-    gelman_rubin,
-    kl_divergence,
-    prepare_data,
-    rmsd,
-    stepwise_bic,
-)
+from pismemulator.utils import (calc_bic, draw_samples, gelman_rubin,
+                                kl_divergence, prepare_data, rmsd,
+                                stepwise_bic)
 
 
 def test_calc_bic():
