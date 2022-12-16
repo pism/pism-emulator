@@ -66,7 +66,12 @@ class MALASampler(object):
     """
 
     def __init__(
-        self, model, alpha_b=3.0, beta_b=3.0, alpha=0.01, emulator_dir="./emulator"
+        self,
+        model,
+        alpha=0.01,
+        alpha_b=3.0,
+        beta_b=3.0,
+        emulator_dir="./emulator",
     ):
         super().__init__()
         self.model = model.eval()
@@ -75,7 +80,16 @@ class MALASampler(object):
         self.beta_b = beta_b
         self.emulator_dir = emulator_dir
 
-    def find_MAP(self, X, Y_target, X_min, X_max, n_iters=51, print_interval=10):
+    def find_MAP(
+        self,
+        X,
+        Y_target,
+        X_min,
+        X_max,
+        n_iters=51,
+        learning_rate=0.01,
+        print_interval=10,
+    ):
         print("***********************************************")
         print("***********************************************")
         print("Finding MAP point")
@@ -103,7 +117,8 @@ class MALASampler(object):
                     for alpha in alphas
                 ]
             )
-            mu = X + alphas[alpha_index] * p
+            gamma = alphas[alpha_index]
+            mu = X + gamma * p
             X.data = mu.data
             if i % print_interval == 0:
                 print("===============================================")
@@ -210,7 +225,8 @@ class MALASampler(object):
         self,
         X,
         Y_target,
-        n_iters=10001,
+        burn=1000,
+        n_samples=10001,
         h=0.1,
         h_max=1.0,
         acc_target=0.25,
@@ -237,8 +253,7 @@ class MALASampler(object):
         local_data = None
         m_vars = []
         acc = acc_target
-        print(n_iters)
-        for i in range(n_iters):
+        for i in range(n_samples + burn):
             X, local_data, s = self.MALA_step(
                 X, Y_target, X_min, X_max, h, local_data=local_data
             )
@@ -267,7 +282,7 @@ class MALASampler(object):
                 )
                 print("===============================================")
 
-            if i % save_interval == 0:
+            if (i % save_interval == 0) & (i >= burn):
                 print("///////////////////////////////////////////////")
                 print("Saving samples for model {0}".format(model_index))
                 print("///////////////////////////////////////////////")
@@ -313,7 +328,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     model_index = args.model_index
     n_posterior_samples = args.num_posterior_samples
-    n_iters = args.num_iterations
+    n_samples = args.num_iterations
     samples_file = args.samples_file
     target_file = args.target_file
     thinning_factor = args.thinning_factor
@@ -388,12 +403,12 @@ if __name__ == "__main__":
 
     mala = MALASampler(e, emulator_dir=emulator_dir)
     X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
-    # # To reproduce the paper, n_iters should be 10^5
-    # X_posterior = mala.MALA(
-    #     X_map,
-    #     U_target,
-    #     n_iters=n_iters,
-    #     model_index=int(model_index),
-    #     save_interval=1000,
-    #     print_interval=100,
-    # )
+    # To reproduce the paper, n_samples should be 10^5
+    X_posterior = mala.MALA(
+        X_map,
+        U_target,
+        n_samples=n_samples,
+        model_index=int(model_index),
+        save_interval=1000,
+        print_interval=100,
+    )

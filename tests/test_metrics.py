@@ -20,8 +20,7 @@ import pytest
 import torch
 from numpy.testing import assert_almost_equal
 
-from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
-                                  L2MeanSquaredError)
+from pismemulator.metrics import AbsoluteError, AreaAbsoluteError, L2MeanSquaredError
 
 
 def test_AreaAbsoluteError():
