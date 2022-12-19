@@ -46,6 +46,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
@@ -55,6 +56,7 @@ if __name__ == "__main__":
 
     emulator_dir = args.emulator_dir
     frac = args.fraction
+    out_format = args.out_format
     samples_file = args.samples_file
 
     print("Loading prior samples\n")
@@ -87,9 +89,16 @@ if __name__ == "__main__":
     X_list = []
     p = Path(f"{emulator_dir}/posterior_samples/")
     print("Loading posterior samples\n")
-    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
+    for m, m_file in enumerate(sorted(p.glob(f"X_posterior_model_*.{out_format}"))):
         print(f"  -- {m_file}")
-        df = pd.read_csv(m_file).sample(frac=frac)
+        if out_format == "csv":
+            df = pd.read_csv(m_file)
+        elif out_format == "parquet":
+            df = pd.read_parquet(m_file)
+        else:
+            raise NotImplementedError(f"{out_format} not implemented")
+
+        df = df.sample(frac=frac)
         if "Unnamed: 0" in df.columns:
             df.drop(columns=["Unnamed: 0"], inplace=True)
         model = m_file.name.split("_")[-1].split(".")[0]
