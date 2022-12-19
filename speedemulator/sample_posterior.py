@@ -1,6 +1,7 @@
 #!/bin/env python3
 
 import os
+import time
 from argparse import ArgumentParser
 from os.path import join
 
@@ -9,7 +10,6 @@ import pandas as pd
 import torch
 from scipy.special import gamma
 from scipy.stats import beta
-from torch.autograd import Variable
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset
 
@@ -17,8 +17,8 @@ from pismemulator.nnemulator import NNEmulator, PISMDataset
 def torch_find_MAP(X, X_min, X_max, Y_target, model):
     Y_pred = 10 ** model(X, add_mean=True)
     r = Y_pred - Y_target
-    t = Variable(r / sigma_hat).type(torch.FloatTensor)
-    X_bar = Variable(X, requires_grad=True)
+    t = r / sigma_hat
+    X_bar = torch.tensor(X, requires_grad=True)
 
     learning_rate = 0.1
     for it in range(51):
@@ -68,24 +68,31 @@ class MALASampler(object):
     def __init__(
         self,
         model,
+        X_min,
+        X_max,
+        Y_target,
+        sigma_hat,
         alpha=0.01,
         alpha_b=3.0,
         beta_b=3.0,
+        nu=1.0,
         emulator_dir="./emulator",
     ):
         super().__init__()
         self.model = model.eval()
+        self.X_min = X_min
+        self.X_max = X_max
+        self.Y_target = Y_target
+        self.sigma_hat = sigma_hat
         self.alpha = alpha
         self.alpha_b = alpha_b
         self.beta_b = beta_b
+        self.nu = nu
         self.emulator_dir = emulator_dir
 
     def find_MAP(
         self,
         X,
-        Y_target,
-        X_min,
-        X_max,
         n_iters=51,
         learning_rate=0.01,
         print_interval=10,
@@ -100,7 +107,7 @@ class MALASampler(object):
         # Find MAP point
         for i in range(n_iters):
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
-                X, Y_target, X_min, X_max, compute_hessian=True
+                X, compute_hessian=True
             )
             # - f'(x) / f''(x)
             # g = f'(x), Hinv = 1 / f''(x)
@@ -109,7 +116,7 @@ class MALASampler(object):
             alpha_index = np.nanargmin(
                 [
                     self.get_log_like_gradient_and_hessian(
-                        X + alpha * p, Y_target, X_min, X_max, compute_hessian=False
+                        X + alpha * p, compute_hessian=False
                     )
                     .detach()
                     .cpu()
@@ -139,32 +146,36 @@ class MALASampler(object):
                 print("===============================================")
         return X
 
-    def V(self, X, Y_target, X_bar):
-        # model result is in log space
+    def V(
+        self,
+        X,
+    ):
+        X_bar = (X - self.X_min) / (self.X_max - self.X_min)
+
         Y_pred = 10 ** self.model(X, add_mean=True)
-        r = Y_pred - Y_target
+        r = Y_pred - self.Y_target
+        sigma_hat = self.sigma_hat
+        t = r / sigma_hat
+        nu = self.nu
 
         # Likelihood
-        L1 = torch.sum(
+        log_likelihood = torch.sum(
             np.log(gamma((nu + 1) / 2.0))
             - np.log(gamma(nu / 2.0))
             - np.log(np.sqrt(np.pi * nu) * sigma_hat)
-            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * (r / sigma_hat) ** 2)
+            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
         )
 
         # Prior
-        L2 = torch.sum(
+        log_prior = torch.sum(
             (self.alpha_b - 1) * torch.log(X_bar)
             + (self.beta_b - 1) * torch.log(1 - X_bar)
         )
-        return -(self.alpha * L1 + L2)
+        return -(self.alpha * log_likelihood + log_prior)
 
-    def get_log_like_gradient_and_hessian(
-        self, X, Y_target, X_min, X_max, eps=1e-2, compute_hessian=False
-    ):
+    def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
 
-        X_bar = (X - X_min) / (X_max - X_min)
-        log_pi = self.V(X, Y_target, X_bar)
+        log_pi = self.V(X)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
             H = torch.stack(
@@ -188,22 +199,18 @@ class MALASampler(object):
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
-    def MALA_step(self, X, Y_target, X_min, X_max, h, local_data=None):
+    def MALA_step(self, X, h, local_data=None):
         if local_data is not None:
             pass
         else:
-            local_data = self.get_log_like_gradient_and_hessian(
-                X, Y_target, X_min, X_max, compute_hessian=True
-            )
+            local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
 
         log_pi, _, H, Hinv, log_det_Hinv = local_data
 
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
 
-        log_pi_ = self.get_log_like_gradient_and_hessian(
-            X_, Y_target, X_min, X_max, compute_hessian=False
-        )
+        log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
 
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
@@ -213,9 +220,7 @@ class MALASampler(object):
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
             X.data = X_.data
-            local_data = self.get_log_like_gradient_and_hessian(
-                X, Y_target, X_min, X_max, compute_hessian=True
-            )
+            local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
             s = 1
         else:
             s = 0
@@ -224,7 +229,6 @@ class MALASampler(object):
     def MALA(
         self,
         X,
-        Y_target,
         burn=1000,
         n_samples=10001,
         h=0.1,
@@ -254,9 +258,7 @@ class MALASampler(object):
         m_vars = []
         acc = acc_target
         for i in range(n_samples + burn):
-            X, local_data, s = self.MALA_step(
-                X, Y_target, X_min, X_max, h, local_data=local_data
-            )
+            X, local_data, s = self.MALA_step(X, h, local_data=local_data)
             m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
@@ -399,16 +401,18 @@ if __name__ == "__main__":
     # nu: float
     # gamma
     # sigma_hat
-    U_target = dataset.Y_target.to(device)
+    Y_target = dataset.Y_target.to(device)
 
-    mala = MALASampler(e, emulator_dir=emulator_dir)
-    X_map = mala.find_MAP(X_0, U_target, X_min, X_max)
+    start = time.process_time()
+    mala = MALASampler(e, X_min, X_max, Y_target, sigma_hat, emulator_dir=emulator_dir)
+    X_map = mala.find_MAP(X_0)
     # To reproduce the paper, n_samples should be 10^5
+    n_samples = 1000
     X_posterior = mala.MALA(
         X_map,
-        U_target,
         n_samples=n_samples,
         model_index=int(model_index),
         save_interval=1000,
         print_interval=100,
     )
+    print(time.process_time() - start)
