@@ -303,10 +303,13 @@ class MALASampler(object):
                     + dataset.X_mean.cpu().numpy(),
                     columns=dataset.X_keys,
                 )
-                df.to_csv(
-                    posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
-                    compression="infer",
-                )
+                if out_format == "csv":
+                    df.to_csv(join(posterior_dir, f"X_posterior_model_{0}.csv.gz"))
+                elif out_format == "parquet":
+                    df.to_parquet(join(posterior_dir, f"X_posterior_model_{0}.parquet"))
+                else:
+                    raise NotImplementedError(f"{out_format} not implemented")
+
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
@@ -321,6 +324,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--num_iterations", type=int, default=100000)
+    parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
@@ -340,6 +344,7 @@ if __name__ == "__main__":
     model_index = args.model_index
     n_posterior_samples = args.num_posterior_samples
     n_samples = args.num_iterations
+    out_format = args.out_format
     samples_file = args.samples_file
     target_file = args.target_file
     thinning_factor = args.thinning_factor
