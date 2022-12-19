@@ -17,6 +17,7 @@ from pismemulator.nnemulator import NNEmulator, PISMDataset
 def torch_find_MAP(X, X_min, X_max, Y_target, model):
     Y_pred = 10 ** model(X, add_mean=True)
     r = Y_pred - Y_target
+
     t = r / sigma_hat
     X_bar = torch.tensor(X, requires_grad=True)
 
@@ -77,24 +78,24 @@ class MALASampler(object):
         beta_b=3.0,
         nu=1.0,
         emulator_dir="./emulator",
+        device="cpu",
     ):
         super().__init__()
         self.model = model.eval()
         self.X_min = X_min
         self.X_max = X_max
         self.Y_target = Y_target
-        self.sigma_hat = sigma_hat
-        self.alpha = alpha
-        self.alpha_b = alpha_b
-        self.beta_b = beta_b
-        self.nu = nu
+        self.sigma_hat = torch.tensor(sigma_hat, device=device)
+        self.alpha = torch.tensor(alpha, device=device)
+        self.alpha_b = torch.tensor(alpha_b, device=device)
+        self.beta_b = torch.tensor(beta_b, device=device)
+        self.nu = torch.tensor(nu, device=device)
         self.emulator_dir = emulator_dir
 
     def find_MAP(
         self,
         X,
         n_iters=51,
-        learning_rate=0.01,
         print_interval=10,
     ):
         print("***********************************************")
@@ -103,7 +104,7 @@ class MALASampler(object):
         print("***********************************************")
         print("***********************************************")
         # Line search distances
-        alphas = np.logspace(-4, 0, 11)
+        alphas = torch.logspace(-4, 0, 11)
         # Find MAP point
         for i in range(n_iters):
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
@@ -160,9 +161,9 @@ class MALASampler(object):
 
         # Likelihood
         log_likelihood = torch.sum(
-            np.log(gamma((nu + 1) / 2.0))
-            - np.log(gamma(nu / 2.0))
-            - np.log(np.sqrt(np.pi * nu) * sigma_hat)
+            torch.lgamma((nu + 1) / 2.0)
+            - torch.lgamma(nu / 2.0)
+            - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
             - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
         )
 
@@ -229,10 +230,10 @@ class MALASampler(object):
     def MALA(
         self,
         X,
-        burn=1000,
-        n_samples=10001,
-        h=0.1,
-        h_max=1.0,
+        burn: int = 1000,
+        n_samples: int = 10001,
+        h: float = 0.1,
+        h_max: float = 1.0,
         acc_target=0.25,
         k=0.01,
         beta=0.99,
@@ -240,15 +241,23 @@ class MALASampler(object):
         save_interval=1000,
         print_interval=50,
     ):
-        print("***********************************************")
-        print("***********************************************")
+        print(
+            "********************************************************************************"
+        )
+        print(
+            "********************************************************************************"
+        )
         print(
             "Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(
                 model_index
             )
         )
-        print("***********************************************")
-        print("***********************************************")
+        print(
+            "********************************************************************************"
+        )
+        print(
+            "********************************************************************************"
+        )
 
         posterior_dir = f"{self.emulator_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
@@ -404,7 +413,9 @@ if __name__ == "__main__":
     Y_target = dataset.Y_target.to(device)
 
     start = time.process_time()
-    mala = MALASampler(e, X_min, X_max, Y_target, sigma_hat, emulator_dir=emulator_dir)
+    mala = MALASampler(
+        e, X_min, X_max, Y_target, sigma_hat, emulator_dir=emulator_dir, device=device
+    )
     X_map = mala.find_MAP(X_0)
     # To reproduce the paper, n_samples should be 10^5
     n_samples = 1000
