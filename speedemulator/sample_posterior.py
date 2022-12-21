@@ -4,16 +4,16 @@ import os
 import time
 from argparse import ArgumentParser
 from os.path import join
+from typing import Union
 
 import numpy as np
 import pandas as pd
+import pylab as plt
+import seaborn as sns
 import torch
 from lightning import LightningModule
 from scipy.special import gamma
 from scipy.stats import beta
-
-import seaborn as sns
-import pylab as plt
 
 from pismemulator.nnemulator import NNEmulator, PISMDataset
 from pismemulator.utils import param_keys_dict as keys_dict
@@ -98,27 +98,59 @@ class MALASampler(object):
     def __init__(
         self,
         model: LightningModule,
-        X_min: torch.tensor,
-        X_max: torch.tensor,
-        Y_target: torch.tensor,
-        sigma_hat: torch.tensor,
-        alpha=0.01,
-        alpha_b=3.0,
-        beta_b=3.0,
-        nu=1.0,
+        X_min: Union[float, torch.tensor],
+        X_max: Union[float, torch.tensor],
+        Y_target: Union[np.ndarray, torch.tensor],
+        sigma_hat: Union[np.ndarray, torch.tensor],
+        alpha: Union[float, torch.tensor] = 0.01,
+        alpha_b: Union[float, torch.tensor] = 3.0,
+        beta_b: Union[float, torch.tensor] = 3.0,
+        nu: Union[float, torch.tensor] = 1.0,
         emulator_dir="./emulator",
         device="cpu",
     ):
         super().__init__()
         self.model = model.eval()
-        self.X_min = X_min
-        self.X_max = X_max
-        self.Y_target = Y_target
-        self.sigma_hat = torch.tensor(sigma_hat, device=device)
-        self.alpha = torch.tensor(alpha, device=device)
-        self.alpha_b = torch.tensor(alpha_b, device=device)
-        self.beta_b = torch.tensor(beta_b, device=device)
-        self.nu = torch.tensor(nu, device=device)
+        self.X_min = (
+            torch.tensor(X_min, dtype=torch.float32, device=device)
+            if not isinstance(X_min, torch.Tensor)
+            else X_min.to(device)
+        )
+        self.X_max = (
+            torch.tensor(X_max, dtype=torch.float32, device=device)
+            if not isinstance(X_max, torch.Tensor)
+            else X_max.to(device)
+        )
+        self.Y_target = (
+            torch.tensor(Y_target, dtype=torch.float32, device=device)
+            if not isinstance(Y_target, torch.Tensor)
+            else Y_target.to(device)
+        )
+        self.sigma_hat = (
+            torch.tensor(sigma_hat, dtype=torch.float32, device=device)
+            if not isinstance(sigma_hat, torch.Tensor)
+            else sigma_hat.to(device)
+        )
+        self.alpha = (
+            torch.tensor(alpha, dtype=torch.float32, device=device)
+            if not isinstance(alpha, torch.Tensor)
+            else alpha.to(device)
+        )
+        self.alpha_b = (
+            torch.tensor(alpha_b, dtype=torch.float32, device=device)
+            if not isinstance(alpha_b, torch.Tensor)
+            else alpha_b.to(device)
+        )
+        self.beta_b = (
+            torch.tensor(beta_b, dtype=torch.float32, device=device).to(device)
+            if not isinstance(beta_b, torch.Tensor)
+            else beta_b.to(device)
+        )
+        self.nu = (
+            torch.tensor(nu, dtype=torch.float32, device=device)
+            if not isinstance(nu, torch.Tensor)
+            else nu.to(device)
+        )
         self.emulator_dir = emulator_dir
 
     def find_MAP(
@@ -428,10 +460,6 @@ if __name__ == "__main__":
     e.load_state_dict(state_dict)
     e.to(device)
 
-    # alpha = 0.01
-
-    nu = 1.0
-
     if dataset.target_has_error:
         sigma = dataset.Y_target_error
         sigma[sigma < 10] = 10
@@ -455,9 +483,6 @@ if __name__ == "__main__":
     X_0 = torch.tensor(
         X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
     )
-    X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
-    X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
-    Y_target = dataset.Y_target.to(device)
 
     start = time.process_time()
     sampler = MALASampler(
