@@ -144,7 +144,10 @@ if __name__ == "__main__":
 
     if checkpoint:
         checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
+            dirpath=emulator_dir,
+            filename="emulator_{epoch}_{model_index}",
+            every_n_epochs=0,
+            save_last=True,
         )
         callbacks.append(checkpoint_callback)
 

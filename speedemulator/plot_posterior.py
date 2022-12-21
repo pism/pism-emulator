@@ -284,6 +284,6 @@ if __name__ == "__main__":
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
 
-    figfile = f"{emulator_dir}/speed_emulator_posterior.pdf"
+    figfile = join(emulator_dir, "speed_emulator_posterior.pdf")
     print(f"Saving figure to {figfile}")
     fig.savefig(figfile)

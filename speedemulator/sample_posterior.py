@@ -8,10 +8,15 @@ from os.path import join
 import numpy as np
 import pandas as pd
 import torch
+from lightning import LightningModule
 from scipy.special import gamma
 from scipy.stats import beta
 
+import seaborn as sns
+import pylab as plt
+
 from pismemulator.nnemulator import NNEmulator, PISMDataset
+from pismemulator.utils import param_keys_dict as keys_dict
 
 
 def torch_find_MAP(X, X_min, X_max, Y_target, model):
@@ -34,7 +39,6 @@ def torch_find_MAP(X, X_min, X_max, Y_target, model):
             * torch.lgamma(torch.tensor(alpha_b + beta_b))
             / (torch.lgamma(torch.tensor(alpha_b)) * torch.lgamma(torch.tensor(beta_b)))
         )
-        print(log_likelihood, log_prior)
         NLL = -(log_likelihood + log_prior)
         NLL.backward()
 
@@ -60,19 +64,44 @@ def torch_find_MAP(X, X_min, X_max, Y_target, model):
 
 
 class MALASampler(object):
-    """
+    f"""
     MALA Sampler
 
     Author: Douglas C Brinkerhoff, University of Montana
+    Creates a Manifold Metropolis-adjusted Langevin algorithm
+
+    Example::
+
+        sampler = MALASampler(
+            emulator, X_min, X_max, Y_target, sigma_hat
+        )
+        >>> X_map = sampler.find_MAP(X_0)
+        >>> X_posterior = sampler.sample(
+        >>>     X_map,
+        >>>     samples=1000,
+        >>>     burn=1000
+        >>> )
+
+    Args:
+        model: LightningModule
+        X_min (array or Tensor): minimum of distribution
+        X_max (array or Tensor): maximum of distribution
+        Y_target (array or Tensor): scale of the distribution
+        sigma_hat (array or Tensor): covariance
+        alpha (float): learning rate
+        alpha_b (float or Tensor):  1st concentration parameter of the distribution
+        (often referred to as alpha)
+        beta_b (float or Tensor): 2nd concentration parameter of the distribution
+        (often referred to as beta)
     """
 
     def __init__(
         self,
-        model,
-        X_min,
-        X_max,
-        Y_target,
-        sigma_hat,
+        model: LightningModule,
+        X_min: torch.tensor,
+        X_max: torch.tensor,
+        Y_target: torch.tensor,
+        sigma_hat: torch.tensor,
         alpha=0.01,
         alpha_b=3.0,
         beta_b=3.0,
@@ -94,9 +123,10 @@ class MALASampler(object):
 
     def find_MAP(
         self,
-        X,
-        n_iters=51,
-        print_interval=10,
+        X: torch.tensor,
+        n_iters: int = 51,
+        verbose: bool = False,
+        print_interval: int = 10,
     ):
         print("***********************************************")
         print("***********************************************")
@@ -128,7 +158,7 @@ class MALASampler(object):
             gamma = alphas[alpha_index]
             mu = X + gamma * p
             X.data = mu.data
-            if i % print_interval == 0:
+            if verbose & (i % print_interval == 0):
                 print("===============================================")
                 print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
                 print(
@@ -144,14 +174,26 @@ class MALASampler(object):
                         ]
                     )
                 )
-                print("===============================================")
+        print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+        print(
+            "".join(
+                [
+                    f"{key}: {(val * std + mean):.3f}\n"
+                    for key, val, std, mean in zip(
+                        dataset.X_keys,
+                        X.data.cpu().numpy(),
+                        dataset.X_std,
+                        dataset.X_mean,
+                    )
+                ]
+            )
+        )
         return X
 
     def V(
         self,
         X,
     ):
-        X_bar = (X - self.X_min) / (self.X_max - self.X_min)
 
         Y_pred = 10 ** self.model(X, add_mean=True)
         r = Y_pred - self.Y_target
@@ -168,6 +210,7 @@ class MALASampler(object):
         )
 
         # Prior
+        X_bar = (X - self.X_min) / (self.X_max - self.X_min)
         log_prior = torch.sum(
             (self.alpha_b - 1) * torch.log(X_bar)
             + (self.beta_b - 1) * torch.log(1 - X_bar)
@@ -179,13 +222,15 @@ class MALASampler(object):
         log_pi = self.V(X)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            H = torch.stack(
-                [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
-            )
+            # H = torch.stack(
+            #     [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
+            # )
+            H = torch.autograd.functional.hessian(self.V, X, create_graph=True)
+
             lamda, Q = torch.linalg.eig(H)
             lamda, Q = lamda.type(torch.float), Q.type(torch.float)
             lamda_prime = torch.sqrt(lamda**2 + eps)
-            lamda_prime_inv = 1.0 / torch.sqrt(lamda**2 + eps)
+            lamda_prime_inv = 1.0 / lamda_prime
             H = Q @ torch.diag(lamda_prime) @ Q.T
             Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
             log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
@@ -227,19 +272,19 @@ class MALASampler(object):
             s = 0
         return X, local_data, s
 
-    def MALA(
+    def sample(
         self,
         X,
         burn: int = 1000,
-        n_samples: int = 10001,
+        samples: int = 10001,
         h: float = 0.1,
         h_max: float = 1.0,
-        acc_target=0.25,
-        k=0.01,
-        beta=0.99,
-        model_index=0,
-        save_interval=1000,
-        print_interval=50,
+        acc_target: float = 0.25,
+        k: float = 0.01,
+        beta: float = 0.99,
+        model_index: int = 0,
+        save_interval: int = 1000,
+        print_interval: int = 50,
     ):
         print(
             "********************************************************************************"
@@ -266,20 +311,20 @@ class MALASampler(object):
         local_data = None
         m_vars = []
         acc = acc_target
-        for i in range(n_samples + burn):
+        for i in range(samples + burn):
             X, local_data, s = self.MALA_step(X, h, local_data=local_data)
             m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
-            if i % print_interval == 0:
+            if (i % print_interval == 0) & (i > burn):
                 print("===============================================")
                 print(
                     "sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(
-                        i, acc, local_data[0].item()
+                        i - burn, acc, local_data[0].item()
                     )
                 )
                 print(
-                    " ".join(
+                    "".join(
                         [
                             f"{key}: {(val * std + mean):.3f}\n"
                             for key, val, std, mean in zip(
@@ -318,13 +363,16 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
+    parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_posterior_samples", type=int, default=100000)
     parser.add_argument("--num_iterations", type=int, default=100000)
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
+    parser.add_argument("--burn", type=int, default=1000)
+    parser.add_argument("--samples", type=int, default=100000)
+    parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
@@ -338,12 +386,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     hparams = vars(args)
 
+    checkpoint = args.checkpoint
     data_dir = args.data_dir
     device = args.device
     emulator_dir = args.emulator_dir
+    alpha = args.alpha
     model_index = args.model_index
-    n_posterior_samples = args.num_posterior_samples
-    n_samples = args.num_iterations
+    samples = args.samples
+    burn = args.burn
     out_format = args.out_format
     samples_file = args.samples_file
     target_file = args.target_file
@@ -398,8 +448,7 @@ if __name__ == "__main__":
     alpha_b = 3.0
     beta_b = 3.0
     X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(n_posterior_samples, n_parameters))
-        * (X_max - X_min)
+        beta.rvs(alpha_b, beta_b, size=(samples, n_parameters)) * (X_max - X_min)
         + X_min
     )
     # Initial condition for MAP. Note that using 0 yields similar results
@@ -408,25 +457,23 @@ if __name__ == "__main__":
     )
     X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
     X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
-
-    # Needs
-    # alpha_b, beta_b: float
-    # alpha: float
-    # nu: float
-    # gamma
-    # sigma_hat
     Y_target = dataset.Y_target.to(device)
 
     start = time.process_time()
-    mala = MALASampler(
-        e, X_min, X_max, Y_target, sigma_hat, emulator_dir=emulator_dir, device=device
+    sampler = MALASampler(
+        e,
+        X_min,
+        X_max,
+        Y_target,
+        sigma_hat,
+        emulator_dir=emulator_dir,
+        device=device,
+        alpha=alpha,
     )
-    X_map = mala.find_MAP(X_0)
-    # To reproduce the paper, n_samples should be 10^5
-    n_samples = 1000
-    X_posterior = mala.MALA(
+    X_map = sampler.find_MAP(X_0)
+    X_posterior = sampler.sample(
         X_map,
-        n_samples=n_samples,
+        samples=samples,
         model_index=int(model_index),
         save_interval=1000,
         print_interval=100,
