@@ -68,7 +68,7 @@ class MALASampler(object):
     MALA Sampler
 
     Author: Douglas C Brinkerhoff, University of Montana
-    Creates a Manifold Metropolis-adjusted Langevin algorithm
+    Creates a manifold Metropolis-adjusted Langevin algorithm (mMALA)
 
     Example::
 
@@ -88,7 +88,7 @@ class MALASampler(object):
         X_max (array or Tensor): maximum of distribution
         Y_target (array or Tensor): scale of the distribution
         sigma_hat (array or Tensor): covariance
-        alpha (float): learning rate
+        alpha (float): adjusts the weighting between the prior and the likelihood
         alpha_b (float or Tensor):  1st concentration parameter of the distribution
         (often referred to as alpha)
         beta_b (float or Tensor): 2nd concentration parameter of the distribution
