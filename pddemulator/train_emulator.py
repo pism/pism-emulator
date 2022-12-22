@@ -23,18 +23,18 @@ from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
 
+import lightning as pl
 import numpy as np
 import pandas as pd
 import pylab as plt
-import pytorch_lightning as pl
 import seaborn as sns
 import torch
+from lightning.callbacks import ModelCheckpoint
+from lightning.loggers import TensorBoardLogger
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
 from pyDOE import lhs
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
 from scipy.special import gamma
 from scipy.stats import dirichlet, gaussian_kde
 from scipy.stats.distributions import uniform

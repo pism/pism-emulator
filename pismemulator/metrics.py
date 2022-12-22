@@ -16,8 +16,10 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+from typing import Any, Tuple
+
 import torch
-from torch import Tensor
+from torch import Tensor, tensor
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 
@@ -182,3 +184,122 @@ class AbsoluteError(Metric):
     @property
     def is_differentiable(self):
         return True
+
+
+class L2MeanSquaredError(Metric):
+    r"""Computes an L2 regularized `mean squared error`_ (MSE):
+    .. math:: \text{MSE} = \frac{1}{N}\sum_i^N(y_i - \hat{y_i})^2 + K\frac{1}{N}\sum_i^N(w_i)^2
+    Where :math:`y` is a tensor of target values, :math:`\hat{y}` is a tensor of predictions, :math: `w` is a tensor of weights, and :math:`K` is a regularization constant. Equivalent to Mean Squared Error for :math:`K=0`.
+    Args:
+        squared: If True returns MSE value, if False returns RMSE value.
+        kwargs: Additional keyword arguments, see :ref:`Metric kwargs` for more info.
+    Example:
+        >>> from pismemulator.metrics import L2MeanSquaredError
+        >>> target = torch.tensor([2.5, 5.0, 4.0, 8.0])
+        >>> preds = torch.tensor([3.0, 5.0, 2.5, 7.0])
+        >>> weight = torch.tensor([0.1, 0.2, 0.5, 0.2])
+        >>> k = 1e-1
+        >>> l2_mean_squared_error = L2MeanSquaredError()
+        >>> l2_mean_squared_error(preds, target, weight, k)
+        tensor(0.8835)
+    """
+    is_differentiable = True
+    higher_is_better = False
+    full_state_update = False
+    sum_squared_error: Tensor
+    total: int
+
+    def __init__(
+        self,
+        squared: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+
+        self.add_state("sum_squared_error", default=tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("total", default=tensor(0), dist_reduce_fx="sum")
+        self.squared = squared
+
+    def update(self, preds: Tensor, target: Tensor, weight: Tensor, K: float) -> None:  # type: ignore
+        """Update state with predictions and targets.
+        Args:
+            preds: Predictions from model
+            target: Ground truth values
+            weight: linear weights
+            k: regularization constant
+        """
+        sum_squared_error, n_obs = _l2_mean_squared_error_update(
+            preds, target, weight, K
+        )
+
+        self.sum_squared_error += sum_squared_error
+        self.total += n_obs
+
+    def compute(self) -> Tensor:
+        """Computes mean squared error over state."""
+        return _l2_mean_squared_error_compute(
+            self.sum_squared_error, self.total, squared=self.squared
+        )
+
+
+def _l2_mean_squared_error_update(
+    preds: Tensor, target: Tensor, weight: Tensor, K: float
+) -> Tuple[Tensor, int]:
+    """Updates and returns variables required to compute Mean Squared Error.
+    Checks for same shape of input tensors.
+    Args:
+        preds: Predicted tensor
+        target: Ground truth tensor
+        weight: linear weights
+        k: regularization constant
+    """
+    _check_same_shape(preds, target)
+    diff = preds - target
+    n_obs = target.numel()
+    sum_squared_error = torch.sum(diff * diff) + K * torch.sum(weight * weight)
+    return sum_squared_error, n_obs
+
+
+def _l2_mean_squared_error_compute(
+    sum_squared_error: Tensor, n_obs: int, squared: bool = True
+) -> Tensor:
+    """Computes Mean Squared Error with L2 regularization.
+    Args:
+        sum_squared_error: Sum of square of errors over all observations
+        n_obs: Number of predictions or observations
+        squared: Returns RMSE value if set to False.
+    Example:
+        >>> preds = torch.tensor([0., 1, 2, 3])
+        >>> target = torch.tensor([0., 1, 2, 2])
+        >>> weigth = torch.tensor([0.25, 0.5, 0.25, 0.25])
+        >>> k = 1e-1
+        >>> sum_squared_error, n_obs = _l2__mean_squared_error_update(preds, target, weight, k)
+        >>> _l2_mean_squared_error_compute(sum_squared_error, n_obs)
+        tensor(0.2609)
+    """
+    return (
+        sum_squared_error / n_obs if squared else torch.sqrt(sum_squared_error / n_obs)
+    )
+
+
+def l2_mean_squared_error(
+    preds: Tensor, target: Tensor, weight: Tensor, K: float, squared: bool = True
+) -> Tensor:
+    """Computes mean squared error with L2 regularization.
+    Args:
+        preds: estimated labels
+        target: ground truth labels
+        squared: returns RMSE value if set to False
+    Return:
+        Tensor with MSE
+    Example:
+        >>> from torchmetrics.functional import mean_squared_error
+        >>> x = torch.tensor([0., 1, 2, 3])
+        >>> y = torch.tensor([0., 1, 2, 2])
+        >>> w = torch.tensor([0.25, 0.5, 0.25, 0.25])
+        >>> k = 1e-1
+        >>> mean_squared_error(x, y, w, k)
+        tensor(0.2609)
+    """
+    sum_squared_error, n_obs = _l2_mean_squared_error_update(preds, target, weight, K)
+    return _l2_mean_squared_error_compute(sum_squared_error, n_obs, squared=squared)

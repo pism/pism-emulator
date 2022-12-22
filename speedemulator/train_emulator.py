@@ -20,35 +20,62 @@
 
 import os
 from argparse import ArgumentParser
+from os.path import abspath, dirname, join, realpath
 
+import lightning as pl
 import numpy as np
-import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import ModelCheckpoint, Timer
+from lightning.pytorch.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-from pismemulator.nnemulator import NNEmulator as NNEmulator
-from pismemulator.nnemulator import PISMDataModule, PISMDataset
+from pismemulator.nnemulator import (DNNEmulator, NNEmulator, PISMDataModule,
+                                     PISMDataset)
 from pismemulator.utils import plot_eigenglaciers
 
+
+def current_script_directory():
+    import inspect
+
+    filename = inspect.stack(0)[0][1]
+    return realpath(dirname(filename))
+
+
+script_directory = current_script_directory()
+
+>>>>>>> dev
 if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
-    parser.add_argument("--data_dir", default="../tests/training_data")
+    parser.add_argument(
+        "--data_dir", default=abspath(join(script_directory, "../tests/training_data"))
+    )
+    parser.add_argument(
+        "--emulator", choices=["NNEmulator", "DNNEmulator"], default="NNEmulator"
+    )
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--n_layers", type=int, default=5)
     parser.add_argument("--q", type=int, default=100)
     parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
+        "--samples_file",
+        default=abspath(
+            join(
+                script_directory, "../data/samples/velocity_calibration_samples_50.csv"
+            )
+        ),
     )
     parser.add_argument(
         "--target_file",
-        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
+        default=abspath(
+            join(
+                script_directory,
+                "../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
+            )
+        ),
     )
     parser.add_argument("--train_size", type=float, default=1.0)
     parser.add_argument("--thinning_factor", type=int, default=1)
@@ -89,7 +116,7 @@ if __name__ == "__main__":
     n_samples = dataset.n_samples
 
     torch.manual_seed(0)
-    pl.seed_everything(0)
+    pl.lite.utilities.seed.seed_everything(0)
     np.random.seed(model_index)
 
     if not os.path.isdir(emulator_dir):
@@ -119,10 +146,17 @@ if __name__ == "__main__":
 
     if checkpoint:
         checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir, filename="emulator_{epoch}_{model_index}"
+            dirpath=emulator_dir,
+            filename="emulator_{epoch}_{model_index}",
+            every_n_epochs=0,
+            save_last=True,
         )
         callbacks.append(checkpoint_callback)
+
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
+
+    timer = Timer()
+    callbacks.append(timer)
 
     e = NNEmulator(
         n_parameters,
@@ -147,4 +181,5 @@ if __name__ == "__main__":
         val_loader = data_loader.val_loader
 
     trainer.fit(e, train_loader, val_loader)
+    print(f"Training took {timer.time_elapsed():.0f}s")
     torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")

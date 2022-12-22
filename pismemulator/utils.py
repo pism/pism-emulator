@@ -18,11 +18,11 @@
 
 # utils.py contains generic functions to read data or perform statistical analyses.
 
-import collections
 import sys
 from math import sqrt
 from os import mkdir
 from os.path import isdir, join
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -62,7 +62,7 @@ param_keys_dict = {
     "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
     "z_min": "$z_{\mathrm{min}}$ (m)",
     "z_max": "$z_{\mathrm{max}}$ (m)",
-    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$ (m yr$^{-1}$",
+    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$ (m yr$^{-1}$)",
     "SIAe": "$E_{\mathrm{SIA}}$ (1)",
     "SSAe": "$E_{\mathrm{SSA}}$ (1)",
     "topg_to_phi_base": "$b_{\mathrm{base}}$ (m)",
@@ -339,7 +339,10 @@ def plot_eigenglaciers(
     fig.savefig(join(fig_dir, f"eigenglaciers_{model_index}.pdf"))
 
 
-def calc_bic(X, Y):
+def calc_bic(
+    X: Union[list, np.ndarray, pd.core.frame.DataFrame],
+    Y: Union[list, np.ndarray, pd.core.frame.DataFrame],
+):
     """
     Bayesian Information Criterion
 
@@ -365,11 +368,6 @@ def calc_bic(X, Y):
     BIC : scalar
           The Bayesian Information Criterion (BIC)
     """
-
-    if not isinstance(X, (collections.Sequence, np.ndarray, pd.core.frame.DataFrame)):
-        raise TypeError("Not like an array.")
-    if not isinstance(Y, (collections.Sequence, np.ndarray, pd.core.series.Series)):
-        raise TypeError("Not like an array.")
 
     lm = LinearRegression(normalize=False)
     lm.fit(X, Y)

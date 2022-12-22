@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pylab as plt
-import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
@@ -47,6 +46,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
@@ -56,6 +56,7 @@ if __name__ == "__main__":
 
     emulator_dir = args.emulator_dir
     frac = args.fraction
+    out_format = args.out_format
     samples_file = args.samples_file
 
     print("Loading prior samples\n")
@@ -88,9 +89,16 @@ if __name__ == "__main__":
     X_list = []
     p = Path(f"{emulator_dir}/posterior_samples/")
     print("Loading posterior samples\n")
-    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
+    for m, m_file in enumerate(sorted(p.glob(f"X_posterior_model_*.{out_format}"))):
         print(f"  -- {m_file}")
-        df = pd.read_csv(m_file).sample(frac=frac)
+        if out_format == "csv":
+            df = pd.read_csv(m_file)
+        elif out_format == "parquet":
+            df = pd.read_parquet(m_file)
+        else:
+            raise NotImplementedError(f"{out_format} not implemented")
+
+        df = df.sample(frac=frac)
         if "Unnamed: 0" in df.columns:
             df.drop(columns=["Unnamed: 0"], inplace=True)
         model = m_file.name.split("_")[-1].split(".")[0]
@@ -227,10 +235,10 @@ if __name__ == "__main__":
                     linestyle="solid",
                     label="Posterior",
                 )
-                print(X_keys[i], p16, p50, p84)
                 p16 = np.percentile(X_posterior[:, i], 16)
                 p50 = np.percentile(X_posterior[:, i], 50)
                 p84 = np.percentile(X_posterior[:, i], 84)
+                print(X_keys[i], p16, p50, p84)
 
                 axs[i, j].axvline(p16, color="black", lw=0.5, ls="dotted")
                 axs[i, j].axvline(p84, color="black", lw=0.5, ls="dotted")
@@ -276,6 +284,6 @@ if __name__ == "__main__":
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
 
-    figfile = f"{emulator_dir}/speed_emulator_posterior.pdf"
+    figfile = join(emulator_dir, "speed_emulator_posterior.pdf")
     print(f"Saving figure to {figfile}")
     fig.savefig(figfile)

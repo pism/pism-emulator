@@ -20,6 +20,7 @@
 
 import os
 from argparse import ArgumentParser
+from os import mkdir
 from os.path import isdir, join
 
 import numpy as np

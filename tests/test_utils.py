@@ -35,25 +35,10 @@ from pismemulator.utils import (
 
 def test_calc_bic():
 
-    X = np.array([[1, 4, 9], [2, 0, -1]])
+    X = np.array([[1.0, 4.0, 9.0], [2.0, 0.0, -1.0]])
     Y = X**2 - 1
     bic = calc_bic(X, Y)
     assert_array_almost_equal(bic, -125.68336950813814, decimal=2), "foo"
-
-
-def test_draw_samples(saltsamples):
-
-    distributions = {
-        "X1": scipy.stats.distributions.randint(0, 2),
-        "X2": scipy.stats.distributions.truncnorm(-4 / 4.0, 4.0 / 4, loc=8, scale=4),
-        "X3": scipy.stats.distributions.uniform(loc=5, scale=2),
-    }
-
-    # We can only test Saltelli because LHS is not repeatable
-    assert_array_almost_equal(
-        draw_samples(distributions, n_samples=2, method="saltelli").values,
-        saltsamples.drop(columns="id").values,
-    )
 
 
 def test_kl_divergence(pq):
