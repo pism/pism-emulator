@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -37,8 +37,12 @@ from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 from tqdm import tqdm
 
-from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
-                                  absolute_error, area_absolute_error)
+from pismemulator.metrics import (
+    AbsoluteError,
+    AreaAbsoluteError,
+    absolute_error,
+    area_absolute_error,
+)
 
 
 class PDDEmulator(pl.LightningModule):
