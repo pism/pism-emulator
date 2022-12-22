@@ -232,6 +232,10 @@ class MALASampler(object):
         sigma_hat = self.sigma_hat
         t = r / sigma_hat
         nu = self.nu
+        X_min = self.X_min
+        X_max = self.X_max
+        alpha_b = self.alpha_b
+        beta_b = self.beta_b
 
         # Likelihood
         log_likelihood = torch.sum(
@@ -242,11 +246,11 @@ class MALASampler(object):
         )
 
         # Prior
-        X_bar = (X - self.X_min) / (self.X_max - self.X_min)
+        X_bar = (X - X_min) / (X_max - X_min)
         log_prior = torch.sum(
-            (self.alpha_b - 1) * torch.log(X_bar)
-            + (self.beta_b - 1) * torch.log(1 - X_bar)
+            (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
         )
+
         return -(self.alpha * log_likelihood + log_prior)
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
@@ -254,13 +258,10 @@ class MALASampler(object):
         log_pi = self.V(X)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            # H = torch.stack(
-            #     [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
-            # )
             H = torch.autograd.functional.hessian(self.V, X, create_graph=True)
 
             lamda, Q = torch.linalg.eig(H)
-            lamda, Q = lamda.type(torch.float), Q.type(torch.float)
+            lamda, Q = torch.real(lamda), torch.real(Q)
             lamda_prime = torch.sqrt(lamda**2 + eps)
             lamda_prime_inv = 1.0 / lamda_prime
             H = Q @ torch.diag(lamda_prime) @ Q.T
@@ -319,10 +320,10 @@ class MALASampler(object):
         print_interval: int = 50,
     ):
         print(
-            "********************************************************************************"
+            "****************************************************************************"
         )
         print(
-            "********************************************************************************"
+            "****************************************************************************"
         )
         print(
             "Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(
@@ -330,10 +331,10 @@ class MALASampler(object):
             )
         )
         print(
-            "********************************************************************************"
+            "****************************************************************************"
         )
         print(
-            "********************************************************************************"
+            "****************************************************************************"
         )
 
         posterior_dir = f"{self.emulator_dir}/posterior_samples/"
@@ -460,6 +461,7 @@ if __name__ == "__main__":
     e.load_state_dict(state_dict)
     e.to(device)
 
+    Y_target = dataset.Y_target
     if dataset.target_has_error:
         sigma = dataset.Y_target_error
         sigma[sigma < 10] = 10
