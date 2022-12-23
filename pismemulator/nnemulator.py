@@ -440,6 +440,7 @@ class PISMDataset(torch.utils.data.Dataset):
         threshold=100e3,
         epsilon=0,
         return_numpy=False,
+        verbose=False,
     ):
         self.data_dir = data_dir
         self.samples_file = samples_file
@@ -455,6 +456,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.log_y = log_y
         self.normalize_x = normalize_x
         self.return_numpy = return_numpy
+        self.verbose = verbose
         self.load_target()
         self.load_data()
 
@@ -540,7 +542,6 @@ class PISMDataset(torch.utils.data.Dataset):
         identifier_name = "id"
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
-        # glob can return duplicates, which must be removed
         training_files = list(OrderedDict.fromkeys(training_files))
         ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
         samples = (
@@ -559,8 +560,9 @@ class PISMDataset(torch.utils.data.Dataset):
         # so we much search for missing response values
         missing_ids = list(set(samples["id"]).difference(ids_df["id"]))
         if missing_ids:
-            print(f"The following simulations are missing:\n   {missing_ids}")
-            print("  ... adjusting priors")
+            if self.verbose:
+                print(f"The following simulations are missing:\n   {missing_ids}")
+                print("  ... adjusting priors")
             # and remove the missing samples and responses
             samples_missing_removed = samples[~samples["id"].isin(missing_ids)]
             samples = samples_missing_removed

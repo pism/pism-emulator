@@ -26,6 +26,7 @@ import matplotlib
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from typing import Union
 
 # matplotlib.rcParams["figure.figsize"] = [10, 10]
 
@@ -35,6 +36,7 @@ from torch.nn import Linear, Tanh, ReLU, CELU
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn.functional as F
 from torch.distributions import MultivariateNormal, Categorical, Normal
+import lightning as pl
 
 from joblib import Parallel, delayed
 
@@ -162,6 +164,226 @@ class GMM(ProbModel):
             plt.show()
 
         return fig
+
+
+class StudentT(ProbModel):
+    def __init__(
+        self,
+        model: pl.LightningModule,
+        X_0,
+        X_min: Union[float, torch.tensor],
+        X_max: Union[float, torch.tensor],
+        Y_target: Union[np.ndarray, torch.tensor],
+        sigma_hat: Union[np.ndarray, torch.tensor],
+        X_mean: Union[float, np.ndarray, torch.tensor] = 1.0,
+        X_std: Union[float, np.ndarray, torch.tensor] = 1.0,
+        alpha: Union[float, torch.tensor] = 0.01,
+        alpha_b: Union[float, torch.tensor] = 3.0,
+        beta_b: Union[float, torch.tensor] = 3.0,
+        nu: Union[float, torch.tensor] = 1.0,
+        device="cpu",
+    ):
+        dataloader = DataLoader(
+            TensorDataset(torch.zeros_like(X_0))
+        )  # bogus dataloader
+        ProbModel.__init__(self, dataloader)
+        self.model = model.eval()
+        self.X_min = (
+            torch.tensor(X_min, dtype=torch.float32, device=device)
+            if not isinstance(X_min, torch.Tensor)
+            else X_min.to(device)
+        )
+        self.X_max = (
+            torch.tensor(X_max, dtype=torch.float32, device=device)
+            if not isinstance(X_max, torch.Tensor)
+            else X_max.to(device)
+        )
+        self.X_mean = (
+            torch.tensor(X_mean, dtype=torch.float32, device=device)
+            if not isinstance(X_mean, torch.Tensor)
+            else X_mean.to(device)
+        )
+        self.X_std = (
+            torch.tensor(X_std, dtype=torch.float32, device=device)
+            if not isinstance(X_std, torch.Tensor)
+            else X_std.to(device)
+        )
+        self.Y_target = (
+            torch.tensor(Y_target, dtype=torch.float32, device=device)
+            if not isinstance(Y_target, torch.Tensor)
+            else Y_target.to(device)
+        )
+        self.sigma_hat = (
+            torch.tensor(sigma_hat, dtype=torch.float32, device=device)
+            if not isinstance(sigma_hat, torch.Tensor)
+            else sigma_hat.to(device)
+        )
+        self.alpha = (
+            torch.tensor(alpha, dtype=torch.float32, device=device)
+            if not isinstance(alpha, torch.Tensor)
+            else alpha.to(device)
+        )
+        self.alpha_b = (
+            torch.tensor(alpha_b, dtype=torch.float32, device=device)
+            if not isinstance(alpha_b, torch.Tensor)
+            else alpha_b.to(device)
+        )
+        self.beta_b = (
+            torch.tensor(beta_b, dtype=torch.float32, device=device).to(device)
+            if not isinstance(beta_b, torch.Tensor)
+            else beta_b.to(device)
+        )
+        self.nu = (
+            torch.tensor(nu, dtype=torch.float32, device=device)
+            if not isinstance(nu, torch.Tensor)
+            else nu.to(device)
+        )
+        self.X = torch.nn.Parameter(torch.tensor(X_0), requires_grad=True)
+
+    def reset_parameters(self):
+
+        self.X.data = self.sample()
+
+    def sample(self):
+        h: float = 0.1
+        log_pi, _, H, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+            self.X, compute_hessian=True
+        )
+
+        samples = self.draw_sample(self.X, 2 * h * Hinv).detach()
+
+        return samples
+
+    def draw_sample(self, mu, cov, eps=1e-10):
+        L = torch.linalg.cholesky(cov + eps * torch.eye(cov.shape[0]))
+        return mu + L @ torch.randn(L.shape[0])
+
+    def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
+        return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+
+    def log_prob(self, *data):
+        X = self.X
+        Y_pred = 10 ** self.model(X, add_mean=True)
+        r = Y_pred - self.Y_target
+        sigma_hat = self.sigma_hat
+        t = r / sigma_hat
+        nu = self.nu
+        X_min = self.X_min
+        X_max = self.X_max
+        alpha_b = self.alpha_b
+        beta_b = self.beta_b
+        # Likelihood
+        log_likelihood = torch.sum(
+            torch.lgamma((nu + 1) / 2.0)
+            - torch.lgamma(nu / 2.0)
+            - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
+            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
+        )
+        # Prior
+        X_bar = (X - X_min) / (X_max - X_min)
+        log_prior = torch.sum(
+            (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
+        )
+        log_prob = self.alpha * log_likelihood + log_prior
+        return {
+            "log_prob": log_prob,
+            "log_prior": log_prior,
+            "log_likelihood": log_likelihood,
+        }
+
+    def forward(self, *data):
+        X = self.X
+        Y_pred = 10 ** self.model(X, add_mean=True)
+        r = Y_pred - self.Y_target
+        sigma_hat = self.sigma_hat
+        t = r / sigma_hat
+        nu = self.nu
+        X_min = self.X_min
+        X_max = self.X_max
+        alpha_b = self.alpha_b
+        beta_b = self.beta_b
+
+        # Likelihood
+        log_likelihood = torch.sum(
+            torch.lgamma((nu + 1) / 2.0)
+            - torch.lgamma(nu / 2.0)
+            - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
+            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
+        )
+
+        # Prior
+        X_bar = (X - X_min) / (X_max - X_min)
+        log_prior = torch.sum(
+            (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
+        )
+
+        log_prob = self.alpha * log_likelihood + log_prior
+        return log_prob
+
+    def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
+
+        log_pi = self.forward()
+        if compute_hessian:
+            g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
+            H = torch.stack(
+                [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
+            )
+            lamda, Q = torch.linalg.eig(H)
+            lamda, Q = torch.real(lamda), torch.real(Q)
+            lamda_prime = torch.sqrt(lamda**2 + eps)
+            lamda_prime_inv = 1.0 / lamda_prime
+            H = Q @ torch.diag(lamda_prime) @ Q.T
+            Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
+            log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
+            return log_pi, g, H, Hinv, log_det_Hinv
+        else:
+            return log_pi
+
+    def pretrain(self):
+        print("***********************************************")
+        print("Finding MAP point")
+        print("***********************************************")
+        # Line search distances
+        n_iters = 51
+        alphas = torch.logspace(-4, 0, 11)
+        # Find MAP point
+        X = self.X
+        for i in range(n_iters):
+            log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+                X, compute_hessian=True
+            )
+            # - f'(x) / f''(x)
+            # g = f'(x), Hinv = 1 / f''(x)
+            p = Hinv @ -g
+            # Line search
+            alpha_index = np.nanargmin(
+                [
+                    self.get_log_like_gradient_and_hessian(
+                        X + alpha * p, compute_hessian=False
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    for alpha in alphas
+                ]
+            )
+            gamma = alphas[alpha_index]
+            mu = X + gamma * p
+            X.data = mu.data
+        print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+        print(
+            "".join(
+                [
+                    f"{(val * std + mean):.3f}\n"
+                    for val, std, mean in zip(
+                        X.data.cpu().numpy(),
+                        self.X_std,
+                        self.X_mean,
+                    )
+                ]
+            )
+        )
+        self.X = X
 
 
 class LinReg(ProbModel):

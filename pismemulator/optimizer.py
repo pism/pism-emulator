@@ -30,6 +30,8 @@ from torch.distributions.distribution import Distribution
 from torch.distributions import MultivariateNormal, Normal
 from torch.nn import Module
 
+from sys import exit
+
 
 class MCMC_Optim:
     def __init__(self):
@@ -223,9 +225,9 @@ class SGLD_Optim(Optimizer, MCMC_Optim):
                     p.data.add_(noise)
 
                     if torch.isnan(p.data).any():
-                        exit("Nan param")
+                        exit("NaN param")
                     if torch.isinf(p.data).any():
-                        exit("inf param")
+                        exit("Inf param")
 
                 else:
                     p.data.add_(
@@ -237,10 +239,11 @@ class SGLD_Optim(Optimizer, MCMC_Optim):
 
 
 class MALA_Optim(Optimizer, MCMC_Optim):
-    def __init__(self, model, step_size=0.1, prior_std=1.0, addnoise=True):
+    def __init__(self, model, params=None, step_size=0.1, prior_std=1.0, addnoise=True):
         """
         log_N(θ|0,1) =
         :param model:
+        "param params:
         :param step_size:
         :param norm_sigma:
         :param addnoise:
@@ -257,9 +260,14 @@ class MALA_Optim(Optimizer, MCMC_Optim):
         )
 
         self.model = model
-        params = self.model.parameters()
-
-        Optimizer.__init__(self, params=params, defaults=defaults)
+        if params is None:
+            params_to_optimize = self.model.parameters()
+        else:
+            params_to_optimize = []
+            for param in self.model.named_parameters():
+                if param[0] in params:
+                    params_to_optimize.append(param[1])
+        Optimizer.__init__(self, params=params_to_optimize, defaults=defaults)
         MCMC_Optim.__init__(self)
 
         # print(self.tune_params)
@@ -279,18 +287,17 @@ class MALA_Optim(Optimizer, MCMC_Optim):
         """
 
         log_prob = None
-
         for group in self.param_groups:
-
             weight_decay = group["weight_decay"]
-
             for p in group["params"]:
-
                 if p.grad is None:
                     continue
 
+                H = torch.autograd.functional.hessian(
+                    self.model.forward, p, create_graph=True
+                )
+
                 grad = p.grad.data
-                # grad.clamp_(-1000,1000)
                 if weight_decay != 0:
                     grad.add_(alpha=weight_decay, other=p.data)
 
@@ -305,14 +312,18 @@ class MALA_Optim(Optimizer, MCMC_Optim):
 
                     if torch.isnan(p.data).any():
                         print(grad)
-                        exit("Nan param")
+                        exit("NaN param")
                     if torch.isinf(p.data).any():
-                        exit("inf param")
+                        exit("Inf param")
 
                 else:
                     p.data.add_(other=0.5 * grad, alpha=-group["step_size"])
 
         return log_prob
+
+    # logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
+    # def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
+    #     return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
 
 class HMC_Optim(Optimizer, MCMC_Optim):

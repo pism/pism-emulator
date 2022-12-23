@@ -21,6 +21,7 @@ from pismemulator.utils import param_keys_dict as keys_dict
 
 def torch_find_MAP(X, X_min, X_max, Y_target, model):
     Y_pred = 10 ** model(X, add_mean=True)
+    print(Y_pred)
     r = Y_pred - Y_target
 
     t = r / sigma_hat
@@ -259,7 +260,6 @@ class MALASampler(object):
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
             H = torch.autograd.functional.hessian(self.V, X, create_graph=True)
-
             lamda, Q = torch.linalg.eig(H)
             lamda, Q = torch.real(lamda), torch.real(Q)
             lamda_prime = torch.sqrt(lamda**2 + eps)
