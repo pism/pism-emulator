@@ -294,7 +294,7 @@ class Sampler_Chain:
             if not accept:
 
                 if torch.isnan(sample_log_prob["log_prob"]):
-                    print(self.chain.state)
+                    print("Chain log_prob is NaN", self.chain.state)
                     exit()
                 self.probmodel.load_state_dict(self.chain.state["state_dict"])
 
@@ -338,10 +338,10 @@ class Sampler_Chain:
             for key, running_avg in self.chain.running_avgs.items():
                 desc += f" {key}: {running_avg.avg:.2f} "
             desc += f'StepSize: {self.optim.param_groups[0]["step_size"]:.3f}'
-            # desc +=f" Std: {F.softplus(self.probmodel.log_std.detach()).item():.3f}"
             progress.set_description(desc=desc)
 
         self.chain = self.chain[self.burn_in :]
+        print(self.chain)
 
         return self.chain
 
@@ -400,15 +400,11 @@ class MALA_Chain(Sampler_Chain):
         )
 
         self.num_chain = num_chain
-
         self.optim = MALA_Optim(
-            self.probmodel,
+            probmodel,
             params=params,
             step_size=step_size,
-            prior_std=1.0,
-            addnoise=True,
         )
-
         self.acceptance = MetropolisHastingsAcceptance()
 
     def __repr__(self):

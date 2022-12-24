@@ -290,7 +290,6 @@ class MALASampler(object):
         X_.requires_grad = True
 
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
-
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
@@ -352,8 +351,8 @@ class MALASampler(object):
             if (i % print_interval == 0) & (i > burn):
                 print("===============================================")
                 print(
-                    "sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(
-                        i - burn, acc, local_data[0].item()
+                    "sample: {0:d}, acc. rate: {1:4.2f}, step: {2:4.2f}log(P): {3:6.1f}".format(
+                        i - burn, acc, h, local_data[0].item()
                     )
                 )
                 print(

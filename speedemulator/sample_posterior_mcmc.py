@@ -30,7 +30,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_iterations", type=int, default=100000)
+    parser.add_argument("--num_chains", type=int, default=1)
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument("--burn", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=100000)
@@ -54,6 +54,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     alpha = args.alpha
     model_index = args.model_index
+    num_chains = args.num_chains
     samples = args.samples
     burn = args.burn
     out_format = args.out_format
@@ -129,11 +130,14 @@ if __name__ == "__main__":
         probmodel=student,
         params=["X"],
         step_size=0.01,
-        num_steps=10000,
-        num_chains=1,
-        burn_in=500,
+        num_steps=samples,
+        num_chains=num_chains,
+        burn_in=burn,
         tune=True,
         pretrain=True,
     )
     sampler.sample_chains()
     print(time.process_time() - start)
+    X_post = torch.vstack(
+        [sampler.chain.samples[k]["X"] for k in range(len(sampler.chain.samples))]
+    )

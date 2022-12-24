@@ -239,7 +239,7 @@ class SGLD_Optim(Optimizer, MCMC_Optim):
 
 
 class MALA_Optim(Optimizer, MCMC_Optim):
-    def __init__(self, model, params=None, step_size=0.1, prior_std=1.0, addnoise=True):
+    def __init__(self, model, params=None, step_size=0.1):
         """
         log_N(θ|0,1) =
         :param model:
@@ -249,17 +249,13 @@ class MALA_Optim(Optimizer, MCMC_Optim):
         :param addnoise:
         """
 
-        weight_decay = 1 / (prior_std**2) if prior_std != 0 else 0
-        if weight_decay < 0.0:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if step_size < 0.0:
             raise ValueError("Invalid learning rate: {}".format(step_size))
 
-        defaults = dict(
-            step_size=step_size, weight_decay=weight_decay, addnoise=addnoise
-        )
+        defaults = dict(step_size=step_size)
 
         self.model = model
+
         if params is None:
             params_to_optimize = self.model.parameters()
         else:
@@ -287,37 +283,40 @@ class MALA_Optim(Optimizer, MCMC_Optim):
         """
 
         log_prob = None
+
+        eps = 1e-2
+
         for group in self.param_groups:
-            weight_decay = group["weight_decay"]
             for p in group["params"]:
                 if p.grad is None:
                     continue
 
-                H = torch.autograd.functional.hessian(
-                    self.model.forward, p, create_graph=True
+                log_pi = self.model.forward()
+                g = torch.autograd.grad(
+                    log_pi, p, retain_graph=True, create_graph=True
+                )[0]
+                H = torch.stack(
+                    [torch.autograd.grad(e, p, retain_graph=True)[0] for e in g]
                 )
+                lamda, Q = torch.linalg.eig(H)
+                lamda, Q = torch.real(lamda), torch.real(Q)
+                lamda_prime = torch.sqrt(lamda**2 + eps)
+                lamda_prime_inv = 1.0 / lamda_prime
+                H = Q @ torch.diag(lamda_prime) @ Q.T
+                Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
+                log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
 
                 grad = p.grad.data
-                if weight_decay != 0:
-                    grad.add_(alpha=weight_decay, other=p.data)
+                sigma = 0.5 * p @ Hinv @ p
 
-                if group["addnoise"]:
+                p.data.add_(g @ Hinv, alpha=-0.5 * group["step_size"])
+                p.data.add_(sigma, alpha=-0.5 * group["step_size"])
 
-                    noise = torch.randn_like(p.data).mul_(
-                        group["step_size"] ** 0.5
-                    )  # .mul_(0.1)
-
-                    p.data.add_(grad, alpha=-0.5 * group["step_size"])
-                    p.data.add_(noise)
-
-                    if torch.isnan(p.data).any():
-                        print(grad)
-                        exit("NaN param")
-                    if torch.isinf(p.data).any():
-                        exit("Inf param")
-
-                else:
-                    p.data.add_(other=0.5 * grad, alpha=-group["step_size"])
+                if torch.isnan(p.data).any():
+                    print("grad is NaN", grad)
+                    exit("NaN param")
+                if torch.isinf(p.data).any():
+                    exit("Inf param")
 
         return log_prob
 

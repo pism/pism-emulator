@@ -169,7 +169,7 @@ class GMM(ProbModel):
 class StudentT(ProbModel):
     def __init__(
         self,
-        model: pl.LightningModule,
+        emulator: pl.LightningModule,
         X_0,
         X_min: Union[float, torch.tensor],
         X_max: Union[float, torch.tensor],
@@ -187,7 +187,7 @@ class StudentT(ProbModel):
             TensorDataset(torch.zeros_like(X_0))
         )  # bogus dataloader
         ProbModel.__init__(self, dataloader)
-        self.model = model.eval()
+        self.emulator = emulator.eval()
         self.X_min = (
             torch.tensor(X_min, dtype=torch.float32, device=device)
             if not isinstance(X_min, torch.Tensor)
@@ -263,7 +263,7 @@ class StudentT(ProbModel):
 
     def log_prob(self, *data):
         X = self.X
-        Y_pred = 10 ** self.model(X, add_mean=True)
+        Y_pred = 10 ** self.emulator(X, add_mean=True)
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
         t = r / sigma_hat
@@ -284,16 +284,14 @@ class StudentT(ProbModel):
         log_prior = torch.sum(
             (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
         )
-        log_prob = self.alpha * log_likelihood + log_prior
+        log_prob = -(self.alpha * log_likelihood + log_prior)
         return {
             "log_prob": log_prob,
-            "log_prior": log_prior,
-            "log_likelihood": log_likelihood,
         }
 
     def forward(self, *data):
         X = self.X
-        Y_pred = 10 ** self.model(X, add_mean=True)
+        Y_pred = 10 ** self.emulator(X, add_mean=True)
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
         t = r / sigma_hat
@@ -317,7 +315,7 @@ class StudentT(ProbModel):
             (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
         )
 
-        log_prob = self.alpha * log_likelihood + log_prior
+        log_prob = -(self.alpha * log_likelihood + log_prior)
         return log_prob
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
@@ -340,6 +338,7 @@ class StudentT(ProbModel):
             return log_pi
 
     def pretrain(self):
+
         print("***********************************************")
         print("Finding MAP point")
         print("***********************************************")

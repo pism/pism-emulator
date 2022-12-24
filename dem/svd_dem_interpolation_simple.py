@@ -120,7 +120,7 @@ for name, param in model.named_parameters():
         p.append(param.data)
 Sr = model.w
 
-M = (V * S) @ model.w
+bM = (V * S) @ model.w
 # M = ((U * Sr) @ V.T).T
 Ms = M.detach().numpy().reshape(n_row, n_col) + D_mean.detach().numpy().reshape(
     n_row, n_col
