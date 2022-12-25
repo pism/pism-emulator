@@ -123,17 +123,21 @@ if __name__ == "__main__":
         sigma_hat,
         X_mean=dataset.X_mean,
         X_std=dataset.X_std,
+        X_keys=dataset.X_keys,
         alpha=alpha,
     )
     start = time.process_time()
     sampler = MALA_Sampler(
         probmodel=student,
         params=["X"],
-        step_size=0.01,
+        step_size=0.004,
         num_steps=samples,
         num_chains=num_chains,
+        save_interval=100,
+        save_dir=emulator_dir,
+        save_format="parquet",
         burn_in=burn,
-        tune=True,
+        tune=False,
         pretrain=True,
     )
     sampler.sample_chains()

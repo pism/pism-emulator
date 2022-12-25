@@ -177,6 +177,7 @@ class StudentT(ProbModel):
         sigma_hat: Union[np.ndarray, torch.tensor],
         X_mean: Union[float, np.ndarray, torch.tensor] = 1.0,
         X_std: Union[float, np.ndarray, torch.tensor] = 1.0,
+        X_keys: list = [],
         alpha: Union[float, torch.tensor] = 0.01,
         alpha_b: Union[float, torch.tensor] = 3.0,
         beta_b: Union[float, torch.tensor] = 3.0,
@@ -208,6 +209,7 @@ class StudentT(ProbModel):
             if not isinstance(X_std, torch.Tensor)
             else X_std.to(device)
         )
+        self.X_keys = X_keys
         self.Y_target = (
             torch.tensor(Y_target, dtype=torch.float32, device=device)
             if not isinstance(Y_target, torch.Tensor)

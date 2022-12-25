@@ -23,12 +23,14 @@ from collections import OrderedDict
 from itertools import compress
 import numpy as np
 from tqdm import tqdm
-
+import os
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 matplotlib.rcParams["figure.figsize"] = [10, 10]
+
+import pandas as pd
 
 import torch
 from torch.nn import Module, Parameter
@@ -98,7 +100,6 @@ class Chain(MutableSequence):
             self.state_dicts = [copy.deepcopy(probmodel.state_dict())]
             log_prob = probmodel.log_prob(*next(probmodel.dataloader.__iter__()))
             log_prob["log_prob"].detach_()
-            # self.log_probs = [copy.deepcopy(log_prob)]
             self.log_probs = [log_prob]
             self.accepts = [True]
             self.last_accepted_idx = 0
@@ -242,7 +243,19 @@ class Chain(MutableSequence):
 
 
 class Sampler_Chain:
-    def __init__(self, probmodel, step_size, num_steps, burn_in, pretrain, tune):
+    def __init__(
+        self,
+        probmodel,
+        params,
+        step_size,
+        num_steps,
+        save_interval,
+        save_dir,
+        save_format,
+        burn_in,
+        pretrain,
+        tune,
+    ):
 
         self.probmodel = probmodel
         self.chain = Chain(probmodel=self.probmodel)
@@ -250,7 +263,10 @@ class Sampler_Chain:
         self.step_size = step_size
         self.num_steps = num_steps
         self.burn_in = burn_in
-
+        self.save_interval = save_interval
+        self.save_dir = save_dir
+        self.save_format = save_format
+        self.params = params
         self.pretrain = pretrain
         self.tune = tune
 
@@ -306,6 +322,11 @@ class Sampler_Chain:
 
     def sample_chain(self):
 
+        save_interval = self.save_interval
+        save_dir = self.save_dir
+        save_format = self.save_format
+
+        params = self.params
         self.probmodel.reset_parameters()
 
         if self.pretrain:
@@ -314,7 +335,7 @@ class Sampler_Chain:
         if self.tune:
             self.tune_step_size()
 
-        # print(f"After Tuning Step Size: {self.optim.param_groups[0]['step_size']=}")
+        print(f"After Tuning Step Size: {self.optim.param_groups[0]['step_size']=}")
 
         self.chain = Chain(probmodel=self.probmodel)
 
@@ -334,6 +355,36 @@ class Sampler_Chain:
                     exit()
                 self.probmodel.load_state_dict(self.chain.state["state_dict"])
 
+            if step % save_interval == 0:
+                X_post = (
+                    torch.vstack(
+                        [
+                            self.chain.samples[k]["X"]
+                            for k in range(len(self.chain.samples))
+                        ]
+                    )
+                    * self.probmodel.X_std
+                    + self.probmodel.X_mean
+                )
+                X_posterior = X_post.detach().numpy()
+                posterior_dir = f"{save_dir}/posterior_samples/"
+                if not os.path.isdir(posterior_dir):
+                    os.makedirs(posterior_dir)
+
+                df = pd.DataFrame(
+                    data=X_posterior,
+                    columns=self.probmodel.X_keys,
+                )
+                if save_format == "csv":
+                    df.to_csv(
+                        os.path.join(posterior_dir, f"X_posterior_model_0.csv.gz")
+                    )
+                elif save_format == "parquet":
+                    df.to_parquet(
+                        os.path.join(posterior_dir, f"X_posterior_model_0.parquet")
+                    )
+                else:
+                    raise NotImplementedError(f"{out_format} not implemented")
             desc = f"{str(self)}: Accept: {self.chain.running_accepts.avg:.2f}/{self.chain.accept_ratio:.2f} \t"
             for key, running_avg in self.chain.running_avgs.items():
                 desc += f" {key}: {running_avg.avg:.2f} "
@@ -341,7 +392,6 @@ class Sampler_Chain:
             progress.set_description(desc=desc)
 
         self.chain = self.chain[self.burn_in :]
-        print(self.chain)
 
         return self.chain
 
@@ -389,6 +439,9 @@ class MALA_Chain(Sampler_Chain):
         params=None,
         step_size=0.1,
         num_steps=2000,
+        save_interval=1000,
+        save_dir=".",
+        save_format="csv",
         burn_in=100,
         pretrain=False,
         tune=False,
@@ -396,7 +449,17 @@ class MALA_Chain(Sampler_Chain):
     ):
 
         Sampler_Chain.__init__(
-            self, probmodel, step_size, num_steps, burn_in, pretrain, tune
+            self,
+            probmodel,
+            params,
+            step_size,
+            num_steps,
+            save_interval,
+            save_dir,
+            save_format,
+            burn_in,
+            pretrain,
+            tune,
         )
 
         self.num_chain = num_chain
