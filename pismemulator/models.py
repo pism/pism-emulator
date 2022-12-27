@@ -244,7 +244,9 @@ class StudentT(ProbModel):
 
     def reset_parameters(self):
 
-        self.X.data = self.sample()
+        samples = self.sample()
+        print("Resetting: new samples", samples)
+        self.X.data = samples
 
     def sample(self):
         h: float = 0.1
@@ -253,6 +255,7 @@ class StudentT(ProbModel):
         )
 
         samples = self.draw_sample(self.X, 2 * h * Hinv).detach()
+        print("Sampling new", samples)
 
         return samples
 
@@ -322,7 +325,7 @@ class StudentT(ProbModel):
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
 
-        log_pi = self.forward()
+        log_pi = self.forward(X)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
             H = torch.stack(

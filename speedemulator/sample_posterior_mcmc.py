@@ -130,7 +130,7 @@ if __name__ == "__main__":
     sampler = MALA_Sampler(
         probmodel=student,
         params=["X"],
-        step_size=0.004,
+        step_size=0.1,
         num_steps=samples,
         num_chains=num_chains,
         save_interval=100,
@@ -142,6 +142,16 @@ if __name__ == "__main__":
     )
     sampler.sample_chains()
     print(time.process_time() - start)
-    X_post = torch.vstack(
+    X_posterior = torch.vstack(
         [sampler.chain.samples[k]["X"] for k in range(len(sampler.chain.samples))]
     )
+    fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(12, 6))
+    fig.subplots_adjust(wspace=0.05, hspace=0.5)
+    for k in range(X_posterior.shape[1]):
+        ax = axs.ravel()[k]
+        sns.kdeplot(X_posterior[:, k] * dataset.X_std[k] + dataset.X_mean[k], ax=ax)
+        sns.despine(ax=ax, left=True, bottom=False)
+        ax.set_xlabel(keys_dict[dataset.X_keys[k]])
+        ax.set_ylabel(None)
+        ax.axes.yaxis.set_visible(False)
+    fig.tight_layout()

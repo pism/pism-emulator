@@ -284,7 +284,7 @@ class MALASampler(object):
         else:
             local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
 
-        log_pi, _, H, Hinv, log_det_Hinv = local_data
+        log_pi, g, H, Hinv, log_det_Hinv = local_data
 
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
@@ -351,7 +351,7 @@ class MALASampler(object):
             if (i % print_interval == 0) & (i > burn):
                 print("===============================================")
                 print(
-                    "sample: {0:d}, acc. rate: {1:4.2f}, step: {2:4.2f}log(P): {3:6.1f}".format(
+                    "sample: {0:d}, acc. rate: {1:4.2f}, step: {2:4.2f} log(P): {3:6.1f}".format(
                         i - burn, acc, h, local_data[0].item()
                     )
                 )

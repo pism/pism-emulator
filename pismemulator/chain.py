@@ -327,15 +327,14 @@ class Sampler_Chain:
         save_format = self.save_format
 
         params = self.params
+        print("Sample_chain")
         self.probmodel.reset_parameters()
-
+        print("done")
         if self.pretrain:
             self.probmodel.pretrain()
 
         if self.tune:
             self.tune_step_size()
-
-        print(f"After Tuning Step Size: {self.optim.param_groups[0]['step_size']=}")
 
         self.chain = Chain(probmodel=self.probmodel)
 
@@ -343,6 +342,7 @@ class Sampler_Chain:
         for step in progress:
 
             proposal_log_prob, sample = self.propose()
+            print(proposal_log_prob, sample)
             accept, log_ratio = self.acceptance(
                 proposal_log_prob["log_prob"], self.chain.state["log_prob"]["log_prob"]
             )

@@ -41,7 +41,6 @@ class MCMC_Optim:
             "t0": 10,
             "gamma": 0.05,
             "kappa": 0.75,
-            # 'mu': np.log(self.param_groups[0]["step_size"]),
             "mu": 0.0,
             "H": 0,
             "log_eps": 1.0,
@@ -90,6 +89,17 @@ class MCMC_Optim:
 
             group["step_size"] *= scale
             # print(f'{avg_acc=:.3f} & {scale=} -> {group["lr"]=:.3f}')
+
+    def db_tune(self, accepts, acc_target, acc):
+
+        step_size_0: float = 0.1
+        step_size_max: float = 1.0
+        acc_target: float = 0.25
+        k: float = 0.01
+
+        h = min(step_size_0 * (1 + k * np.sign(acc - acc_target)), step_size_max)
+
+        return h
 
     def dual_average_tune(self, accepts, t, alpha):
         """
@@ -239,7 +249,12 @@ class SGLD_Optim(Optimizer, MCMC_Optim):
 
 
 class MALA_Optim(Optimizer, MCMC_Optim):
-    def __init__(self, model, params=None, step_size=0.1):
+    def __init__(
+        self,
+        model,
+        params=None,
+        step_size=0.1,
+    ):
         """
         log_N(θ|0,1) =
         :param model:
@@ -248,9 +263,6 @@ class MALA_Optim(Optimizer, MCMC_Optim):
         :param norm_sigma:
         :param addnoise:
         """
-
-        if step_size < 0.0:
-            raise ValueError("Invalid learning rate: {}".format(step_size))
 
         defaults = dict(step_size=step_size)
 
@@ -265,9 +277,6 @@ class MALA_Optim(Optimizer, MCMC_Optim):
                     params_to_optimize.append(param[1])
         Optimizer.__init__(self, params=params_to_optimize, defaults=defaults)
         MCMC_Optim.__init__(self)
-
-        # print(self.tune_params)
-        # exit()
 
     def step(self):
 
@@ -291,26 +300,28 @@ class MALA_Optim(Optimizer, MCMC_Optim):
                 if p.grad is None:
                     continue
 
-                log_pi = self.model.forward()
-                g = torch.autograd.grad(
-                    log_pi, p, retain_graph=True, create_graph=True
-                )[0]
-                H = torch.stack(
-                    [torch.autograd.grad(e, p, retain_graph=True)[0] for e in g]
+                (
+                    log_pi,
+                    g,
+                    _,
+                    Hinv,
+                    log_det_Hinv,
+                ) = self.model.get_log_like_gradient_and_hessian(
+                    p, compute_hessian=True
                 )
-                lamda, Q = torch.linalg.eig(H)
-                lamda, Q = torch.real(lamda), torch.real(Q)
-                lamda_prime = torch.sqrt(lamda**2 + eps)
-                lamda_prime_inv = 1.0 / lamda_prime
-                H = Q @ torch.diag(lamda_prime) @ Q.T
-                Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
-                log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
 
                 grad = p.grad.data
-                sigma = 0.5 * p @ Hinv @ p
+                sigma = p @ Hinv @ p
+                # sample_log_prob, sample = self.propose()
+                # accept, log_ratio = self.acceptance(
+                #     sample_log_prob["log_prob"],
+                #     self.chain.state["log_prob"]["log_prob"],
+                # )
 
-                p.data.add_(g @ Hinv, alpha=-0.5 * group["step_size"])
-                p.data.add_(sigma, alpha=-0.5 * group["step_size"])
+                # g = self.db_tune()
+                h = group["step_size"]
+                p.data.add_(g @ Hinv, alpha=-0.5 * h)
+                # p.data.add_(sigma, alpha=-0.5 * h)
 
                 if torch.isnan(p.data).any():
                     print("grad is NaN", grad)
