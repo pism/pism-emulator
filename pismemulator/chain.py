@@ -474,8 +474,8 @@ class mMALA_Chain(Sampler_Chain):
     def propose(self):
 
         self.optim.zero_grad()
-        self.probmodel.reset_parameters()
         batch = next(self.probmodel.dataloader.__iter__())
+        # self.probmodel.reset_parameters()
         log_prob = self.probmodel.log_prob(*batch)
         (-log_prob["log_prob"]).backward()
         self.optim.step()

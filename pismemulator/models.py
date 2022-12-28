@@ -266,7 +266,7 @@ class StudentT(ProbModel):
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
-    def log_prob(self, *data):
+    def log_prob(self, *x):
         X = self.X
         Y_pred = 10 ** self.emulator(X, add_mean=True)
         r = Y_pred - self.Y_target
@@ -294,8 +294,7 @@ class StudentT(ProbModel):
             "log_prob": log_prob,
         }
 
-    def forward(self, *data):
-        X = self.X
+    def forward(self, X=None):
         Y_pred = 10 ** self.emulator(X, add_mean=True)
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
