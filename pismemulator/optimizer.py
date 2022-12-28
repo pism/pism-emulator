@@ -248,7 +248,7 @@ class SGLD_Optim(Optimizer, MCMC_Optim):
         return log_prob
 
 
-class MALA_Optim(Optimizer, MCMC_Optim):
+class mMALA_Optim(Optimizer, MCMC_Optim):
     def __init__(
         self,
         model,
@@ -258,7 +258,7 @@ class MALA_Optim(Optimizer, MCMC_Optim):
         """
         log_N(θ|0,1) =
         :param model:
-        "param params:
+        :param params:
         :param step_size:
         :param norm_sigma:
         :param addnoise:
@@ -334,6 +334,85 @@ class MALA_Optim(Optimizer, MCMC_Optim):
     # logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
     # def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
     #     return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+
+
+class MALA_Optim(Optimizer, MCMC_Optim):
+    def __init__(self, model, step_size=0.1, prior_std=1.0, addnoise=True):
+        """
+        log_N(θ|0,1) =
+        :param model:
+        :param step_size:
+        :param norm_sigma:
+        :param addnoise:
+        """
+
+        weight_decay = 1 / (prior_std**2) if prior_std != 0 else 0
+        if weight_decay < 0.0:
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+        if step_size < 0.0:
+            raise ValueError("Invalid learning rate: {}".format(step_size))
+
+        defaults = dict(
+            step_size=step_size, weight_decay=weight_decay, addnoise=addnoise
+        )
+
+        self.model = model
+        params = self.model.parameters()
+
+        Optimizer.__init__(self, params=params, defaults=defaults)
+        MCMC_Optim.__init__(self)
+
+        # print(self.tune_params)
+        # exit()
+
+    def step(self):
+
+        """
+        d theta
+        = eps/2 nabla log_prob + N(0, eps)
+        = eps/2 nabla log_prob + N(0, 1) * eps**0.5 # x^0.5 = x^(1-0.5) = x/x^0.5
+        = eps/2 nabla log_prob + N(0, 1) * eps / eps**0.5
+        = eps/2 nabla log_prob + N(0, 1) * eps / eps**0.5 * 2/2
+        = eps/2 nabla log_prob + N(0, 1) * eps/2 * 2/eps**0.5
+        = eps/2 ( nabla log_prob + 2/eps**0.5 * N(0, 1) )
+
+        """
+
+        log_prob = None
+
+        for group in self.param_groups:
+
+            weight_decay = group["weight_decay"]
+
+            for p in group["params"]:
+
+                if p.grad is None:
+                    continue
+
+                grad = p.grad.data
+                # grad.clamp_(-1000,1000)
+                if weight_decay != 0:
+                    grad.add_(alpha=weight_decay, other=p.data)
+
+                if group["addnoise"]:
+
+                    noise = torch.randn_like(p.data).mul_(
+                        group["step_size"] ** 0.5
+                    )  # .mul_(0.1)
+
+                    p.data.add_(grad, alpha=-0.5 * group["step_size"])
+                    p.data.add_(noise)
+
+                    if torch.isnan(p.data).any():
+                        print(grad)
+                        exit("Nan param")
+                    if torch.isinf(p.data).any():
+                        exit("inf param")
+
+                else:
+                    p.data.add_(other=0.5 * grad, alpha=-group["step_size"])
+
+        return log_prob
 
 
 class HMC_Optim(Optimizer, MCMC_Optim):

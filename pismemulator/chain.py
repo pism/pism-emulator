@@ -48,6 +48,7 @@ from pismemulator.optimizer import (
     SGLD_Optim,
     MetropolisHastings_Optim,
     MALA_Optim,
+    mMALA_Optim,
     HMC_Optim,
     SGNHT_Optim,
 )
@@ -249,12 +250,12 @@ class Sampler_Chain:
         params,
         step_size,
         num_steps,
-        save_interval,
-        save_dir,
-        save_format,
-        burn_in,
-        pretrain,
-        tune,
+        save_interval=None,
+        save_dir=".",
+        save_format="csv",
+        burn_in=True,
+        pretrain=True,
+        tune=True,
     ):
 
         self.probmodel = probmodel
@@ -327,9 +328,7 @@ class Sampler_Chain:
         save_format = self.save_format
 
         params = self.params
-        print("Sample_chain")
         self.probmodel.reset_parameters()
-        print("done")
         if self.pretrain:
             self.probmodel.pretrain()
 
@@ -340,9 +339,7 @@ class Sampler_Chain:
 
         progress = tqdm(range(self.num_steps))
         for step in progress:
-
             proposal_log_prob, sample = self.propose()
-            print(proposal_log_prob, sample)
             accept, log_ratio = self.acceptance(
                 proposal_log_prob["log_prob"], self.chain.state["log_prob"]["log_prob"]
             )
@@ -432,7 +429,7 @@ class SGLD_Chain(Sampler_Chain):
         return log_prob, self.probmodel
 
 
-class MALA_Chain(Sampler_Chain):
+class mMALA_Chain(Sampler_Chain):
     def __init__(
         self,
         probmodel,
@@ -463,12 +460,53 @@ class MALA_Chain(Sampler_Chain):
         )
 
         self.num_chain = num_chain
-        self.optim = MALA_Optim(
+        self.optim = mMALA_Optim(
             probmodel,
             params=params,
             step_size=step_size,
         )
         self.acceptance = MetropolisHastingsAcceptance()
+
+    def __repr__(self):
+        return "mMALA"
+
+    @torch.enable_grad()
+    def propose(self):
+
+        self.optim.zero_grad()
+        self.probmodel.reset_parameters()
+        batch = next(self.probmodel.dataloader.__iter__())
+        log_prob = self.probmodel.log_prob(*batch)
+        (-log_prob["log_prob"]).backward()
+        self.optim.step()
+
+        return log_prob, self.probmodel
+
+
+class MALA_Chain(Sampler_Chain):
+    def __init__(
+        self,
+        probmodel,
+        step_size=0.1,
+        num_steps=2000,
+        burn_in=100,
+        pretrain=False,
+        tune=False,
+        num_chain=0,
+    ):
+
+        Sampler_Chain.__init__(
+            self, probmodel, step_size, num_steps, burn_in, pretrain, tune
+        )
+
+        self.num_chain = num_chain
+
+        self.optim = MALA_Optim(
+            self.probmodel, step_size=step_size, prior_std=1.0, addnoise=True
+        )
+
+        self.acceptance = MetropolisHastingsAcceptance()
+        # self.acceptance = SDE_Acceptance()
 
     def __repr__(self):
         return "MALA"

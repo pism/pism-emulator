@@ -26,11 +26,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from pismemulator.utils import posterior_dist
-from pismemulator.optimizer import SGLD_Optim, MetropolisHastings_Optim
+from pismemulator.optimizer import (
+    SGLD_Optim,
+    MetropolisHastings_Optim,
+)
 from pismemulator.acceptance import MetropolisHastingsAcceptance, SDE_Acceptance
 from pismemulator.chain import (
     Chain,
     MALA_Chain,
+    mMALA_Chain,
 )
 from pismemulator.probmodel import ProbModel
 
@@ -54,12 +58,12 @@ class Sampler:
         step_size,
         num_steps,
         num_chains,
-        save_interval,
-        save_dir,
-        save_format,
-        burn_in,
-        pretrain,
-        tune,
+        save_interval=None,
+        save_dir=".",
+        save_format="csv",
+        burn_in=True,
+        pretrain=True,
+        tune=True,
     ):
 
         self.probmodel = probmodel
@@ -369,7 +373,7 @@ class SGLD_Sampler(Sampler):
         return "SGLD"
 
 
-class MALA_Sampler(Sampler):
+class mMALA_Sampler(Sampler):
     def __init__(
         self,
         probmodel,
@@ -412,7 +416,7 @@ class MALA_Sampler(Sampler):
 
         if self.num_chains > 1:
             self.parallel_chains = [
-                MALA_Chain(
+                mMALA_Chain(
                     copy.deepcopy(self.probmodel),
                     params=self.params,
                     step_size=self.step_size,
@@ -433,7 +437,7 @@ class MALA_Sampler(Sampler):
             )
 
         elif self.num_chains == 1:
-            chain = MALA_Chain(
+            chain = mMALA_Chain(
                 copy.deepcopy(self.probmodel),
                 params=self.params,
                 step_size=self.step_size,
@@ -456,7 +460,7 @@ class MALA_Sampler(Sampler):
         return chains
 
     def __str__(self):
-        return "MALA"
+        return "mMALA"
 
 
 class HMC_Sampler(Sampler):
@@ -593,3 +597,70 @@ class SGNHT_Sampler(Sampler):
             self.chain += chain
 
         return chains
+
+
+class MALA_Sampler(Sampler):
+    def __init__(
+        self,
+        probmodel,
+        step_size=0.01,
+        num_steps=10000,
+        num_chains=1,
+        burn_in=500,
+        pretrain=True,
+        tune=True,
+    ):
+        """
+
+        :param probmodel: Probmodel() that implements forward, log_prob, prob and sample
+        :param step_length:
+        :param num_steps:
+        :param burn_in:
+        """
+
+        assert isinstance(probmodel, ProbModel)
+        super().__init__(
+            probmodel, step_size, num_steps, num_chains, burn_in, pretrain, tune
+        )
+
+    def sample_chains(self):
+
+        if self.num_chains > 1:
+            self.parallel_chains = [
+                MALA_Chain(
+                    copy.deepcopy(self.probmodel),
+                    step_size=self.step_size,
+                    num_steps=self.num_steps,
+                    burn_in=self.burn_in,
+                    pretrain=self.pretrain,
+                    tune=self.tune,
+                    num_chain=i,
+                )
+                for i in range(self.num_chains)
+            ]
+
+            chains = Parallel(n_jobs=self.num_chains)(
+                delayed(chain.sample_chain)() for chain in self.parallel_chains
+            )
+
+        elif self.num_chains == 1:
+            chain = MALA_Chain(
+                copy.deepcopy(self.probmodel),
+                step_size=self.step_size,
+                num_steps=self.num_steps,
+                burn_in=self.burn_in,
+                pretrain=self.pretrain,
+                tune=self.tune,
+                num_chain=0,
+            )
+            chains = [chain.sample_chain()]
+
+        self.chain = Chain(probmodel=self.probmodel)
+
+        for chain in chains:
+            self.chain += chain
+
+        return chains
+
+    def __str__(self):
+        return "MALA"
