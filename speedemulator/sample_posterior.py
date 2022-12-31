@@ -5,6 +5,7 @@ import time
 from argparse import ArgumentParser
 from os.path import join
 from typing import Union
+from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
@@ -276,6 +277,8 @@ class MALASampler(object):
         return mu + L @ torch.randn(L.shape[0], device=device)
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
+        sigma = (Y - mu) @ inverse_cov @ (Y - mu)
+        #          print("inv_cov", inverse_cov, "log_det_cov", log_det_cov, "sigma", sigma)
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
     def MALA_step(self, X, h, local_data=None):
@@ -293,6 +296,7 @@ class MALASampler(object):
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
+        # alpha = min(1, P * Q_ / (P_ * Q))
         log_alpha = -log_pi_ + logq_ + log_pi - logq
         alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
         u = torch.rand(1, device=device)
@@ -343,32 +347,37 @@ class MALASampler(object):
         local_data = None
         m_vars = []
         acc = acc_target
-        for i in range(samples + burn):
+        progress = tqdm(range(samples + burn))
+        for i in progress:
             X, local_data, s = self.MALA_step(X, h, local_data=local_data)
             m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
-            if (i % print_interval == 0) & (i > burn):
-                print("===============================================")
-                print(
-                    "sample: {0:d}, acc. rate: {1:4.2f}, step: {2:4.2f} log(P): {3:6.1f}".format(
-                        i - burn, acc, h, local_data[0].item()
-                    )
-                )
-                print(
-                    "".join(
-                        [
-                            f"{key}: {(val * std + mean):.3f}\n"
-                            for key, val, std, mean in zip(
-                                dataset.X_keys,
-                                X.data.cpu().numpy(),
-                                dataset.X_std,
-                                dataset.X_mean,
-                            )
-                        ]
-                    )
-                )
-                print("===============================================")
+            log_p = local_data[0].item()
+            desc = f"sample: {(i-burn):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f} "
+            progress.set_description(desc=desc)
+
+            # if (i % print_interval == 0) & (i > burn):
+            #     print("===============================================")
+            #     print(
+            #         "sample: {0:d}, acc. rate: {1:4.2f}, step: {2:4.2f} log(P): {3:6.1f}".format(
+            #             i - burn, acc, h, local_data[0].item()
+            #         )
+            #     )
+            #     print(
+            #         "".join(
+            #             [
+            #                 f"{key}: {(val * std + mean):.3f}\n"
+            #                 for key, val, std, mean in zip(
+            #                     dataset.X_keys,
+            #                     X.data.cpu().numpy(),
+            #                     dataset.X_std,
+            #                     dataset.X_mean,
+            #                 )
+            #             ]
+            #         )
+            #     )
+            #     print("===============================================")
 
             if (i % save_interval == 0) & (i >= burn):
                 print("///////////////////////////////////////////////")

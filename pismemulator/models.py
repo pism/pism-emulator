@@ -245,17 +245,14 @@ class StudentT(ProbModel):
     def reset_parameters(self):
 
         samples = self.sample()
-        print("Resetting: new samples", samples)
         self.X.data = samples
 
     def sample(self):
         h: float = 0.1
-        log_pi, _, H, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+        log_pi, _, H, Hinv, det_Hinv = self.get_log_like_gradient_and_hessian(
             self.X, compute_hessian=True
         )
-
         samples = self.draw_sample(self.X, 2 * h * Hinv).detach()
-        print("Sampling new", samples)
 
         return samples
 
@@ -289,7 +286,7 @@ class StudentT(ProbModel):
         log_prior = torch.sum(
             (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
         )
-        log_prob = -(self.alpha * log_likelihood + log_prior)
+        log_prob = self.alpha * log_likelihood + log_prior
         return {
             "log_prob": log_prob,
         }

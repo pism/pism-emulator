@@ -55,6 +55,7 @@ from pismemulator.optimizer import (
 from pismemulator.acceptance import (
     SDE_Acceptance,
     MetropolisHastingsAcceptance,
+    MALAAcceptance,
 )
 from pismemulator.utils import RunningAverageMeter
 
@@ -465,7 +466,7 @@ class mMALA_Chain(Sampler_Chain):
             params=params,
             step_size=step_size,
         )
-        self.acceptance = MetropolisHastingsAcceptance()
+        self.acceptance = MALAAcceptance()
 
     def __repr__(self):
         return "mMALA"
@@ -475,7 +476,6 @@ class mMALA_Chain(Sampler_Chain):
 
         self.optim.zero_grad()
         batch = next(self.probmodel.dataloader.__iter__())
-        # self.probmodel.reset_parameters()
         log_prob = self.probmodel.log_prob(*batch)
         (-log_prob["log_prob"]).backward()
         self.optim.step()

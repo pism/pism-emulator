@@ -303,25 +303,29 @@ class mMALA_Optim(Optimizer, MCMC_Optim):
                 (
                     log_pi,
                     g,
-                    _,
+                    H,
                     Hinv,
                     log_det_Hinv,
                 ) = self.model.get_log_like_gradient_and_hessian(
                     p, compute_hessian=True
                 )
 
+                h = group["step_size"]
+
                 grad = p.grad.data
-                sigma = p @ Hinv @ p
-                # sample_log_prob, sample = self.propose()
-                # accept, log_ratio = self.acceptance(
-                #     sample_log_prob["log_prob"],
-                #     self.chain.state["log_prob"]["log_prob"],
-                # )
+
+                p_ = self.model.draw_sample(p, 2 * h * Hinv).detach()
+                p_.requires_grad = True
 
                 # g = self.db_tune()
-                h = group["step_size"]
-                p.data.add_(g @ Hinv, alpha=-0.5 * h)
-                # p.data.add_(sigma, alpha=-0.5 * h)
+                mu = log_det_Hinv
+                inverse_cov = H * 2 * h
+                mu = grad @ Hinv
+                sigma = (p - p_).T @ (inverse_cov @ (p - p_))
+                # print("mu", mu, "sigma", sigma)
+                # print("g@Hinv: ", g @ Hinv, "log_det_Hinv: ", log_det_Hinv)
+                p.data.add_(mu, alpha=-0.5 * h)
+                p.data.add_(sigma, alpha=-0.5 * h)
 
                 if torch.isnan(p.data).any():
                     print("grad is NaN", grad)

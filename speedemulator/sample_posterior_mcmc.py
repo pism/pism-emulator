@@ -34,6 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument("--burn", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=100000)
+    parser.add_argument("--step_size", type=float, default=0.1)
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
@@ -59,6 +60,7 @@ if __name__ == "__main__":
     burn = args.burn
     out_format = args.out_format
     samples_file = args.samples_file
+    step_size = args.step_size
     target_file = args.target_file
     thinning_factor = args.thinning_factor
 
@@ -130,7 +132,7 @@ if __name__ == "__main__":
     sampler = mMALA_Sampler(
         probmodel=student,
         params=["X"],
-        step_size=0.1,
+        step_size=step_size,
         num_steps=samples,
         num_chains=num_chains,
         save_interval=100,

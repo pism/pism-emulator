@@ -30,7 +30,6 @@ from pismemulator.optimizer import (
     SGLD_Optim,
     MetropolisHastings_Optim,
 )
-from pismemulator.acceptance import MetropolisHastingsAcceptance, SDE_Acceptance
 from pismemulator.chain import (
     Chain,
     MALA_Chain,
