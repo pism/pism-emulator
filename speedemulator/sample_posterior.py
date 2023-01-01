@@ -246,13 +246,11 @@ class MALASampler(object):
             - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
             - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
         )
-
         # Prior
         X_bar = (X - X_min) / (X_max - X_min)
         log_prior = torch.sum(
             (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
         )
-
         return -(self.alpha * log_likelihood + log_prior)
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
@@ -288,16 +286,17 @@ class MALASampler(object):
             local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
 
         log_pi, g, H, Hinv, log_det_Hinv = local_data
-
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
 
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
+        # print("q", logq, "q_", logq_)
 
         # alpha = min(1, P * Q_ / (P_ * Q))
         log_alpha = -log_pi_ + logq_ + log_pi - logq
+        log_alpha = -log_pi_ + log_pi
         alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
@@ -514,3 +513,16 @@ if __name__ == "__main__":
         print_interval=100,
     )
     print(time.process_time() - start)
+    fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(12, 6))
+    fig.subplots_adjust(wspace=0.05, hspace=0.5)
+    for k in range(X_posterior.shape[1]):
+        ax = axs.ravel()[k]
+        sns.kdeplot(
+            X_posterior[:, k] * dataset.X_std[k].numpy() + dataset.X_mean[k].numpy(),
+            ax=ax,
+        )
+        sns.despine(ax=ax, left=True, bottom=False)
+        ax.set_xlabel(keys_dict[dataset.X_keys[k]])
+        ax.set_ylabel(None)
+        ax.axes.yaxis.set_visible(False)
+    fig.tight_layout()

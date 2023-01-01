@@ -286,7 +286,7 @@ class StudentT(ProbModel):
         log_prior = torch.sum(
             (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
         )
-        log_prob = self.alpha * log_likelihood + log_prior
+        log_prob = -(self.alpha * log_likelihood + log_prior)
         return {
             "log_prob": log_prob,
         }

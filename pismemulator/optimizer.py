@@ -90,7 +90,7 @@ class MCMC_Optim:
             group["step_size"] *= scale
             # print(f'{avg_acc=:.3f} & {scale=} -> {group["lr"]=:.3f}')
 
-    def db_tune(self, accepts, acc_target, acc):
+    def db_tune(self, acc):
 
         step_size_0: float = 0.1
         step_size_max: float = 1.0
@@ -99,7 +99,8 @@ class MCMC_Optim:
 
         h = min(step_size_0 * (1 + k * np.sign(acc - acc_target)), step_size_max)
 
-        return h
+        for group in self.param_groups:
+            group["step_size"] = h
 
     def dual_average_tune(self, accepts, t, alpha):
         """
@@ -317,11 +318,9 @@ class mMALA_Optim(Optimizer, MCMC_Optim):
                 p_ = self.model.draw_sample(p, 2 * h * Hinv).detach()
                 p_.requires_grad = True
 
-                # g = self.db_tune()
-                mu = log_det_Hinv
-                inverse_cov = H * 2 * h
                 mu = grad @ Hinv
-                sigma = (p - p_).T @ (inverse_cov @ (p - p_))
+                inverse_cov = Hinv * 2
+                sigma = (p - p_) @ inverse_cov @ (p - p_)
                 # print("mu", mu, "sigma", sigma)
                 # print("g@Hinv: ", g @ Hinv, "log_det_Hinv: ", log_det_Hinv)
                 p.data.add_(mu, alpha=-0.5 * h)

@@ -344,6 +344,10 @@ class Sampler_Chain:
             accept, log_ratio = self.acceptance(
                 proposal_log_prob["log_prob"], self.chain.state["log_prob"]["log_prob"]
             )
+            self.optim.db_tune(
+                np.exp(log_ratio.item()),
+            )
+
             self.chain += (self.probmodel, proposal_log_prob, accept)
 
             if not accept:
