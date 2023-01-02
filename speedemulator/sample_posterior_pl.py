@@ -6,18 +6,18 @@ from argparse import ArgumentParser
 from os.path import join
 from typing import Union
 
+import arviz as az
+import lightning as pl
 import numpy as np
 import pandas as pd
 import pylab as plt
 import seaborn as sns
 import torch
-from torch.utils.data import DataLoader, TensorDataset
-import lightning as pl
-
-from scipy.special import gamma
 from scipy.stats import beta
+from torch.utils.data import DataLoader, TensorDataset
 
-from pismemulator.nnemulator import NNEmulator, PISMDataset
+from pismemulator.datasets import PISMDataset
+from pismemulator.nnemulator import NNEmulator
 from pismemulator.utils import param_keys_dict as keys_dict
 
 
@@ -165,16 +165,16 @@ class mMALA(pl.LightningModule):
         beta_b = self.beta_b
 
         # Likelihood
-        # log_likelihood = torch.sum(
-        #     torch.lgamma((nu + 1) / 2.0)
-        #     - torch.lgamma(nu / 2.0)
-        #     - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
-        #     - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
-        # )
-        log_likelihood = (
-            torch.distributions.StudentT(nu).log_prob(t**2).sum()
-            - sigma_hat.log().sum()
+        log_likelihood = torch.sum(
+            torch.lgamma((nu + 1) / 2.0)
+            - torch.lgamma(nu / 2.0)
+            - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
+            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
         )
+        # log_likelihood = (
+        #     torch.distributions.StudentT(nu).log_prob(t**2).sum()
+        #     - sigma_hat.log().sum()
+        # )
         # Prior
         X_bar = (X - X_min) / (X_max - X_min)
         log_prior = torch.sum(
@@ -238,8 +238,9 @@ class mMALA(pl.LightningModule):
         print(
             "".join(
                 [
-                    f"{(val * std + mean):.3f}\n"
-                    for val, std, mean in zip(
+                    f"{key} = {(val * std + mean):.3f}\n"
+                    for key, val, std, mean in zip(
+                        self.X_keys,
                         X.data.cpu().numpy(),
                         self.X_std,
                         self.X_mean,
@@ -336,12 +337,8 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_chains", type=int, default=1)
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument("--burn", type=int, default=1000)
-    parser.add_argument("--samples", type=int, default=100000)
-    parser.add_argument("--step_size", type=float, default=0.1)
-    parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
@@ -359,14 +356,10 @@ if __name__ == "__main__":
     checkpoint = args.checkpoint
     data_dir = args.data_dir
     emulator_dir = args.emulator_dir
-    alpha = args.alpha
     model_index = args.model_index
-    num_chains = args.num_chains
-    samples = args.samples
     burn = args.burn
     out_format = args.out_format
     samples_file = args.samples_file
-    step_size = args.step_size
     target_file = args.target_file
     thinning_factor = args.thinning_factor
 
@@ -418,8 +411,7 @@ if __name__ == "__main__":
     alpha_b = 3.0
     beta_b = 3.0
     X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(samples, n_parameters)) * (X_max - X_min)
-        + X_min
+        beta.rvs(alpha_b, beta_b, size=(100000, n_parameters)) * (X_max - X_min) + X_min
     )
     # Initial condition for MAP. Note that using 0 yields similar results
     X_0 = torch.tensor(X_prior.mean(axis=0), dtype=torch.float)
@@ -451,14 +443,18 @@ if __name__ == "__main__":
     trainer.fit(mala, data_loader)
 
     print(time.process_time() - start)
-    X_posterior = np.vstack([mala.X_posterior[k] for k in range(len(mala.X_posterior))])
+    X_posterior = (
+        np.vstack([mala.X_posterior[k] for k in range(len(mala.X_posterior))])[burn::]
+        * X_std.numpy()
+        + X_mean.numpy()
+    )
 
     fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(12, 6))
     fig.subplots_adjust(wspace=0.05, hspace=0.5)
     for k in range(X_posterior.shape[1]):
         ax = axs.ravel()[k]
         sns.kdeplot(
-            X_posterior[:, k] * dataset.X_std[k].numpy() + dataset.X_mean[k].numpy(),
+            X_posterior[:, k],
             ax=ax,
         )
         sns.despine(ax=ax, left=True, bottom=False)
@@ -466,3 +462,9 @@ if __name__ == "__main__":
         ax.set_ylabel(None)
         ax.axes.yaxis.set_visible(False)
     fig.tight_layout()
+    d = {}
+    for k, key in enumerate(X_keys):
+        d[key] = X_posterior[:, k]
+
+    trace = az.convert_to_inference_data(d)
+    az.plot_trace(trace)

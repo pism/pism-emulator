@@ -15,11 +15,10 @@ from lightning import LightningModule
 from scipy.special import gamma
 from scipy.stats import beta
 
+from pismemulator.models import StudentT
 from pismemulator.nnemulator import NNEmulator, PISMDataset
 from pismemulator.sampler import mMALA_Sampler
-from pismemulator.models import StudentT
 from pismemulator.utils import param_keys_dict as keys_dict
-
 
 if __name__ == "__main__":
     __spec__ = None

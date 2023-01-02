@@ -5,7 +5,6 @@ import time
 from argparse import ArgumentParser
 from os.path import join
 from typing import Union
-from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
@@ -15,8 +14,10 @@ import torch
 from lightning import LightningModule
 from scipy.special import gamma
 from scipy.stats import beta
+from tqdm import tqdm
 
-from pismemulator.nnemulator import NNEmulator, PISMDataset
+from pismemulator.datasets import PISMDataset
+from pismemulator.nnemulator import NNEmulator
 from pismemulator.utils import param_keys_dict as keys_dict
 
 

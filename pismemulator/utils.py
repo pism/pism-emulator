@@ -37,130 +37,12 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 np.random.seed(0)
 
-import os
-import math
-from numbers import Number
 import logging
+import math
+import os
+from numbers import Number
+
 import torch
-
-
-def str2bool(s):
-    return s.lower() in ("true", "1")
-
-
-def makedirs(dirname):
-    if not os.path.exists(dirname):
-        os.makedirs(dirname)
-
-
-def get_logger(
-    logpath, filepath, package_files=[], displaying=True, saving=True, debug=False
-):
-    logger = logging.getLogger()
-    if debug:
-        level = logging.DEBUG
-    else:
-        level = logging.INFO
-    logger.setLevel(level)
-    if saving:
-        info_file_handler = logging.FileHandler(logpath, mode="a")
-        info_file_handler.setLevel(level)
-        logger.addHandler(info_file_handler)
-    if displaying:
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(level)
-        logger.addHandler(console_handler)
-    logger.info(filepath)
-    with open(filepath, "r") as f:
-        logger.info(f.read())
-
-    for f in package_files:
-        logger.info(f)
-        with open(f, "r") as package_f:
-            logger.info(package_f.read())
-
-    return logger
-
-
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-
-class RunningAverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self, momentum=0.99):
-        self.momentum = momentum
-        self.reset()
-
-    def reset(self):
-        self.val = None
-        self.avg = 0
-
-    def update(self, val):
-        if self.val is None:
-            self.avg = val
-        else:
-            self.avg = self.avg * self.momentum + val * (1 - self.momentum)
-        self.val = val
-
-
-def inf_generator(iterable):
-    """Allows training with DataLoaders in a single infinite loop:
-    for i, (x, y) in enumerate(inf_generator(train_loader)):
-    """
-    iterator = iterable.__iter__()
-    while True:
-        try:
-            yield iterator.__next__()
-        except StopIteration:
-            iterator = iterable.__iter__()
-
-
-def save_checkpoint(state, save, epoch):
-    if not os.path.exists(save):
-        os.makedirs(save)
-    filename = os.path.join(save, "checkpt-%04d.pth" % epoch)
-    torch.save(state, filename)
-
-
-def isnan(tensor):
-    return tensor != tensor
-
-
-def logsumexp(value, dim=None, keepdim=False):
-    """Numerically stable implementation of the operation
-    value.exp().sum(dim, keepdim).log()
-    """
-    if dim is not None:
-        m, _ = torch.max(value, dim=dim, keepdim=True)
-        value0 = value - m
-        if keepdim is False:
-            m = m.squeeze(dim)
-        return m + torch.log(torch.sum(torch.exp(value0), dim=dim, keepdim=keepdim))
-    else:
-        m = torch.max(value)
-        sum_exp = torch.sum(torch.exp(value - m))
-        if isinstance(sum_exp, Number):
-            return m + math.log(sum_exp)
-        else:
-            return m + torch.log(sum_exp)
-
 
 param_keys_dict = {
     "GCM": "GCM (1)",
@@ -884,7 +766,7 @@ def set_size(w, h, ax=None):
     ax.figure.set_size_inches(figw, figh)
 
 
-def gelman_rubin(p, q):
+def gelman_rubin(p: np.ndarray, q: np.ndarray):
     """
     Returns estimate of R for a set of two traces.
     The Gelman-Rubin diagnostic tests for lack of convergence by comparing
@@ -934,57 +816,3 @@ def gelman_rubin(p, q):
 # Define constants
 
 golden_ratio = (1 + np.sqrt(5)) / 2
-
-
-def posterior_dist(chain, param=None, verbose=False, plot=True):
-
-    if len(chain.samples[0]) == 1:
-        """
-        We're sampling from a predefined distribution like a GMM and simulating a particle
-        """
-        post = []
-
-        # print(list(self.probmodel.state_dict().values())[0])
-        # exit()
-
-        # accepted_models = [chain.samples[idx] for idx in chain.accepted_steps]
-        for model_state_dict in chain.samples:
-            post.append(list(model_state_dict.values())[0])
-
-        post = torch.cat(post, dim=0)
-
-        if plot:
-            hist2d = plt.hist2d(
-                x=post[:, 0].cpu().numpy(),
-                y=post[:, 1].cpu().numpy(),
-                bins=100,
-                range=np.array([[-3, 3], [-3, 3]]),
-                density=True,
-            )
-            plt.colorbar(hist2d[3])
-            plt.show()
-
-    elif len(chain.samples[0]) > 1:
-        """
-        There is more than one parameter in the model
-        """
-
-        param_names = list(chain.samples[0].keys())
-        accepted_models = [chain.samples[idx] for idx in chain.accepted_idxs]
-
-        for param_name in param_names:
-
-            post = []
-
-            for model_state_dict in accepted_models:
-                post.append(model_state_dict[param_name])
-
-            post = torch.cat(post)
-            # print(post)
-
-            if plot:
-                plt.hist(
-                    x=post, bins=50, range=np.array([-3, 3]), density=True, alpha=0.5
-                )
-                plt.title(param_name)
-            plt.show()
