@@ -297,7 +297,7 @@ class MALASampler(object):
 
         # alpha = min(1, P * Q_ / (P_ * Q))
         log_alpha = -log_pi_ + logq_ + log_pi - logq
-        log_alpha = -log_pi_ + log_pi
+        # log_alpha = -log_pi_ + log_pi
         alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
