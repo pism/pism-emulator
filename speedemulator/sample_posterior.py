@@ -495,12 +495,15 @@ if __name__ == "__main__":
         print_interval=100,
     )
     print(time.process_time() - start)
+    X_posterior *= dataset.X_std.cpu().numpy()
+    X_posterior += dataset.X_mean.cpu().numpy()
+
     fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(12, 6))
     fig.subplots_adjust(wspace=0.05, hspace=0.5)
     for k in range(X_posterior.shape[1]):
         ax = axs.ravel()[k]
         sns.kdeplot(
-            X_posterior[:, k] * dataset.X_std[k].numpy() + dataset.X_mean[k].numpy(),
+            X_posterior[:, k],
             ax=ax,
         )
         sns.despine(ax=ax, left=True, bottom=False)

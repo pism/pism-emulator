@@ -33,8 +33,14 @@ from matplotlib.patches import Rectangle
 from scipy import stats
 
 from pismemulator.emulate import emulate_gp
-from pismemulator.utils import (gelman_rubin, golden_ratio, kl_divergence,
-                                prepare_data, rmsd, set_size)
+from pismemulator.utils import (
+    gelman_rubin,
+    golden_ratio,
+    kl_divergence,
+    prepare_data,
+    rmsd,
+    set_size,
+)
 
 if __name__ == "__main__":
 
