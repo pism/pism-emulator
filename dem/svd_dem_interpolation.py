@@ -13,7 +13,8 @@ from torch import Tensor, tensor
 from torch.optim.lr_scheduler import ExponentialLR
 
 from pismemulator.metrics import L2MeanSquaredError
-from pismemulator.svdinterpolation import DEMDataModule, DEMDataset, LinearRegression
+from pismemulator.svdinterpolation import (DEMDataModule, DEMDataset,
+                                           LinearRegression)
 
 # matplotlib.use("agg")
 

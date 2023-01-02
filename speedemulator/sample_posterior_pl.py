@@ -8,12 +8,12 @@ from typing import Union
 
 import arviz as az
 import lightning as pl
-from lightning.pytorch.callbacks import Timer
 import numpy as np
 import pandas as pd
 import pylab as plt
 import seaborn as sns
 import torch
+from lightning.pytorch.callbacks import Timer
 from scipy.stats import beta
 from torch.utils.data import DataLoader, TensorDataset
 
