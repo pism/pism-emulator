@@ -20,7 +20,6 @@
 import lightning as pl
 import numpy as np
 import pandas as pd
-import pyro
 import torch
 import torch.nn as nn
 import xarray as xr
@@ -29,8 +28,12 @@ from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 
-from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
-                                  absolute_error, area_absolute_error)
+from pismemulator.metrics import (
+    AbsoluteError,
+    AreaAbsoluteError,
+    absolute_error,
+    area_absolute_error,
+)
 
 
 class PDDEmulator(pl.LightningModule):

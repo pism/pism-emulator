@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 from os.path import join
 from typing import Union
 
+import arviz as az
 import numpy as np
 import pandas as pd
 import pylab as plt
@@ -350,38 +351,17 @@ class MALASampler(object):
         progress = tqdm(range(samples + burn))
         for i in progress:
             X, local_data, s = self.MALA_step(X, h, local_data=local_data)
-            m_vars.append(X.detach())
+            if i >= burn:
+                m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
             log_p = local_data[0].item()
-            desc = f"sample: {(i-burn):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f} "
+            desc = f"sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f} "
             progress.set_description(desc=desc)
 
-            # if (i % print_interval == 0) & (i > burn):
-            #     print("===============================================")
-            #     print(
-            #         "sample: {0:d}, acc. rate: {1:4.2f}, step: {2:4.2f} log(P): {3:6.1f}".format(
-            #             i - burn, acc, h, local_data[0].item()
-            #         )
-            #     )
-            #     print(
-            #         "".join(
-            #             [
-            #                 f"{key}: {(val * std + mean):.3f}\n"
-            #                 for key, val, std, mean in zip(
-            #                     dataset.X_keys,
-            #                     X.data.cpu().numpy(),
-            #                     dataset.X_std,
-            #                     dataset.X_mean,
-            #                 )
-            #             ]
-            #         )
-            #     )
-            #     print("===============================================")
-
-            if (i % save_interval == 0) & (i >= burn):
+            if (i + burn % save_interval == 0) & (i >= burn):
                 print("///////////////////////////////////////////////")
-                print("Saving samples for model {0}".format(model_index))
+                print(f"Saving samples for model {model_index}")
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
                 df = pd.DataFrame(
@@ -510,6 +490,7 @@ if __name__ == "__main__":
         X_map,
         samples=samples,
         model_index=int(model_index),
+        burn=burn,
         save_interval=1000,
         print_interval=100,
     )
@@ -527,3 +508,9 @@ if __name__ == "__main__":
         ax.set_ylabel(None)
         ax.axes.yaxis.set_visible(False)
     fig.tight_layout()
+    d = {}
+    for k, key in enumerate(dataset.X_keys):
+        d[key] = X_posterior[:, k]
+
+    trace = az.convert_to_inference_data(d)
+    az.plot_trace(trace)

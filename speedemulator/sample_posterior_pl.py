@@ -8,6 +8,7 @@ from typing import Union
 
 import arviz as az
 import lightning as pl
+from lightning.pytorch.callbacks import Timer
 import numpy as np
 import pandas as pd
 import pylab as plt
@@ -171,10 +172,6 @@ class mMALA(pl.LightningModule):
             - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
             - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
         )
-        # log_likelihood = (
-        #     torch.distributions.StudentT(nu).log_prob(t**2).sum()
-        #     - sigma_hat.log().sum()
-        # )
         # Prior
         X_bar = (X - X_min) / (X_max - X_min)
         log_prior = torch.sum(
@@ -416,7 +413,6 @@ if __name__ == "__main__":
     # Initial condition for MAP. Note that using 0 yields similar results
     X_0 = torch.tensor(X_prior.mean(axis=0), dtype=torch.float)
 
-    start = time.process_time()
     mala = mMALA(
         e,
         X_0,
@@ -435,8 +431,14 @@ if __name__ == "__main__":
         num_workers=0,
     )  # bogus dataloader
 
+    callbacks = []
+    timer = Timer()
+    callbacks.append(timer)
+
+    start = time.process_time()
     trainer = pl.Trainer.from_argparse_args(
         args,
+        callbacks=callbacks,
         deterministic=True,
         num_sanity_val_steps=0,
     )
