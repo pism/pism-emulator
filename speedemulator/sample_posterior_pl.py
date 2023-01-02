@@ -448,6 +448,19 @@ if __name__ == "__main__":
         * X_std.numpy()
         + X_mean.numpy()
     )
+    df = pd.DataFrame(
+        data=X_posterior,
+        columns=dataset.X_keys,
+    )
+    posterior_dir = f"{emulator_dir}/posterior_samples/"
+    if not os.path.isdir(posterior_dir):
+        os.makedirs(posterior_dir)
+    if out_format == "csv":
+        df.to_csv(join(posterior_dir, f"X_posterior_model_{0}.csv.gz"))
+    elif out_format == "parquet":
+        df.to_parquet(join(posterior_dir, f"X_posterior_model_{0}.parquet"))
+    else:
+        raise NotImplementedError(f"{out_format} not implemented")
 
     fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(12, 6))
     fig.subplots_adjust(wspace=0.05, hspace=0.5)
