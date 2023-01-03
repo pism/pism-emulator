@@ -10,10 +10,8 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pylab as plt
-import seaborn as sns
 import torch
 from lightning import LightningModule
-from scipy.special import gamma
 from scipy.stats import beta
 from tqdm import tqdm
 
@@ -22,54 +20,9 @@ from pismemulator.nnemulator import NNEmulator
 from pismemulator.utils import param_keys_dict as keys_dict
 
 
-def torch_find_MAP(X, X_min, X_max, Y_target, model):
-    Y_pred = 10 ** model(X, add_mean=True)
-    print(Y_pred)
-    r = Y_pred - Y_target
-
-    t = r / sigma_hat
-    X_bar = torch.tensor(X, requires_grad=True)
-
-    learning_rate = 0.1
-    for it in range(51):
-        X_bar.data = (X_bar.data - X_min) / (X_max - X_min)
-        likelihood_dist = torch.distributions.StudentT(nu)
-        log_likelihood = (
-            likelihood_dist.log_prob(t**2).sum() - np.log(sigma_hat).sum()
-        )
-        prior_dist = torch.distributions.Beta(alpha_b, beta_b)
-        log_prior = (
-            prior_dist.log_prob(X_bar).sum()
-            * torch.lgamma(torch.tensor(alpha_b + beta_b))
-            / (torch.lgamma(torch.tensor(alpha_b)) * torch.lgamma(torch.tensor(beta_b)))
-        )
-        NLL = -(log_likelihood + log_prior)
-        NLL.backward()
-
-        if it % 10 == 0:
-            print(f"iter: {it:d}, log(P): {NLL:.1f}\n")
-            print(
-                "".join(
-                    [
-                        f"{key}: {(val * std + mean):.3f}\n"
-                        for key, val, std, mean in zip(
-                            dataset.X_keys,
-                            X_bar.data.cpu().numpy(),
-                            dataset.X_std,
-                            dataset.X_mean,
-                        )
-                    ]
-                )
-            )
-
-        X_bar.data -= learning_rate * X_bar.grad.data
-        X_bar.grad.data.zero_()
-    return X_bar
-
-
 class MALASampler(object):
-    f"""
-    MALA Sampler
+    """
+    mMALA Sampler
 
     Author: Douglas C Brinkerhoff, University of Montana
     Creates a manifold Metropolis-adjusted Langevin algorithm (mMALA)
@@ -278,7 +231,6 @@ class MALASampler(object):
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
         sigma = (Y - mu) @ inverse_cov @ (Y - mu)
-        #          print("inv_cov", inverse_cov, "log_det_cov", log_det_cov, "sigma", sigma)
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
     def MALA_step(self, X, h, local_data=None):
@@ -294,7 +246,6 @@ class MALASampler(object):
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
-        # print("q", logq, "q_", logq_)
 
         # alpha = min(1, P * Q_ / (P_ * Q))
         log_alpha = -log_pi_ + logq_ + log_pi - logq
@@ -330,7 +281,7 @@ class MALASampler(object):
             "****************************************************************************"
         )
         print(
-            "Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(
+            "Running Metropolis-Adjusted Langevin Algorithm for model {0}".format(
                 model_index
             )
         )
