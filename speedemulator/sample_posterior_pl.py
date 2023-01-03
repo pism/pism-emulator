@@ -154,7 +154,7 @@ class mMALA(pl.LightningModule):
         inverse_cov = inverse_cov.to(self.device)
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
-    def forward(self, X=None):
+    def log_prob(self, X=None):
         Y_pred = 10 ** self.emulator(X, add_mean=True)
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
@@ -183,10 +183,10 @@ class mMALA(pl.LightningModule):
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
 
-        log_pi = self.forward(X)
+        log_pi = self.log_prob(X)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            H = torch.autograd.functional.hessian(self.forward, X)
+            H = torch.autograd.functional.hessian(self.log_prob, X)
             lamda, Q = torch.linalg.eig(H)
             lamda, Q = torch.real(lamda), torch.real(Q)
             lamda_prime = torch.sqrt(lamda**2 + eps)
@@ -197,6 +197,9 @@ class mMALA(pl.LightningModule):
             return log_pi, g, H, Hinv, log_det_Hinv
         else:
             return log_pi
+
+    def forward(self):
+        return None
 
     def pretrain(self):
 
@@ -268,7 +271,7 @@ class mMALA(pl.LightningModule):
         self.X = X
         self.X_posterior.append(X.cpu().detach().numpy())
         self.accept = self.beta * self.accept + (1 - self.beta) * s
-        loss = self.forward(X)
+        loss = self.forward()
         return loss
 
     def training_epoch_end(self, outputs):

@@ -7,6 +7,7 @@ from os.path import join
 from typing import Union
 
 import arviz as az
+import seaborn as sns
 import numpy as np
 import pandas as pd
 import pylab as plt
@@ -230,7 +231,7 @@ class MALASampler(object):
         return mu + L @ torch.randn(L.shape[0], device=device)
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
-        sigma = (Y - mu) @ inverse_cov @ (Y - mu)
+        # - 0.5 * log_det_Hinv - 0.5 * (Y - mu) @ H / (2*h) * (Y - mu)
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
     def MALA_step(self, X, h, local_data=None):
