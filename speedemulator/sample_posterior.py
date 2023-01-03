@@ -111,6 +111,44 @@ class MALASampler(object):
         )
         self.emulator_dir = emulator_dir
 
+    def torch_find_MAP(
+        self,
+        X: torch.tensor,
+        n_iters: int = 51,
+        verbose: bool = False,
+        print_interval: int = 10,
+    ):
+        # L-BFGS
+        def closure():
+            opt.zero_grad()
+            loss = self.V(X)
+            loss.backward()
+            return loss
+
+        opt = torch.optim.LBFGS([X], lr=0.1, max_iter=25, line_search_fn="strong_wolfe")
+
+        for i in range(n_iters):
+            log_pi = self.V(X)
+            log_pi.backward()
+            opt.step(closure)
+            opt.zero_grad()
+
+        print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+        print(
+            "".join(
+                [
+                    f"{key}: {(val * std + mean):.3f}\n"
+                    for key, val, std, mean in zip(
+                        dataset.X_keys,
+                        X.data.cpu().numpy(),
+                        dataset.X_std,
+                        dataset.X_mean,
+                    )
+                ]
+            )
+        )
+        return X
+
     def find_MAP(
         self,
         X: torch.tensor,
@@ -438,6 +476,7 @@ if __name__ == "__main__":
         alpha=alpha,
     )
     X_map = sampler.find_MAP(X_0)
+
     X_posterior = sampler.sample(
         X_map,
         samples=samples,
