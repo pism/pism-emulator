@@ -64,6 +64,7 @@ param_keys_dict = {
     "ZMAX": "$z_{\mathrm{max}}$ (m)",
     "sia_e": "$E_{\mathrm{SIA}}$ (1)",
     "ssa_e": "$E_{\mathrm{SSA}}$ (1)",
+    "ssa_n": "$n_{\mathrm{SSA}}$ (1)",
     "ppq": "$q$ (1)",
     "tefo": "$\delta$ (1)",
     "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",

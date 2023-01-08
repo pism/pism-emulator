@@ -208,7 +208,7 @@ def plot_historical(
 def plot_projection(
     out_filename,
     simulated=None,
-    ensemble="Flow+Mass Calib. S2",
+    ensemble="Flow+Mass Calib.",
     quantiles=[0.05, 0.95],
     bars=None,
     quantile_df=None,
@@ -376,9 +376,9 @@ def plot_projection(
                             label=ens,
                         ),
                     )
-        legend_2 = ax.legend(handles=legend_elements, loc="upper right")
-        legend_2.get_frame().set_linewidth(0.0)
-        legend_2.get_frame().set_alpha(0.0)
+        # legend_2 = ax.legend(handles=legend_elements, loc="upper right")
+        # legend_2.get_frame().set_linewidth(0.0)
+        # legend_2.get_frame().set_alpha(0.0)
 
         for a in [1, 2, 3]:
             sns.despine(ax=axs[a], left=True, bottom=True)
@@ -975,10 +975,6 @@ def plot_histograms(
     m_flow_df = df[df["Ensemble"] == "Flow Calib."][m_flow_keys]
     m_mass_df = df[df["Ensemble"] == "Flow+Mass Calib."][m_keys]
 
-    print(m_as19_df.median())
-    print(m_flow_df.median())
-    print(m_mass_df.median())
-
     p_dict = {
         "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 11)},
         "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 11)},
@@ -1518,6 +1514,21 @@ if __name__ == "__main__":
     all_2100_df = all_df[(all_df["Year"] == year)]
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
 
+    plot_projection(
+        "sle_timeseries_calib_2008_2100.pdf",
+        all_df,
+        ensemble="Flow+Mass Calib.",
+        bars=["AS19", "Flow Calib.", "Flow+Mass Calib."],
+    )
+    plot_projection(
+        "sle_timeseries_flow_2008_2100.pdf",
+        all_df,
+        ensemble="Flow Calib.",
+        bars=["AS19", "Flow Calib."],
+    )
+    plot_projection(
+        "sle_timeseries_as19_2008_2100.pdf", all_df, ensemble="AS19", bars=["AS19"]
+    )
     plot_histograms(
         "marginal_posteriors_all.pdf",
         all_2100_df,

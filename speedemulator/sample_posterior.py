@@ -15,6 +15,7 @@ import torch
 from lightning import LightningModule
 from scipy.stats import beta
 from tqdm import tqdm
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import NNEmulator
@@ -287,8 +288,10 @@ class MALASampler(object):
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
         # alpha = min(1, P * Q_ / (P_ * Q))
+        # s = self.MetropolisHastingsAcceptance(log_pi, log_pi_, logq, logq_)
+        # if s == 1:
+        #     local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
         log_alpha = -log_pi_ + logq_ + log_pi - logq
-        # log_alpha = -log_pi_ + log_pi
         alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
@@ -297,7 +300,19 @@ class MALASampler(object):
             s = 1
         else:
             s = 0
+
         return X, local_data, s
+
+    def MetropolisHastingsAcceptance(self, log_pi, log_pi_, logq, logq_):
+        log_alpha = -log_pi_ + logq_ + log_pi - logq
+        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
+        u = torch.rand(1, device=device)
+        if u <= alpha and log_alpha != np.inf:
+            X.data = X_.data
+            s = 1
+        else:
+            s = 0
+        return s
 
     def sample(
         self,
@@ -476,7 +491,6 @@ if __name__ == "__main__":
         alpha=alpha,
     )
     X_map = sampler.find_MAP(X_0)
-
     X_posterior = sampler.sample(
         X_map,
         samples=samples,
