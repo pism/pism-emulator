@@ -1288,9 +1288,11 @@ def resample_ensemble_by_data(
                     print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
         experiments = np.array(evals)
         w = np.array(log_likes)
+        print(w)
         w -= w.mean()
         weights = np.exp(w)
         weights /= weights.sum()
+        print(weights)
         resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
         new_frame = []
         for i in resampled_experiments:
