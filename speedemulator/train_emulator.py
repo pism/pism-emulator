@@ -106,6 +106,7 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
+        verbose=True,
     )
 
     X = dataset.X
@@ -140,7 +141,6 @@ if __name__ == "__main__":
     n_eigenglaciers = data_loader.n_eigenglaciers
     V_hat = data_loader.V_hat
     F_mean = data_loader.F_mean
-    F_train = data_loader.F_bar
 
     plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir)
 
