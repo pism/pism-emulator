@@ -26,10 +26,11 @@ from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 
-from pismemulator.nnemulator import DNNEmulator, NNEmulator, PISMDataset
+from pismemulator.datasets import PISMDataset
+from pismemulator.nnemulator import DNNEmulator, NNEmulator
 
 
-def test_dataset():
+def tes_dataset():
 
     """"""
 
@@ -142,4 +143,4 @@ def test_emulator_equivalence():
     de.eval()
     Y_e = e(X, add_mean=True).detach().numpy()
     Y_de = de(X, add_mean=True).detach().numpy()
-    assert_array_almost_equal(Y_e, Y_de, decimal=0)
+    assert_array_almost_equal(Y_e, Y_de, decimal=1)

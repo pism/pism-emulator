@@ -16,6 +16,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+from collections import OrderedDict
 
 import lightning as pl
 import numpy as np
@@ -28,8 +29,12 @@ from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 
-from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
-                                  absolute_error, area_absolute_error)
+from pismemulator.metrics import (
+    AbsoluteError,
+    AreaAbsoluteError,
+    absolute_error,
+    area_absolute_error,
+)
 
 
 class PDDEmulator(pl.LightningModule):
@@ -83,7 +88,7 @@ class PDDEmulator(pl.LightningModule):
                 )
             )
         self.dnn = nn.ModuleList(models)
-        self.l_last = nn.Linear(n_hidden[-1], n_outputs)
+        self.l_last = nn.Linear(n_hidden[-1], n_outputs, bias=False)
 
         self.train_ae = AbsoluteError()
         self.test_ae = AbsoluteError()
@@ -175,11 +180,12 @@ class DNNEmulator(pl.LightningModule):
 
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden] * (n_layers - 1)
+        p = [0] + [0.5] * (n_layers - 1) + [0.3]
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden[0])
         self.norm_first = nn.LayerNorm(n_hidden[0])
-        self.dropout_first = nn.Dropout(p=0.0)
+        self.dropout_first = nn.Dropout(p=p[0])
 
         models = []
         for n in range(n_layers - 2):
@@ -189,13 +195,13 @@ class DNNEmulator(pl.LightningModule):
                         [
                             ("Linear", nn.Linear(n_hidden[n], n_hidden[n + 1])),
                             ("LayerNorm", nn.LayerNorm(n_hidden[n + 1])),
-                            ("Dropout", nn.Dropout(p=0.1)),
+                            ("Dropout", nn.Dropout(p=p[n + 1])),
                         ]
                     )
                 )
             )
         self.dnn = nn.ModuleList(models)
-        self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers)
+        self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers, bias=False)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
@@ -312,7 +318,7 @@ class NNEmulator(pl.LightningModule):
         self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
         self.norm_4 = nn.LayerNorm(n_hidden_3)
         self.dropout_4 = nn.Dropout(p=0.5)
-        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
+        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers, bias=False)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)

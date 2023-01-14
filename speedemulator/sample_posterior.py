@@ -7,15 +7,15 @@ from os.path import join
 from typing import Union
 
 import arviz as az
-import seaborn as sns
 import numpy as np
 import pandas as pd
 import pylab as plt
+import seaborn as sns
 import torch
 from lightning import LightningModule
 from scipy.stats import beta
+from torch.profiler import ProfilerActivity, profile, record_function
 from tqdm import tqdm
-from torch.profiler import profile, record_function, ProfilerActivity
 
 from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import NNEmulator
