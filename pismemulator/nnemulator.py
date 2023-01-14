@@ -317,7 +317,7 @@ class NNEmulator(pl.LightningModule):
         self.dropout_3 = nn.Dropout(p=0.5)
         self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
         self.norm_4 = nn.LayerNorm(n_hidden_3)
-        self.dropout_4 = nn.Dropout(p=0.5)
+        self.dropout_4 = nn.Dropout(p=0.3)
         self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers, bias=False)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
