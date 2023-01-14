@@ -123,14 +123,14 @@ class MALASampler(object):
         # L-BFGS
         def closure():
             opt.zero_grad()
-            loss = self.V(X)
+            loss = self.log_prob(X)
             loss.backward()
             return loss
 
         opt = torch.optim.LBFGS([X], lr=0.1, max_iter=25, line_search_fn="strong_wolfe")
 
         for i in range(n_iters):
-            log_pi = self.V(X)
+            log_pi = self.log_prob(X)
             log_pi.backward()
             opt.step(closure)
             opt.zero_grad()
@@ -218,22 +218,41 @@ class MALASampler(object):
                 ]
             )
         )
+
+        self.local_data = self.get_log_like_gradient_and_hessian(
+            X, compute_hessian=True
+        )
+
         return X
 
-    def V(
+    def log_prob(
         self,
         X,
     ):
 
+        """
+        Log Probability
+
+        Alpha adjusts the weighting between the likelihood and the prior.
+        Big alpha means big likelihood importance.
+        There is some thinking that under a mis-specified model, one should use an alpha<1
+        (e.g. Safe learning: Bridging the gap between Bayes, MDL and statistical learning theory via empirical convexity, Grunwald).
+        """
+        log_likelihood = self.log_likelihood(X)
+        log_prior = self.log_prior(X)
+
+        return -(self.alpha * log_likelihood + log_prior)
+
+    def log_likelihood(self, X):
+        """
+        Caluclate log(P) for a Student-T distribution with
+        StudentT(nu)
+        """
         Y_pred = 10 ** self.model(X, add_mean=True)
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
         t = r / sigma_hat
         nu = self.nu
-        X_min = self.X_min
-        X_max = self.X_max
-        alpha_b = self.alpha_b
-        beta_b = self.beta_b
 
         # Likelihood
         log_likelihood = torch.sum(
@@ -242,19 +261,33 @@ class MALASampler(object):
             - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
             - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
         )
+        return log_likelihood
+
+    def log_prior(self, X):
+        """
+        Calculate log(Prior)
+        for a Beta(alpha_b, beta_b) distribution
+        """
+
+        X_min = self.X_min
+        X_max = self.X_max
+        alpha_b = self.alpha_b
+        beta_b = self.beta_b
+
         # Prior
         X_bar = (X - X_min) / (X_max - X_min)
         log_prior = torch.sum(
             (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
         )
-        return -(self.alpha * log_likelihood + log_prior)
+        return log_prior
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
-        log_pi = self.V(X)
+
+        log_pi = self.log_prob(X)
         if compute_hessian:
             self.hessian_counter += 1
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            H = torch.autograd.functional.hessian(self.V, X, create_graph=True)
+            H = torch.autograd.functional.hessian(self.log_prob, X, create_graph=True)
             lamda, Q = torch.linalg.eig(H)
             lamda, Q = torch.real(lamda), torch.real(Q)
             lamda_prime = torch.sqrt(lamda**2 + eps)
@@ -274,13 +307,9 @@ class MALASampler(object):
         # - 0.5 * log_det_Hinv - 0.5 * (Y - mu) @ H / (2*h) * (Y - mu)
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
-    def MALA_step(self, X, h, local_data=None):
-        if local_data is not None:
-            pass
-        else:
-            local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
-
-        log_pi, g, H, Hinv, log_det_Hinv = local_data
+    def MALA_step(self, X, h):
+        log_pi = self.get_log_like_gradient_and_hessian(X, compute_hessian=False)
+        _, g, H, Hinv, log_det_Hinv = self.local_data
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
 
@@ -289,27 +318,20 @@ class MALASampler(object):
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
         # alpha = min(1, P * Q_ / (P_ * Q))
-        # s = self.MetropolisHastingsAcceptance(log_pi, log_pi_, logq, logq_)
-        # if s == 1:
-        #     local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
-        log_alpha = -log_pi_ + logq_ + log_pi - logq
-        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
-        u = torch.rand(1, device=device)
-        if u <= alpha and log_alpha != np.inf:
+        s = self.MetropolisHastingsAcceptance(log_pi, log_pi_, logq, logq_)
+        if s == 1:
             X.data = X_.data
-            local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
-            s = 1
-        else:
-            s = 0
+            self.local_data = self.get_log_like_gradient_and_hessian(
+                X, compute_hessian=True
+            )
 
-        return X, local_data, s
+        return X, log_pi, s
 
     def MetropolisHastingsAcceptance(self, log_pi, log_pi_, logq, logq_):
         log_alpha = -log_pi_ + logq_ + log_pi - logq
         alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
-            X.data = X_.data
             s = 1
         else:
             s = 0
@@ -351,17 +373,15 @@ class MALASampler(object):
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
 
-        local_data = None
         m_vars = []
         acc = acc_target
         progress = tqdm(range(samples + burn))
         for i in progress:
-            X, local_data, s = self.MALA_step(X, h, local_data=local_data)
+            X, log_p, s = self.MALA_step(X, h)
             if i >= burn:
                 m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
-            log_p = local_data[0].item()
             desc = f"sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f} "
             progress.set_description(desc=desc)
 

@@ -37,6 +37,13 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 np.random.seed(0)
 
+import logging
+import math
+import os
+from numbers import Number
+
+import torch
+
 param_keys_dict = {
     "GCM": "GCM (1)",
     "FICE": "$f_i$ (mm K$^{-1}$ day$^{-1}$)",
@@ -57,6 +64,7 @@ param_keys_dict = {
     "ZMAX": "$z_{\mathrm{max}}$ (m)",
     "sia_e": "$E_{\mathrm{SIA}}$ (1)",
     "ssa_e": "$E_{\mathrm{SSA}}$ (1)",
+    "ssa_n": "$n_{\mathrm{SSA}}$ (1)",
     "ppq": "$q$ (1)",
     "tefo": "$\delta$ (1)",
     "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
@@ -759,7 +767,7 @@ def set_size(w, h, ax=None):
     ax.figure.set_size_inches(figw, figh)
 
 
-def gelman_rubin(p, q):
+def gelman_rubin(p: np.ndarray, q: np.ndarray):
     """
     Returns estimate of R for a set of two traces.
     The Gelman-Rubin diagnostic tests for lack of convergence by comparing

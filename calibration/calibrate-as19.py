@@ -208,7 +208,7 @@ def plot_historical(
 def plot_projection(
     out_filename,
     simulated=None,
-    ensemble="Flow+Mass Calib. S2",
+    ensemble="Flow+Mass Calib.",
     quantiles=[0.05, 0.95],
     bars=None,
     quantile_df=None,
@@ -376,9 +376,9 @@ def plot_projection(
                             label=ens,
                         ),
                     )
-        legend_2 = ax.legend(handles=legend_elements, loc="upper right")
-        legend_2.get_frame().set_linewidth(0.0)
-        legend_2.get_frame().set_alpha(0.0)
+        # legend_2 = ax.legend(handles=legend_elements, loc="upper right")
+        # legend_2.get_frame().set_linewidth(0.0)
+        # legend_2.get_frame().set_alpha(0.0)
 
         for a in [1, 2, 3]:
             sns.despine(ax=axs[a], left=True, bottom=True)
@@ -975,10 +975,6 @@ def plot_histograms(
     m_flow_df = df[df["Ensemble"] == "Flow Calib."][m_flow_keys]
     m_mass_df = df[df["Ensemble"] == "Flow+Mass Calib."][m_keys]
 
-    print(m_as19_df.median())
-    print(m_flow_df.median())
-    print(m_mass_df.median())
-
     p_dict = {
         "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 11)},
         "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 11)},
@@ -1295,6 +1291,7 @@ def resample_ensemble_by_data(
         w -= w.mean()
         weights = np.exp(w)
         weights /= weights.sum()
+        print(weights)
         resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
         new_frame = []
         for i in resampled_experiments:
@@ -1518,6 +1515,21 @@ if __name__ == "__main__":
     all_2100_df = all_df[(all_df["Year"] == year)]
     quantiles = [0.5, 0.05, 0.95, 0.16, 0.84]
 
+    plot_projection(
+        "sle_timeseries_calib_2008_2100.pdf",
+        all_df,
+        ensemble="Flow+Mass Calib.",
+        bars=["AS19", "Flow Calib.", "Flow+Mass Calib."],
+    )
+    plot_projection(
+        "sle_timeseries_flow_2008_2100.pdf",
+        all_df,
+        ensemble="Flow Calib.",
+        bars=["AS19", "Flow Calib."],
+    )
+    plot_projection(
+        "sle_timeseries_as19_2008_2100.pdf", all_df, ensemble="AS19", bars=["AS19"]
+    )
     plot_histograms(
         "marginal_posteriors_all.pdf",
         all_2100_df,
@@ -1606,3 +1618,93 @@ if __name__ == "__main__":
 
     quantiles_abs_df = pd.concat(y_abs_dfs).round(2)
     quantiles_rel_df = pd.concat(y_rel_dfs).round(2)
+
+
+def resample_ensemble_by_data(
+    observed,
+    simulated,
+    rcps=[26, 45, 85],
+    calibration_start=2010,
+    calibration_end=2020,
+    fudge_factor=3,
+    n_samples=500,
+    verbose=False,
+    m_var="Mass (Gt)",
+    m_var_std="Mass uncertainty (Gt)",
+):
+    """
+    Resampling algorithm by Douglas C. Brinkerhoff
+
+
+    Parameters
+    ----------
+    observed : pandas.DataFrame
+        A dataframe with observations
+    simulated : pandas.DataFrame
+        A dataframe with simulations
+    calibration_start : float
+        Start year for calibration
+    calibration_end : float
+        End year for calibration
+    fudge_factor : float
+        Tolerance for simulations. Calculated as fudge_factor * standard deviation of observed
+    n_samples : int
+        Number of samples to draw.
+
+    """
+
+    observed_calib_time = (observed["Year"] >= calibration_start) & (
+        observed["Year"] <= calibration_end
+    )
+    observed_calib_period = observed[observed_calib_time]
+    # print(observed_calib_period)
+    # Should we interpolate the simulations at observed time?
+    observed_interp_mean = interp1d(
+        observed_calib_period["Year"], observed_calib_period[m_var]
+    )
+    observed_interp_std = interp1d(
+        observed_calib_period["Year"], observed_calib_period[m_var_std]
+    )
+
+    simulated_calib_time = (simulated["Year"] >= calibration_start) & (
+        simulated["Year"] <= calibration_end
+    )
+    simulated_calib_period = simulated[simulated_calib_time]
+
+    resampled_list = []
+    for rcp in rcps:
+        log_likes = []
+        experiments = np.unique(simulated_calib_period["Experiment"])
+        evals = []
+        for i in experiments:
+            exp_ = simulated_calib_period[(simulated_calib_period["Experiment"] == i)]
+            log_like = 0.0
+            for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
+                try:
+                    observed_mass = observed_interp_mean(year)
+                    observed_std = observed_interp_std(year) * fudge_factor
+                    log_like -= 0.5 * (
+                        (exp_mass - observed_mass) / observed_std
+                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
+                except ValueError:
+                    pass
+            if log_like != 0:
+                evals.append(i)
+                log_likes.append(log_like)
+                if verbose:
+                    print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
+        experiments = np.array(evals)
+        w = np.array(log_likes)
+        w -= w.mean()
+        weights = np.exp(w)
+        weights /= weights.sum()
+        resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
+        new_frame = []
+        for i in resampled_experiments:
+            new_frame.append(simulated[(simulated["Experiment"] == i)])
+        simulated_resampled = pd.concat(new_frame)
+        resampled_list.append(simulated_resampled)
+
+    simulated_resampled = pd.concat(resampled_list)
+
+    return simulated_resampled

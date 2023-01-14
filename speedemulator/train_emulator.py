@@ -29,8 +29,9 @@ from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-from pismemulator.nnemulator import (DNNEmulator, NNEmulator, PISMDataModule,
-                                     PISMDataset)
+from pismemulator.datamodules import PISMDataModule
+from pismemulator.datasets import PISMDataset
+from pismemulator.nnemulator import DNNEmulator, NNEmulator
 from pismemulator.utils import plot_eigenglaciers
 
 
@@ -106,6 +107,7 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
+        verbose=True,
     )
 
     X = dataset.X
@@ -140,17 +142,17 @@ if __name__ == "__main__":
     n_eigenglaciers = data_loader.n_eigenglaciers
     V_hat = data_loader.V_hat
     F_mean = data_loader.F_mean
-    F_train = data_loader.F_bar
 
     plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir)
 
     if checkpoint:
         checkpoint_callback = ModelCheckpoint(
-            dirpath=emulator_dir,
-            filename="emulator_{epoch}_{model_index}",
+            dirpath=f"{emulator_dir}/emulator",
+            filename="emulator_{model_index}",
             every_n_epochs=0,
             save_last=True,
         )
+        checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
         callbacks.append(checkpoint_callback)
 
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
