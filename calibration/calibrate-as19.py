@@ -1672,39 +1672,35 @@ def resample_ensemble_by_data(
     simulated_calib_period = simulated[simulated_calib_time]
 
     resampled_list = []
-    for rcp in rcps:
-        log_likes = []
-        experiments = np.unique(simulated_calib_period["Experiment"])
-        evals = []
-        for i in experiments:
-            exp_ = simulated_calib_period[(simulated_calib_period["Experiment"] == i)]
-            log_like = 0.0
-            for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
-                try:
-                    observed_mass = observed_interp_mean(year)
-                    observed_std = observed_interp_std(year) * fudge_factor
-                    log_like -= 0.5 * (
-                        (exp_mass - observed_mass) / observed_std
-                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
-                except ValueError:
-                    pass
-            if log_like != 0:
-                evals.append(i)
-                log_likes.append(log_like)
-                if verbose:
-                    print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
-        experiments = np.array(evals)
-        w = np.array(log_likes)
-        w -= w.mean()
-        weights = np.exp(w)
-        weights /= weights.sum()
-        resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
-        new_frame = []
-        for i in resampled_experiments:
-            new_frame.append(simulated[(simulated["Experiment"] == i)])
-        simulated_resampled = pd.concat(new_frame)
-        resampled_list.append(simulated_resampled)
-
-    simulated_resampled = pd.concat(resampled_list)
+    log_likes = []
+    experiments = np.unique(simulated_calib_period["Experiment"])
+    evals = []
+    for i in experiments:
+        exp_ = simulated_calib_period[(simulated_calib_period["Experiment"] == i)]
+        log_like = 0.0
+        for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
+            try:
+                observed_mass = observed_interp_mean(year)
+                observed_std = observed_interp_std(year) * fudge_factor
+                log_like -= 0.5 * (
+                    (exp_mass - observed_mass) / observed_std
+                ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
+            except ValueError:
+                pass
+        if log_like != 0:
+            evals.append(i)
+            log_likes.append(log_like)
+            if verbose:
+                print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
+    experiments = np.array(evals)
+    w = np.array(log_likes)
+    w -= w.mean()
+    weights = np.exp(w)
+    weights /= weights.sum()
+    resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
+    new_frame = []
+    for i in resampled_experiments:
+        new_frame.append(simulated[(simulated["Experiment"] == i)])
+    simulated_resampled = pd.concat(new_frame)
 
     return simulated_resampled

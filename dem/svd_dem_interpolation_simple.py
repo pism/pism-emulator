@@ -1,18 +1,15 @@
 from argparse import ArgumentParser
 from glob import glob
 
-import lightning as pl
 import numpy as np
 import pylab as plt
 import torch
 import xarray as xr
-from sklearn.model_selection import train_test_split
 from torch.autograd import Variable
-from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics import MeanSquaredError
 
-training_files = glob("usurf_gris_g1800m_v5_RAGIS_id_0_1980-1-1_2020-1-1_YM.nc")
+training_files = glob("usurf_ex_gris_g1800m_v5_RAGIS_id_*_1975-1-1_1980-1-1.nc")
 epsilon = 0
 training_var = "usurf"
 thinning_factor = 1
@@ -36,8 +33,8 @@ for idx, m_file in enumerate(training_files):
         ds.close()
 data = np.concatenate(all_data, axis=0)
 
-with xr.open_dataset("aerodem_1978_1987_wgs84_g1800m.nc") as ds:
-    obs = ds.variables["surface_altitude"]
+with xr.open_dataset("aerodem_1978_1987_mean_g1800m.nc") as ds:
+    obs = ds.variables["surface"]
     mask = obs.isnull()
     m_mask = np.ones_like(mask)
     m_mask[mask == True] = 0
@@ -58,7 +55,7 @@ n = len(R[I])
 
 inputDim = q  # takes variable 'x
 outputDim = 1  # takes variable 'y'
-learningRate = 0.01
+learningRate = 0.1
 epochs = 5000
 
 
@@ -87,11 +84,11 @@ model = linearRegression(inputDim, outputDim)
 criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learningRate)
 
-K_reg = 1
+# L2 regularization. This parameters needs to be estimated using a parameter search.
+K_reg = 1e12
 
 inputs = V_i * S
 labels = R_i.reshape(-1, 1)
-print(V.shape, S.shape, inputs.shape, labels.shape)
 
 for epoch in range(epochs):
     # Converting inputs and labels to Variable
@@ -120,8 +117,7 @@ for name, param in model.named_parameters():
         p.append(param.data)
 Sr = model.w
 
-bM = (V * S) @ model.w
-# M = ((U * Sr) @ V.T).T
+M = (V * S) @ model.w
 Ms = M.detach().numpy().reshape(n_row, n_col) + D_mean.detach().numpy().reshape(
     n_row, n_col
 )
@@ -133,4 +129,4 @@ mds = xr.Dataset(
         "x": ("x", ds.x.values),
         "y": ("y", ds.y.values),
     },
-).to_netcdf("test_usurf.nc")
+).to_netcdf(f"test_usurf_{K_reg}.nc")

@@ -245,8 +245,15 @@ class MALASampler(object):
         # Prior
         X_bar = (X - X_min) / (X_max - X_min)
         log_prior = torch.sum(
-            (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
+            (alpha_b - 1) * torch.log(X_bar)
+            + (beta_b - 1) * torch.log(1 - X_bar)
+            # + torch.lgamma(alpha_b + beta_b)
+            # - torch.lgamma(alpha_b)
+            # - torch.lgamma(beta_b)
         )
+        print(log_likelihood, log_prior)
+        log_likelihood = torch.distributions.StudentT(nu).log_prob(t).sum()
+        log_prior = torch.distributions.Beta(alpha_b, beta_b).log_prob(X_bar).sum()
         return -(self.alpha * log_likelihood + log_prior)
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):

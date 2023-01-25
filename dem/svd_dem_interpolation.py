@@ -7,14 +7,11 @@ import pandas as pd
 import pylab as plt
 import torch
 import xarray as xr
-from lightning.callbacks.early_stopping import EarlyStopping
-from sklearn.model_selection import train_test_split
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from torch import Tensor, tensor
-from torch.optim.lr_scheduler import ExponentialLR
 
 from pismemulator.metrics import L2MeanSquaredError
-from pismemulator.svdinterpolation import (DEMDataModule, DEMDataset,
-                                           LinearRegression)
+from pismemulator.svdinterpolation import DEMDataModule, DEMDataset, LinearRegression
 
 # matplotlib.use("agg")
 
@@ -83,7 +80,7 @@ if __name__ == "__main__":
     parser.add_argument("-q", type=int, default=30)
     parser.add_argument(
         "--target_file",
-        default="aerodem_1978_1987_wgs84_g1800m.nc",
+        default="aerodem_1978_1987_mean_g1800m.nc",
     )
     parser.add_argument("--train_size", type=float, default=0.9)
     parser.add_argument("--outfile", type=str, default="dem_reconstructed.nc")
@@ -107,6 +104,7 @@ if __name__ == "__main__":
     dataset = DEMDataset(
         training_files=training_files,
         target_file=target_file,
+        target_var="surface",
     )
 
     data_loader = DEMDataModule(
@@ -194,7 +192,7 @@ if __name__ == "__main__":
 
     print(f"Saving result to {outfile}")
     mds = xr.Dataset(
-        {"surface_altitude": (("time", "y", "x"), R_filled)},
+        {"surface": (("time", "y", "x"), R_filled)},
         coords={
             "x": ("x", dataset.x),
             "y": ("y", dataset.y),
