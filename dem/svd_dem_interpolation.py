@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 
+import time
 import lightning as pl
 import matplotlib
 import numpy as np
@@ -7,7 +8,7 @@ import pandas as pd
 import pylab as plt
 import torch
 import xarray as xr
-from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, Timer
 from torch import Tensor, tensor
 
 from pismemulator.metrics import L2MeanSquaredError
@@ -82,7 +83,6 @@ if __name__ == "__main__":
         "--target_file",
         default="aerodem_1978_1987_mean_g1800m.nc",
     )
-    parser.add_argument("--train_size", type=float, default=0.9)
     parser.add_argument("--outfile", type=str, default="dem_reconstructed.nc")
 
     parser = LinearRegression.add_model_specific_args(parser)
@@ -98,7 +98,6 @@ if __name__ == "__main__":
     outfile = args.outfile
     q = args.q
     target_file = args.target_file
-    train_size = args.train_size
     training_files = args.training_files
 
     dataset = DEMDataset(
@@ -118,13 +117,18 @@ if __name__ == "__main__":
     data_loader.setup()
     m = LinearRegression(q, 1, hparams)
 
+    callbacks = []
+    timer = Timer()
+    callbacks.append(timer)
+
     early_stop_callback = EarlyStopping(
         monitor="val_loss", min_delta=1e2, patience=10, verbose=False
     )
+    callbacks.append(early_stop_callback)
 
     trainer = pl.Trainer.from_argparse_args(
         args,
-        callbacks=[early_stop_callback],
+        callbacks=callbacks,
         check_val_every_n_epoch=10,
     )
 
@@ -175,7 +179,10 @@ if __name__ == "__main__":
         fig.savefig(f"eigen_glacier_{k}.pdf")
 
     # Train the model
+    start = time.process_time()
     trainer.fit(m, data_loader.train_dataloader(), data_loader.val_dataloader())
+    print(time.process_time() - start)
+
     # Get the linear weights
     w = m.linear.weight
 

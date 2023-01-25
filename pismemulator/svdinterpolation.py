@@ -142,7 +142,7 @@ class DEMDataModule(pl.LightningDataModule):
         R,
         I,
         q: int = 30,
-        batch_size: int = 128,
+        batch_size: int = 4096,
         train_size: float = 0.9,
         num_workers: int = 0,
     ):
