@@ -5,9 +5,10 @@ import random
 import pylab as plt
 from pismemulator.utils import param_keys_dict as keys_dict
 from pismemulator.utils import kl_divergence
+from joblib import parallel, delayed
 
 # Function that plots the posterior distributions of randomly selected ensembles with a fixed number of members
-def plot_groups(df,vars,models,num_groups=10,per_group=50,seed=8675309):
+def plot_random_groups(df,vars,models,num_groups=10,per_group=50,seed=8675309):
     # df        : data frame of all models for true avg
     # vars      : list of variable (column) names
     # models    : list of available models (0,1,2 ...)
@@ -40,12 +41,20 @@ def plot_groups(df,vars,models,num_groups=10,per_group=50,seed=8675309):
                 sns.kdeplot(data=temp,x=var,ax=axes[i,j],color='green',alpha = .5) # remove y axis values, add x axis label
                 axes[i,j].set(xlabel=keys_dict[var],yticklabels=[],ylabel=None)
 
-# Function that plots the posterior distributions from any number of ensembles of emulators
-def plot_posteriors(dfs,vars):
+# Function that plots the aggregate posterior distributions from any number of ensembles of emulators
+def plot_posteriors(dfs,vars,labels=None):
+    # dfs   : any number of data frames containing posterior samples
+    # vars  : list of the names of variables contained in the dfs
+    # labels: list of names for each df for graphing 
+    
     sns.set_theme(palette='colorblind')
     rows = int(np.ceil(len(vars)/2))
     cols = 2
-
+    named = True
+    if labels is None:
+        named = False  # Check if use passed in df labels
+        print("debug")
+        
     fig, axes = plt.subplots(rows,cols,figsize=(11.69,17.44))
     
     bar = 0
@@ -54,7 +63,10 @@ def plot_posteriors(dfs,vars):
         for i in range(rows):
             for j in range (cols):            
                 var = vars[foo]
-                sns.kdeplot(data=df, x=var,ax=axes[int(i),int(j)],label=bar)
+                if named:
+                    sns.kdeplot(data=df, x=var,ax=axes[int(i),int(j)],label=labels[bar])
+                else:
+                    sns.kdeplot(data=df, x=var,ax=axes[int(i),int(j)],label=bar)
                 foo += 1
         bar += 1
         print(bar)
