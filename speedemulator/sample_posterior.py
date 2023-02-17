@@ -140,7 +140,7 @@ class MALASampler(object):
         log_pi_ = self.get_log_like_gradient_and_hessian(
             X_, Y_target, X_min, X_max, compute_hessian=False
         )
-
+        # q_ is q_proposed
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
@@ -189,6 +189,12 @@ class MALASampler(object):
         m_vars = []
         acc = acc_target
         print(n_iters)
+
+        traceplot_data = {}
+        for key in dataset.X_keys:
+            traceplot_data[key] = []
+        traceplot_interval = int(n_iters/10000)
+
         for i in range(n_iters):
             X, local_data, s = self.MALA_step(
                 X, Y_target, X_min, X_max, h, local_data=local_data
@@ -218,6 +224,11 @@ class MALASampler(object):
                 )
                 print("===============================================")
 
+            # Work in progress: want this for the gelman-rubin plots
+            if i % traceplot_interval == 0:
+                for key, val, std, mean in zip(dataset.X_keys, X.data.cpu().numpy(), dataset.X_std, dataset.X_mean):
+                    traceplot_data[key].append(float(val * std + mean))                
+               
             if i % save_interval == 0:
                 print("///////////////////////////////////////////////")
                 print("Saving samples for model {0}".format(model_index))
@@ -232,6 +243,10 @@ class MALASampler(object):
                     posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
                     compression="infer",
                 )
+
+        # Save data for traceplot
+        traceplot_csv = pd.DataFrame(traceplot_data)
+        traceplot_csv.to_csv(posterior_dir + "traceplot.csv",header=dataset.X_keys)
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 

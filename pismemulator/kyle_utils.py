@@ -52,7 +52,7 @@ def plot_posteriors(dfs,vars,labels=None):
     cols = 2
     named = True
     if labels is None:
-        named = False  # Check if use passed in df labels
+        named = False  # Check if user passed in df labels
         print("debug")
         
     fig, axes = plt.subplots(rows,cols,figsize=(11.69,17.44))
@@ -68,11 +68,13 @@ def plot_posteriors(dfs,vars,labels=None):
                 else:
                     sns.kdeplot(data=df, x=var,ax=axes[int(i),int(j)],label=bar)
                 foo += 1
+                axes[int(i),int(j)].legend()
         bar += 1
         print(bar)
     plt.legend()
     
 def kl_divergences(df,vars,models,num_groups=10,per_group=50):
+    # this was designed to calculate the kl divergences of random sub-ensembles from a larger "true" ensemble
     # df : data frame of all models for true avg
     # vars: list of variable (column) names
     # models: list of available models (0,1,2 ...)
@@ -96,5 +98,22 @@ def kl_divergences(df,vars,models,num_groups=10,per_group=50):
             q = np.histogram(temp[var],bins=30,density=True)[0]
             kl_average += np.abs(kl_divergence(p,q))
         kl_average  = kl_average / num_groups
+        divs[var] = kl_average
+    return divs
+
+def kl_deviation(df,vars,models):
+    # This was designed to calculate the "kl deviation" of a single ensemble of emulators
+    # In essence, we calculate the average kl divergence of each individual emulator with the ensemble average
+    divs = {}
+
+    for i in range(len(vars)):
+        kl_average = 0
+        var = vars[i]
+        p = np.histogram(df[var], bins=30,density=True)[0]
+        for model in models:
+            temp = df[df['Model']==model]
+            q = np.histogram(temp[var],bins=30,density=True)[0]
+            kl_average += np.abs(kl_divergence(p,q))
+        kl_average  = kl_average / int(len(models))
         divs[var] = kl_average
     return divs
