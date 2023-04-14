@@ -68,11 +68,12 @@ class PDDEmulator(pl.LightningModule):
 
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden] * (n_layers - 1)
+        p = [0] + [0.5] * (n_layers - 2) + [0.3]
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden[0])
         self.norm_first = nn.LayerNorm(n_hidden[0])
-        self.dropout_first = nn.Dropout(p=0.0)
+        self.dropout_first = nn.Dropout(p=p[0])
 
         models = []
         for n in range(n_layers - 2):
@@ -82,7 +83,7 @@ class PDDEmulator(pl.LightningModule):
                         [
                             ("Linear", nn.Linear(n_hidden[n], n_hidden[n + 1])),
                             ("LayerNorm", nn.LayerNorm(n_hidden[n + 1])),
-                            ("Dropout", nn.Dropout(p=0.1)),
+                            ("Dropout", nn.Dropout(p=p[n + 1])),
                         ]
                     )
                 )
@@ -180,7 +181,7 @@ class DNNEmulator(pl.LightningModule):
 
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden] * (n_layers - 1)
-        p = [0] + [0.5] * (n_layers - 1) + [0.3]
+        p = [0] + [0.5] * (n_layers - 2) + [0.3]
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden[0])
@@ -602,7 +603,7 @@ class TorchPDDModel(torch.nn.modules.Module):
 
     def _integrate(self, array):
         """Integrate an array over one year"""
-        return torch.sum(array, axis=0) / (self.interpolate_n - 1)
+        return torch.sum(array, axis=0) / (self.interpolate_n)
 
     def _interpolate(self, array):
         """Interpolate an array through one year."""

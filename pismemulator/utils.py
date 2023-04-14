@@ -106,6 +106,34 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
     )
 
 
+def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
+    """
+    Read and return Obs
+    """
+
+    with xr.open_dataset(file) as Obs:
+
+        stacked = Obs.stack(z=("rlat", "rlon"))
+        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
+
+        temp = stacked.tas.dropna(dim="z").values
+        rainfall = stacked.rainfall.dropna(dim="z").values
+        snowfall = stacked.snfall.dropna(dim="z").values
+        smb = stacked.gld.dropna(dim="z").values
+        refreeze = ncl_stacked.rfrz.dropna(dim="z").values
+        melt = stacked.snmel.dropna(dim="z").values
+        precip = rainfall + snowfall
+
+    return (
+        (temp[..., ::thinning_factor] - 273.15).reshape(1, -1),
+        precip[..., ::thinning_factor].reshape(1, -1),
+        snowfall[::thinning_factor].reshape(1, -1),
+        melt[::thinning_factor].reshape(1, -1),
+        refreeze[::thinning_factor].reshape(1, -1),
+        smb[::thinning_factor].reshape(1, -1),
+    )
+
+
 def load_imbie_csv(proj_start=2008):
 
     df = pd.read_csv("imbie_greenland_2021_Gt.csv")

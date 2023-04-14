@@ -155,25 +155,8 @@ class PDDDataModule(pl.LightningDataModule):
             all_data, train_size=self.train_size, random_state=0
         )
         self.training_data = training_data
-        self.test_data = training_data
-
         self.val_data = val_data
-        train_all_loader = DataLoader(
-            dataset=all_data,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-        self.train_all_loader = train_all_loader
-        val_all_loader = DataLoader(
-            dataset=all_data,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-        self.val_all_loader = val_all_loader
+
         train_loader = DataLoader(
             dataset=training_data,
             batch_size=self.batch_size,
@@ -182,7 +165,6 @@ class PDDDataModule(pl.LightningDataModule):
             pin_memory=True,
         )
         self.train_loader = train_loader
-        self.test_loader = train_loader
         val_loader = DataLoader(
             dataset=val_data,
             batch_size=self.batch_size,

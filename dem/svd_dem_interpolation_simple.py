@@ -9,12 +9,12 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics import MeanSquaredError
 
-training_files = glob("usurf_ex_gris_g1800m_v5_RAGIS_id_*_1975-1-1_1980-1-1.nc")
+training_files = glob("usurf_ex_gris_g1200m_v2023_RAGIS_id_*_1975-1-1_1980-1-1.nc")
 epsilon = 0
 training_var = "usurf"
 thinning_factor = 1
 # Number of principal components
-q = 10
+q = 100
 
 all_data = []
 for idx, m_file in enumerate(training_files):
@@ -33,8 +33,8 @@ for idx, m_file in enumerate(training_files):
         ds.close()
 data = np.concatenate(all_data, axis=0)
 
-with xr.open_dataset("aerodem_1978_1987_mean_g1800m.nc") as ds:
-    obs = ds.variables["surface"]
+with xr.open_dataset("aerodem_g1200m_geoid_corrected_1978_1987_mean.nc") as ds:
+    obs = ds.variables["surface_altitude"]
     mask = obs.isnull()
     m_mask = np.ones_like(mask)
     m_mask[mask == True] = 0
@@ -56,7 +56,7 @@ n = len(R[I])
 inputDim = q  # takes variable 'x
 outputDim = 1  # takes variable 'y'
 learningRate = 0.1
-epochs = 5000
+epochs = 1000
 
 
 class linearRegression(torch.nn.Module):

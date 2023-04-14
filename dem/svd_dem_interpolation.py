@@ -81,7 +81,7 @@ if __name__ == "__main__":
     parser.add_argument("-q", type=int, default=30)
     parser.add_argument(
         "--target_file",
-        default="aerodem_1978_1987_mean_g1800m.nc",
+        default="aerodem_g1200m_geoid_corrected_1978_1987_mean.nc",
     )
     parser.add_argument("--outfile", type=str, default="dem_reconstructed.nc")
 
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     dataset = DEMDataset(
         training_files=training_files,
         target_file=target_file,
-        target_var="surface",
+        target_var="surface_altitude",
     )
 
     data_loader = DEMDataModule(
