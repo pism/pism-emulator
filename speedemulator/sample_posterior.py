@@ -244,7 +244,7 @@ class MALASampler(object):
                     compression="infer",
                 )
 
-        # Save data for traceplot
+        # Save data for traceplot, unecessary 
         traceplot_csv = pd.DataFrame(traceplot_data)
         traceplot_csv.to_csv(posterior_dir + "traceplot.csv",header=dataset.X_keys)
         X_posterior = torch.stack(m_vars).cpu().numpy()
