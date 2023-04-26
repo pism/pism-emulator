@@ -88,21 +88,23 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
-        temp = stacked.tas.dropna(dim="z").values
-        rainfall = stacked.rainfall.dropna(dim="z").values
-        snowfall = stacked.snfall.dropna(dim="z").values
-        smb = stacked.gld.dropna(dim="z").values
-        refreeze = ncl_stacked.rfrz.dropna(dim="z").values
-        melt = stacked.snmel.dropna(dim="z").values
+        temp = stacked.tas.dropna(dim="z").values - 273.15
+        rainfall = stacked.rainfall.dropna(dim="z").values * 365.242198781 / 1000
+        snowfall = stacked.snfall.dropna(dim="z").values * 365.242198781 / 1000
+        smb = stacked.gld.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        refreeze = ncl_stacked.rfrz.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        melt = stacked.snmel.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        runoff = stacked.rogl.dropna(dim="z").values * 365.242198781 / 1000 / 12
         precip = rainfall + snowfall
 
     return (
-        temp[..., ::thinning_factor] - 273.15,
+        temp[..., ::thinning_factor],
         precip[..., ::thinning_factor],
         snowfall.sum(axis=0)[::thinning_factor],
         melt.sum(axis=0)[::thinning_factor],
-        refreeze.sum(axis=0)[::thinning_factor],
+        runoff.sum(axis=0)[::thinning_factor],
         smb.sum(axis=0)[::thinning_factor],
+        refreeze.sum(axis=0)[::thinning_factor],
     )
 
 
@@ -123,14 +125,16 @@ def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1)
         refreeze = ncl_stacked.rfrz.dropna(dim="z").values
         melt = stacked.snmel.dropna(dim="z").values
         precip = rainfall + snowfall
+        runoff = stacked.rogl.dropna(dim="z").values
 
     return (
-        (temp[..., ::thinning_factor] - 273.15).reshape(1, -1),
-        precip[..., ::thinning_factor].reshape(1, -1),
+        (temp[::thinning_factor] - 273.15).reshape(1, -1),
+        precip[::thinning_factor].reshape(1, -1),
         snowfall[::thinning_factor].reshape(1, -1),
         melt[::thinning_factor].reshape(1, -1),
-        refreeze[::thinning_factor].reshape(1, -1),
+        runoff[::thinning_factor].reshape(1, -1),
         smb[::thinning_factor].reshape(1, -1),
+        refreeze[::thinning_factor].reshape(1, -1),
     )
 
 

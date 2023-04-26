@@ -23,7 +23,11 @@ from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
 
+from typing import Union
+
 import lightning as pl
+from lightning import LightningModule
+
 import numpy as np
 import pandas as pd
 import pylab as plt
@@ -40,322 +44,153 @@ from scipy.stats import dirichlet, gaussian_kde
 from scipy.stats.distributions import uniform
 from sklearn.metrics import mean_squared_error
 
+from scipy.stats import beta
+
+import time
+
 from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
 from pismemulator.datamodules import PDDDataModule
-from pismemulator.utils import load_hirham_climate, load_hirham_climate_simple
+from pismemulator.utils import load_hirham_climate_simple, load_hirham_climate
 
 np.random.seed(2)
 
 
-class MALAPDDSampler(object):
-    """
-    MALA Sampler
-
-    Author: Douglas C Brinkerhoff, University of Montana
-    """
-
-    def __init__(
-        self,
-        model,
-        alpha_b=3.0,
-        beta_b=3.0,
-        alpha=0.01,
-        nu=1,
-        emulator_dir="./emulator",
-    ):
-        super().__init__()
-        self.model = model.eval()
-        self.alpha = alpha
-        self.alpha_b = alpha_b
-        self.beta_b = beta_b
-        self.nu = nu
-        self.emulator_dir = emulator_dir
-
-    def find_MAP(
-        self, X, T, P, S, Y_target, X_min, X_max, n_iters=50, print_interval=10
-    ):
-        print("***********************************************")
-        print("***********************************************")
-        print("Finding MAP point")
-        print("***********************************************")
-        print("***********************************************")
-        # Line search distances
-        alphas = np.logspace(-4, 0, 11)
-        # Find MAP point
-        for i in range(n_iters):
-            log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
-                X, T, P, S, Y_target, X_min, X_max, compute_hessian=True
-            )
-            p = Hinv @ -g
-            alpha_index = np.nanargmin(
-                [
-                    self.get_log_like_gradient_and_hessian(
-                        X + alpha * p,
-                        T,
-                        P,
-                        S,
-                        Y_target,
-                        X_min,
-                        X_max,
-                        compute_hessian=False,
-                    )
-                    .detach()
-                    .cpu()
-                    .numpy()
-                    for alpha in alphas
-                ]
-            )
-            mu = X + alphas[alpha_index] * p
-            X.data = mu.data
-            if i % print_interval == 0:
-                print("===============================================")
-                print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
-                print(
-                    "".join(
-                        [
-                            f"{key}: {(val * std + mean):.3f}\n"
-                            for key, val, std, mean in zip(
-                                X_P_keys,
-                                X.data.cpu().numpy(),
-                                X_P_std,
-                                X_P_mean,
-                            )
-                        ]
-                    )
-                )
-
-                print("===============================================")
-        return X
-
-    def V(self, X, T, P, S, Y_target, X_bar):
-        pdd = TorchPDDModel(
-            pdd_factor_snow=X[0],
-            pdd_factor_ice=X[1],
-            refreeze_snow=X[2],
-            refreeze_ice=X[2],
-        )
-
-        result = pdd(T, P, S)
-
-        A = result["accu"]
-        M = result["melt"]
-        R = result["runoff"]
-        B = result["smb"]
-        Y_pred = torch.vstack(
-            (
-                B,
-                R,
-            )
-        ).T
-
-        r = Y_pred - Y_target
-        L1 = torch.sum(
-            np.log(gamma((self.nu + 1) / 2.0))
-            - np.log(gamma(self.nu / 2.0))
-            - np.log(np.sqrt(np.pi * self.nu) * sigma_hat)
-            - (self.nu + 1) / 2.0 * torch.log(1 + 1.0 / self.nu * (r / sigma_hat) ** 2)
-        )
-        L2 = torch.sum(
-            (self.alpha_b - 1) * torch.log(X_bar)
-            + (self.beta_b - 1) * torch.log(1 - X_bar)
-        )
-
-        return -(self.alpha * L1 + L2)
-
-    def get_log_like_gradient_and_hessian(
-        self, X, T, P, S, Y_target, X_min, X_max, eps=1e-2, compute_hessian=False
-    ):
-
-        X_bar = (X - X_min) / (X_max - X_min)
-        log_pi = self.V(X, T, P, S, Y_target, X_bar)
-        if compute_hessian:
-            g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            H = torch.stack(
-                [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
-            )
-            lamda, Q = torch.linalg.eig(H)
-            lamda, Q = lamda.type(torch.float), Q.type(torch.float)
-            lamda_prime = torch.sqrt(lamda**2 + eps)
-            lamda_prime_inv = 1.0 / torch.sqrt(lamda**2 + eps)
-            H = Q @ torch.diag(lamda_prime) @ Q.T
-            Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
-            log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
-            return log_pi, g, H, Hinv, log_det_Hinv
-        else:
-            return log_pi
-
-    def draw_sample(self, mu, cov, eps=1e-10):
-        L = torch.linalg.cholesky(cov + eps * torch.eye(cov.shape[0], device=device))
-        return mu + L @ torch.randn(L.shape[0], device=device)
-
-    def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
-        return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
-
-    def MALA_step(self, X, T, P, S, Y_target, X_min, X_max, h, local_data=None):
-        if local_data is not None:
-            pass
-        else:
-            local_data = self.get_log_like_gradient_and_hessian(
-                X, T, P, S, Y_target, X_min, X_max, compute_hessian=True
-            )
-
-        log_pi, _, H, Hinv, log_det_Hinv = local_data
-
-        X_ = self.draw_sample(X, 2 * h * Hinv).detach()
-        X_.requires_grad = True
-
-        log_pi_ = self.get_log_like_gradient_and_hessian(
-            X_, T, P, S, Y_target, X_min, X_max, compute_hessian=False
-        )
-
-        logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
-        logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
-
-        log_alpha = -log_pi_ + logq_ + log_pi - logq
-        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
-        u = torch.rand(1, device=device)
-        if u <= alpha and log_alpha != np.inf:
-            X.data = X_.data
-            local_data = self.get_log_like_gradient_and_hessian(
-                X, T, P, S, Y_target, X_min, X_max, compute_hessian=True
-            )
-            s = 1
-        else:
-            s = 0
-        return X, local_data, s
-
-    def MALA(
-        self,
-        X,
-        X_min,
-        X_max,
-        T,
-        P,
-        S,
-        Y_target,
-        n_iters=10001,
-        h=0.1,
-        h_max=1.0,
-        acc_target=0.25,
-        k=0.01,
-        beta=0.99,
-        model_index=0,
-        save_interval=1000,
-        print_interval=50,
-    ):
-        print("***********************************************")
-        print("***********************************************")
-        print(
-            "Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(
-                model_index
-            )
-        )
-        print("***********************************************")
-        print("***********************************************")
-
-        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
-        if not os.path.isdir(posterior_dir):
-            os.makedirs(posterior_dir)
-
-        local_data = None
-        m_vars = []
-        acc = acc_target
-        print(n_iters)
-        for i in range(n_iters):
-            X, local_data, s = self.MALA_step(
-                X, T, P, S, Y_target, X_min, X_max, h, local_data=local_data
-            )
-            m_vars.append(X.detach())
-            acc = beta * acc + (1 - beta) * s
-            h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
-            if i % print_interval == 0:
-                print("===============================================")
-                print(
-                    "sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(
-                        i, acc, local_data[0].item()
-                    )
-                )
-                print(
-                    " ".join(
-                        [
-                            f"{key}: {(val * std + mean):.3f}\n"
-                            for key, val, std, mean in zip(
-                                X_P_keys,
-                                X.data.cpu().numpy(),
-                                X_P_std,
-                                X_P_mean,
-                            )
-                        ]
-                    )
-                )
-
-                print("===============================================")
-
-            if i % save_interval == 0:
-                print("///////////////////////////////////////////////")
-                print("Saving samples for model {0}".format(model_index))
-                print("///////////////////////////////////////////////")
-                X_posterior = torch.stack(m_vars).cpu().numpy()
-                df = pd.DataFrame(
-                    data=X_posterior.astype("float32") * X_P_std.cpu().numpy()
-                    + X_P_mean.cpu().numpy(),
-                    columns=X_P_keys,
-                )
-                df.to_csv(
-                    posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
-                    compression="infer",
-                )
-        X_posterior = torch.stack(m_vars).cpu().numpy()
-        return X_posterior
-
-
 class MALASampler(object):
     """
-    MALA Sampler
+    mMALA Sampler
 
     Author: Douglas C Brinkerhoff, University of Montana
+    Creates a manifold Metropolis-adjusted Langevin algorithm (mMALA)
+
+    Example::
+
+        sampler = MALASampler(
+            emulator, X_min, X_max, Y_target, sigma_hat
+        )
+        >>> X_map = sampler.find_MAP(X_0)
+        >>> X_posterior = sampler.sample(
+        >>>     X_map,
+        >>>     samples=1000,
+        >>>     burn=1000
+        >>> )
+
+    Args:
+        model: LightningModule
+        X_min (array or Tensor): minimum of distribution
+        X_max (array or Tensor): maximum of distribution
+        Y_target (array or Tensor): scale of the distribution
+        sigma_hat (array or Tensor): covariance
+        alpha (float): adjusts the weighting between the prior and the likelihood
+        alpha_b (float or Tensor):  1st concentration parameter of the distribution
+        (often referred to as alpha)
+        beta_b (float or Tensor): 2nd concentration parameter of the distribution
+        (often referred to as beta)
     """
 
     def __init__(
         self,
         model,
-        alpha_b=3.0,
-        beta_b=3.0,
-        alpha=0.01,
-        nu=1,
-        emulator_dir="./emulator",
+        temp_obs: Union[np.ndarray, torch.tensor],
+        precip_obs: Union[np.ndarray, torch.tensor],
+        std_dev_obs: Union[np.ndarray, torch.tensor],
+        X_min: Union[float, torch.tensor],
+        X_max: Union[float, torch.tensor],
+        Y_target: Union[np.ndarray, torch.tensor],
+        sigma_hat: Union[np.ndarray, torch.tensor],
+        alpha: Union[float, torch.tensor] = 0.01,
+        alpha_b: Union[float, torch.tensor] = 3.0,
+        beta_b: Union[float, torch.tensor] = 3.0,
+        nu: Union[float, torch.tensor] = 1.0,
+        posterior_dir="./posterior",
+        device="cpu",
     ):
         super().__init__()
         self.model = model.eval()
-        self.alpha = alpha
-        self.alpha_b = alpha_b
-        self.beta_b = beta_b
-        self.nu = nu
-        self.emulator_dir = emulator_dir
+        self.temp_obs = (
+            torch.tensor(temp_obs, dtype=torch.float32, device=device)
+            if not isinstance(temp_obs, torch.Tensor)
+            else temp_obs.to(device)
+        )
+        self.precip_obs = (
+            torch.tensor(precip_obs, dtype=torch.float32, device=device)
+            if not isinstance(precip_obs, torch.Tensor)
+            else precip_obs.to(device)
+        )
+        self.std_dev_obs = (
+            torch.tensor(std_dev_obs, dtype=torch.float32, device=device)
+            if not isinstance(std_dev_obs, torch.Tensor)
+            else std_dev_obs.to(device)
+        )
+        self.X_min = (
+            torch.tensor(X_min, dtype=torch.float32, device=device)
+            if not isinstance(X_min, torch.Tensor)
+            else X_min.to(device)
+        )
+        self.X_max = (
+            torch.tensor(X_max, dtype=torch.float32, device=device)
+            if not isinstance(X_max, torch.Tensor)
+            else X_max.to(device)
+        )
+        self.Y_target = (
+            torch.tensor(Y_target, dtype=torch.float32, device=device)
+            if not isinstance(Y_target, torch.Tensor)
+            else Y_target.to(device)
+        )
+        self.sigma_hat = (
+            torch.tensor(sigma_hat, dtype=torch.float32, device=device)
+            if not isinstance(sigma_hat, torch.Tensor)
+            else sigma_hat.to(device)
+        )
+        self.alpha = (
+            torch.tensor(alpha, dtype=torch.float32, device=device)
+            if not isinstance(alpha, torch.Tensor)
+            else alpha.to(device)
+        )
+        self.alpha_b = (
+            torch.tensor(alpha_b, dtype=torch.float32, device=device)
+            if not isinstance(alpha_b, torch.Tensor)
+            else alpha_b.to(device)
+        )
+        self.beta_b = (
+            torch.tensor(beta_b, dtype=torch.float32, device=device).to(device)
+            if not isinstance(beta_b, torch.Tensor)
+            else beta_b.to(device)
+        )
+        self.nu = (
+            torch.tensor(nu, dtype=torch.float32, device=device)
+            if not isinstance(nu, torch.Tensor)
+            else nu.to(device)
+        )
+        self.posterior_dir = posterior_dir
+        self.hessian_counter = 0
 
-    def find_MAP(self, X, X_I, Y_target, X_min, X_max, n_iters=50, print_interval=10):
+    def find_MAP(
+        self,
+        X: torch.tensor,
+        n_iters: int = 51,
+        verbose: bool = False,
+        print_interval: int = 10,
+    ):
         print("***********************************************")
         print("***********************************************")
         print("Finding MAP point")
         print("***********************************************")
         print("***********************************************")
         # Line search distances
-        alphas = np.logspace(-4, 0, 11)
+        alphas = torch.logspace(-4, 0, 11)
         # Find MAP point
         for i in range(n_iters):
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
-                X, X_I, Y_target, X_min, X_max, compute_hessian=True
+                X, compute_hessian=True
             )
+            # - f'(x) / f''(x)
+            # g = f'(x), Hinv = 1 / f''(x)
             p = Hinv @ -g
+            # Line search
             alpha_index = np.nanargmin(
                 [
                     self.get_log_like_gradient_and_hessian(
-                        X + alpha * p,
-                        X_I,
-                        Y_target,
-                        X_min,
-                        X_max,
-                        compute_hessian=False,
+                        X + alpha * p, compute_hessian=False
                     )
                     .detach()
                     .cpu()
@@ -363,61 +198,93 @@ class MALASampler(object):
                     for alpha in alphas
                 ]
             )
-            mu = X + alphas[alpha_index] * p
+            gamma = alphas[alpha_index]
+            mu = X + gamma * p
             X.data = mu.data
-            if i % print_interval == 0:
+            if verbose & (i % print_interval == 0):
                 print("===============================================")
                 print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
                 print(
                     "".join(
                         [
-                            f"{key}: {(val * std + mean):.3f}\n"
-                            for key, val, std, mean in zip(
-                                X_P_keys,
+                            f"{key}: {val:.3f}\n"
+                            for key, val in zip(
+                                X_keys,
                                 X.data.cpu().numpy(),
-                                X_P_std,
-                                X_P_mean,
                             )
                         ]
                     )
                 )
-
-                print("===============================================")
+        print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+        print(
+            "".join(
+                [
+                    f"{key}: {val:.3f}\n"
+                    for key, val in zip(
+                        X_keys,
+                        X.data.cpu().numpy(),
+                    )
+                ]
+            )
+        )
         return X
 
-    def V(self, X, X_I, Y_target, X_bar):
-        # model result is in log space
-        X_IP = torch.hstack((X, X_I))
-        Y_pred = self.model(X_IP)
-        r = Y_pred - Y_target
-        L1 = torch.sum(
-            np.log(gamma((self.nu + 1) / 2.0))
-            - np.log(gamma(self.nu / 2.0))
-            - np.log(np.sqrt(np.pi * self.nu) * sigma_hat)
-            - (self.nu + 1) / 2.0 * torch.log(1 + 1.0 / self.nu * (r / sigma_hat) ** 2)
-        )
-        L2 = torch.sum(
-            (self.alpha_b - 1) * torch.log(X_bar)
-            + (self.beta_b - 1) * torch.log(1 - X_bar)
-        )
-
-        return -(self.alpha * L1 + L2)
-
-    def get_log_like_gradient_and_hessian(
-        self, X, X_I, Y_target, X_min, X_max, eps=1e-2, compute_hessian=False
+    def V(
+        self,
+        X,
     ):
-
-        X_bar = (X - X_min) / (X_max - X_min)
-        log_pi = self.V(X, X_I, Y_target, X_bar)
-        if compute_hessian:
-            g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            H = torch.stack(
-                [torch.autograd.grad(e, X, retain_graph=True)[0] for e in g]
+        f_snow = X[0]
+        f_ice = X[1]
+        refreeze = X[2]
+        Xp = torch.hstack(
+            (
+                self.temp_obs.T,
+                self.precip_obs.T,
+                self.std_dev_obs.T,
+                torch.tile(f_snow, (self.temp_obs.shape[1], 1)),
+                torch.tile(f_ice, (self.temp_obs.shape[1], 1)),
+                torch.tile(refreeze, (self.temp_obs.shape[1], 1)),
             )
+        )
+        print(Xp.shape)
+        Y_pred = self.model(Xp)
+
+        r = Y_pred - self.Y_target
+        sigma_hat = self.sigma_hat
+        t = r / sigma_hat
+        nu = self.nu
+        X_min = self.X_min
+        X_max = self.X_max
+        alpha_b = self.alpha_b
+        beta_b = self.beta_b
+        # Likelihood
+        log_likelihood = torch.sum(
+            torch.lgamma((nu + 1) / 2.0)
+            - torch.lgamma(nu / 2.0)
+            - torch.log(torch.sqrt(torch.pi * nu) * sigma_hat)
+            - (nu + 1) / 2.0 * torch.log(1 + 1.0 / nu * t**2)
+        )
+        # Prior
+        X_bar = (X - X_min) / (X_max - X_min)
+        log_prior = torch.sum(
+            (alpha_b - 1) * torch.log(X_bar)
+            + (beta_b - 1) * torch.log(1 - X_bar)
+            # + torch.lgamma(alpha_b + beta_b)
+            # - torch.lgamma(alpha_b)
+            # - torch.lgamma(beta_b)
+        )
+        return -(self.alpha * log_likelihood + log_prior)
+
+    def get_log_like_gradient_and_hessian(self, X, eps=1e-24, compute_hessian=False):
+        log_pi = self.V(X)
+        if compute_hessian:
+            self.hessian_counter += 1
+            g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
+            H = torch.autograd.functional.hessian(self.V, X, create_graph=True)
             lamda, Q = torch.linalg.eig(H)
-            lamda, Q = lamda.type(torch.float), Q.type(torch.float)
+            lamda, Q = torch.real(lamda), torch.real(Q)
             lamda_prime = torch.sqrt(lamda**2 + eps)
-            lamda_prime_inv = 1.0 / torch.sqrt(lamda**2 + eps)
+            lamda_prime_inv = 1.0 / lamda_prime
             H = Q @ torch.diag(lamda_prime) @ Q.T
             Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
             log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
@@ -430,120 +297,111 @@ class MALASampler(object):
         return mu + L @ torch.randn(L.shape[0], device=device)
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
+        # - 0.5 * log_det_Hinv - 0.5 * (Y - mu) @ H / (2*h) * (Y - mu)
         return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
 
-    def MALA_step(self, X, X_I, Y_target, X_min, X_max, h, local_data=None):
+    def MALA_step(self, X, h, local_data=None):
         if local_data is not None:
             pass
         else:
-            local_data = self.get_log_like_gradient_and_hessian(
-                X, X_I, Y_target, X_min, X_max, compute_hessian=True
-            )
+            local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
 
-        log_pi, _, H, Hinv, log_det_Hinv = local_data
-
+        log_pi, g, H, Hinv, log_det_Hinv = local_data
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
 
-        log_pi_ = self.get_log_like_gradient_and_hessian(
-            X_, X_I, Y_target, X_min, X_max, compute_hessian=False
-        )
-
+        log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
+        # alpha = min(1, P * Q_ / (P_ * Q))
+        # s = self.MetropolisHastingsAcceptance(log_pi, log_pi_, logq, logq_)
+        # if s == 1:
+        #     local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
         log_alpha = -log_pi_ + logq_ + log_pi - logq
         alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
         u = torch.rand(1, device=device)
         if u <= alpha and log_alpha != np.inf:
             X.data = X_.data
-            local_data = self.get_log_like_gradient_and_hessian(
-                X, X_I, Y_target, X_min, X_max, compute_hessian=True
-            )
+            local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
             s = 1
         else:
             s = 0
+
         return X, local_data, s
 
-    def MALA(
+    def MetropolisHastingsAcceptance(self, log_pi, log_pi_, logq, logq_):
+        log_alpha = -log_pi_ + logq_ + log_pi - logq
+        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
+        u = torch.rand(1, device=device)
+        if u <= alpha and log_alpha != np.inf:
+            X.data = X_.data
+            s = 1
+        else:
+            s = 0
+        return s
+
+    def sample(
         self,
         X,
-        X_I,
-        X_min,
-        X_max,
-        Y_target,
-        n_iters=10001,
-        h=0.1,
-        h_max=1.0,
-        acc_target=0.25,
-        k=0.01,
-        beta=0.99,
-        model_index=0,
-        save_interval=1000,
-        print_interval=50,
+        burn: int = 1000,
+        samples: int = 10001,
+        h: float = 0.1,
+        h_max: float = 1.0,
+        acc_target: float = 0.25,
+        k: float = 0.01,
+        beta: float = 0.99,
+        save_interval: int = 1000,
+        print_interval: int = 50,
     ):
-        print("***********************************************")
-        print("***********************************************")
         print(
-            "Running Metropolis-Adjusted Langevin Algorithm for model index {0}".format(
-                model_index
-            )
+            "****************************************************************************"
         )
-        print("***********************************************")
-        print("***********************************************")
+        print(
+            "****************************************************************************"
+        )
+        print("Running Metropolis-Adjusted Langevin Algorithm")
+        print(
+            "****************************************************************************"
+        )
+        print(
+            "****************************************************************************"
+        )
 
-        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
+        posterior_dir = self.posterior_dir
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
 
         local_data = None
         m_vars = []
         acc = acc_target
-        print(n_iters)
-        for i in range(n_iters):
-            X, local_data, s = self.MALA_step(
-                X, X_I, Y_target, X_min, X_max, h, local_data=local_data
-            )
-            m_vars.append(X.detach())
+        progress = tqdm(range(samples + burn))
+        for i in progress:
+            X, local_data, s = self.MALA_step(X, h, local_data=local_data)
+            if i >= burn:
+                m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
-            if i % print_interval == 0:
-                print("===============================================")
-                print(
-                    "sample: {0:d}, acc. rate: {1:4.2f}, log(P): {2:6.1f}".format(
-                        i, acc, local_data[0].item()
-                    )
-                )
-                print(
-                    " ".join(
-                        [
-                            f"{key}: {(val * std + mean):.3f}\n"
-                            for key, val, std, mean in zip(
-                                X_P_keys,
-                                X.data.cpu().numpy(),
-                                X_P_std,
-                                X_P_mean,
-                            )
-                        ]
-                    )
-                )
+            log_p = local_data[0].item()
+            desc = f"sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f} "
+            progress.set_description(desc=desc)
 
-                print("===============================================")
-
-            if i % save_interval == 0:
+            if (i + burn % save_interval == 0) & (i >= burn):
                 print("///////////////////////////////////////////////")
-                print("Saving samples for model {0}".format(model_index))
+                print(f"Saving samples")
                 print("///////////////////////////////////////////////")
                 X_posterior = torch.stack(m_vars).cpu().numpy()
                 df = pd.DataFrame(
-                    data=X_posterior.astype("float32") * X_P_std.cpu().numpy()
-                    + X_P_mean.cpu().numpy(),
-                    columns=X_P_keys,
+                    data=X_posterior.astype("float32"),
+                    columns=X_keys,
                 )
-                df.to_csv(
-                    posterior_dir + "X_posterior_model_{0}.csv.gz".format(model_index),
-                    compression="infer",
-                )
+                if out_format == "csv":
+                    df.to_csv(join(posterior_dir, f"X_posterior.csv.gz"))
+                elif out_format == "parquet":
+                    df.to_parquet(join(posterior_dir, f"X_posterior.parquet"))
+                else:
+                    raise NotImplementedError(f"{out_format} not implemented")
+
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
@@ -589,8 +447,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=1)
-    parser.add_argument("--n_layers", type=int, default=5)
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--train_size", type=float, default=0.8)
     parser.add_argument("--thinning_factor", type=int, default=1)
 
@@ -614,18 +471,14 @@ if __name__ == "__main__":
     pl.seed_everything(0)
     np.random.seed(model_index)
 
+    samples = 2_000
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    (
-        temp,
-        precip,
-        a,
-        m,
-        r,
-        b,
-    ) = load_hirham_climate_simple(thinning_factor=thinning_factor)
+    (temp, precip, a, m, r, b, rfr) = load_hirham_climate(
+        thinning_factor=thinning_factor
+    )
 
     temp = temp.reshape(1, -1)
     precip = precip.reshape(1, -1)
@@ -639,8 +492,8 @@ if __name__ == "__main__":
 
     nt = temp.shape[0]
 
-    X = []
-    Y = []
+    X_m = []
+    Y_m = []
     for k, row in prior_df.iterrows():
         m_f_snow = row["f_snow"]
         m_f_ice = row["f_ice"]
@@ -649,11 +502,11 @@ if __name__ == "__main__":
         pdd = TorchPDDModel(
             pdd_factor_snow=m_f_snow,
             pdd_factor_ice=m_f_ice,
-            refreeze_snow=0,
+            refreeze_snow=m_refreeze,
             refreeze_ice=0,
             temp_snow=0.0,
             temp_rain=0.0,
-            n_interpolate=1,
+            n_interpolate=12,
         )
         result = pdd(temp, precip, std_dev)
 
@@ -669,13 +522,14 @@ if __name__ == "__main__":
                 B,
             )
         ).T
-        Y.append(m_Y)
-        X.append(
+        Y_m.append(m_Y)
+        X_m.append(
             torch.from_numpy(
                 np.hstack(
                     (
                         temp.T,
                         precip.T,
+                        std_dev.T,
                         np.tile(m_f_snow, (temp.shape[1], 1)),
                         np.tile(m_f_ice, (temp.shape[1], 1)),
                         np.tile(m_refreeze, (temp.shape[1], 1)),
@@ -684,8 +538,8 @@ if __name__ == "__main__":
             )
         )
 
-    X = torch.vstack(X).type(torch.FloatTensor)
-    Y = torch.vstack(Y).type(torch.FloatTensor)
+    X = torch.vstack(X_m).type(torch.FloatTensor)
+    Y = torch.vstack(Y_m).type(torch.FloatTensor)
     n_samples, n_parameters = X.shape
     n_outputs = Y.shape[1]
 
@@ -695,19 +549,14 @@ if __name__ == "__main__":
     X_norm = torch.nan_to_num((X - X_mean) / X_std, 0)
 
     callbacks = []
+    timer = Timer()
+    callbacks.append(timer)
 
     print(f"Training model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
     omegas = omegas.type(torch.FloatTensor)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
     area = torch.ones_like(omegas)
-    num_workers = 4
-    hparams = {
-        "n_layers": 5,
-        "n_hidden": 128,
-        "batch_size": 4096,
-        "learning_rate": 0.01,
-    }
 
     # Load training data
     data_loader = PDDDataModule(X_norm, Y, omegas, omegas_0, num_workers=num_workers)
@@ -734,7 +583,9 @@ if __name__ == "__main__":
     val_loader = data_loader.val_loader
 
     # Train the emulator
+
     trainer.fit(e, train_loader, val_loader)
+    print(f"Training took {timer.time_elapsed():.0f}s")
     trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
 
     # Out-Of-Set validation
@@ -784,11 +635,12 @@ if __name__ == "__main__":
     axs[0].legend()
     axs[1].legend()
     axs[2].legend()
+    axs[3].legend()
     fig.savefig(f"{emulator_dir}/validation.pdf")
 
     # Create observations using the forward model
     obs_df = draw_samples(n_samples=100, random_seed=4)
-    temp_obs, precip_obs, _, _, _, _ = load_hirham_climate(thinning_factor=10)
+    temp_obs, precip_obs, _, _, _, _, _ = load_hirham_climate(thinning_factor=100)
     std_dev_obs = np.zeros_like(temp_obs)
 
     f_snow_obs = 3.44
@@ -811,32 +663,32 @@ if __name__ == "__main__":
     R_obs = result["runoff"]
     B_obs = result["smb"]
 
-    # A_obs += bnp.random.normal(0, 0.01, A_obs.shape)
-    # M_obs += np.random.normal(0, 0.1, M_obs.shape)
-    # R_obs += np.random.normal(0, 0.1, R_obs.shape)
-    # B_obs += np.random.normal(0, 0.1, B_obs.shape)
-
     Y_obs = torch.vstack((A_obs, M_obs, R_obs, B_obs)).T.type(torch.FloatTensor)
 
     # Create observations using the forward model
-    mcmc_df = draw_samples(n_samples=10000, random_seed=5)
-    temp_prior, precip_prior, _, _, _, _ = load_hirham_climate(
+    mcmc_df = draw_samples(n_samples=1_000, random_seed=5)
+    temp_prior, precip_prior, _, _, _, _, _ = load_hirham_climate(
         thinning_factor=thinning_factor
     )
     std_dev_prior = np.zeros_like(temp_prior)
 
-    X = []
-    Y = []
+    # Y_obs = torch.vstack(
+    #     (
+    #         torch.from_numpy(a_obs),
+    #         torch.from_numpy(m_obs),
+    #         torch.from_numpy(r_obs),
+    #     )
+    # ).T.type(torch.FloatTensor)
+
+    X_m = []
     for k, row in mcmc_df.iterrows():
         m_f_snow = row["f_snow"]
         m_f_ice = row["f_ice"]
         m_refreeze = row["refreeze"]
-        X.append(
+        X_m.append(
             torch.from_numpy(
                 np.hstack(
                     (
-                        temp_prior.T,
-                        precip_prior.T,
                         np.tile(m_f_snow, (temp_prior.shape[1], 1)),
                         np.tile(m_f_ice, (temp_prior.shape[1], 1)),
                         np.tile(m_refreeze, (temp_prior.shape[1], 1)),
@@ -845,61 +697,48 @@ if __name__ == "__main__":
             )
         )
 
-    X_prior = torch.vstack(X).type(torch.FloatTensor)
-    X_prior_mean = X_prior.nanmean(axis=0)
-    X_prior_std = X_prior.std(axis=0)
+    X_prior = torch.vstack(X_m).type(torch.FloatTensor)
+    X_min = X_prior.cpu().numpy().min(axis=0)
+    X_max = X_prior.cpu().numpy().max(axis=0)
 
-    X_prior_norm = torch.nan_to_num((X_prior - X_prior_mean) / X_prior_std)
+    sigma_hat = torch.tensor([0.1, 0.1, 0.1, 0.1])
+    sh = torch.ones_like(Y_obs)
+    sigma_hat = sh * torch.tensor([0.5, 0.5, 0.1, 0.1])
+    X_keys = ["f_snow", "f_ice", "refreeze"]
 
-    X_P_mean = X_prior_mean[-3::].to(device)
-    X_P_std = X_prior_std[-3::].to(device)
-    X_P_prior = X_prior_norm[:, -3::].to(device)
-    X_I_prior = X_prior_norm[:, :-3].to(device)
-
-    X_min = X_prior_norm.cpu().numpy().min(axis=0)
-    X_max = X_prior_norm.cpu().numpy().max(axis=0)
-
-    sigma_hat = 0.001
-
-    X_min = torch.tensor(X_min, dtype=torch.float32, device=device)
-    X_max = torch.tensor(X_max, dtype=torch.float32, device=device)
-
-    # Needs
-    # alpha_b, beta_b: float
-    # alpha: float
-    # nu: float
-    # gamma
-    # sigma_hat
-    X_P_0 = torch.tensor(
-        X_P_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
+    burn = 1000
+    alpha = 100
+    alpha_b = 3.0
+    beta_b = 3.0
+    X_prior = beta.rvs(alpha_b, beta_b, size=(samples, 3)) * (X_max - X_min) + X_min
+    # Initial condition for MAP. Note that using 0 yields similar results
+    X_0 = torch.tensor(
+        X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
     )
 
-    X_I_0 = torch.tensor(
-        X_I_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
+    start = time.process_time()
+    sampler = MALASampler(
+        e,
+        torch.from_numpy(temp_obs),
+        torch.from_numpy(precip_obs),
+        torch.from_numpy(std_dev_obs),
+        X_min,
+        X_max,
+        Y_obs,
+        sigma_hat,
+        posterior_dir=".",
+        device=device,
+        alpha=alpha,
     )
-
-    X_P_min = X_min[-3:]
-    X_P_max = X_max[-3:]
-
-    Y_target = Y_obs.to(device)
-
-    n_iters = 20000
-    X_P_keys = ["f_snow", "f_ice", "refreeze"]
-
-    mala = MALASampler(e, emulator_dir=emulator_dir)
-    X_map = mala.find_MAP(X_P_0, X_I_0, Y_target, X_P_min, X_P_max)
-
-    X_posterior = mala.MALA(
+    X_map = sampler.find_MAP(X_0)
+    X_posterior = sampler.sample(
         X_map,
-        X_I_0,
-        X_P_min,
-        X_P_max,
-        Y_target,
-        n_iters=n_iters,
-        model_index=int(model_index),
+        samples=samples,
+        burn=burn,
         save_interval=1000,
         print_interval=100,
     )
+    print(time.process_time() - start)
 
     # mala = MALAPDDSampler(e, emulator_dir=emulator_dir)
     # X_map = mala.find_MAP(
@@ -921,223 +760,223 @@ if __name__ == "__main__":
     #     print_interval=100,
     # )
 
-    X_std = X_P_std
-    X_mean = X_P_mean
-    frac = 1.0
-    lw = 1
-    color_prior = "b"
-    X_list = []
-    X_keys = ["f_snow", "f_ice", "refreeze"]
-    X_Prior = (
-        X_P_prior.detach().cpu().numpy() * X_P_std[-3::].detach().cpu().numpy()
-        + X_P_mean[-3::].detach().cpu().numpy()
-    )
-    keys_dict = {
-        "f_ice": "$f_{\mathrm{ice}}$",
-        "f_snow": "$f_{\mathrm{snoe}}$",
-        "refreeze": "$r$",
-    }
-    p = Path(f"{emulator_dir}/posterior_samples/")
-    print("Loading posterior samples\n")
-    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
-        print(f"  -- {m_file}")
-        df = pd.read_csv(m_file).sample(frac=frac)
-        if "Unnamed: 0" in df.columns:
-            df.drop(columns=["Unnamed: 0"], inplace=True)
-        model = m_file.name.split("_")[-1].split(".")[0]
-        df["Model"] = int(model)
-        X_list.append(df)
+    # X_std = X_P_std
+    # X_mean = X_P_mean
+    # frac = 1.0
+    # lw = 1
+    # color_prior = "b"
+    # X_list = []
+    # X_keys = ["f_snow", "f_ice", "refreeze"]
+    # X_Prior = (
+    #     X_P_prior.detach().cpu().numpy() * X_P_std[-3::].detach().cpu().numpy()
+    #     + X_P_mean[-3::].detach().cpu().numpy()
+    # )
+    # keys_dict = {
+    #     "f_ice": "$f_{\mathrm{ice}}$",
+    #     "f_snow": "$f_{\mathrm{snoe}}$",
+    #     "refreeze": "$r$",
+    # }
+    # p = Path(f"{emulator_dir}/posterior_samples/")
+    # print("Loading posterior samples\n")
+    # for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
+    #     print(f"  -- {m_file}")
+    #     df = pd.read_csv(m_file).sample(frac=frac)
+    #     if "Unnamed: 0" in df.columns:
+    #         df.drop(columns=["Unnamed: 0"], inplace=True)
+    #     model = m_file.name.split("_")[-1].split(".")[0]
+    #     df["Model"] = int(model)
+    #     X_list.append(df)
 
-    print(f"Merging posteriors into dataframe")
-    posterior_df = pd.concat(X_list)
+    # print(f"Merging posteriors into dataframe")
+    # posterior_df = pd.concat(X_list)
 
-    X_posterior = posterior_df.drop(columns=["Model"]).values
-    C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-    Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
+    # X_posterior = posterior_df.drop(columns=["Model"]).values
+    # C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
+    # Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
 
-    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 4))
-    fig.subplots_adjust(hspace=0.25, wspace=0.25)
-    for i in range(3):
-        min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
-        max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
-        bins = np.linspace(min_val, max_val, 100)
-        X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
-        X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
-        b = 0.5 * (b[1:] + b[:-1])
-        axs[i].plot(
-            b,
-            X_posterior_hist * 0.5,
-            color="k",
-            linewidth=lw,
-            linestyle="solid",
-        )
-        axs[i].axvline(f_true[i], lw=3, color="orange", label="true")
+    # fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 4))
+    # fig.subplots_adjust(hspace=0.25, wspace=0.25)
+    # for i in range(3):
+    #     min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
+    #     max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
+    #     bins = np.linspace(min_val, max_val, 100)
+    #     X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
+    #     X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
+    #     b = 0.5 * (b[1:] + b[:-1])
+    #     axs[i].plot(
+    #         b,
+    #         X_posterior_hist * 0.5,
+    #         color="k",
+    #         linewidth=lw,
+    #         linestyle="solid",
+    #     )
+    #     axs[i].axvline(f_true[i], lw=3, color="orange", label="true")
 
-    figfile = f"{emulator_dir}/posterior.pdf"
-    print(f"Saving figure to {figfile}")
-    fig.savefig(figfile)
+    # figfile = f"{emulator_dir}/posterior.pdf"
+    # print(f"Saving figure to {figfile}")
+    # fig.savefig(figfile)
 
-    fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(5.4, 5.6))
-    fig.subplots_adjust(hspace=0.0, wspace=0.0)
-    for i in range(3):
-        for j in range(3):
-            if i > j:
+    # fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(5.4, 5.6))
+    # fig.subplots_adjust(hspace=0.0, wspace=0.0)
+    # for i in range(3):
+    #     for j in range(3):
+    #         if i > j:
 
-                axs[i, j].scatter(
-                    X_posterior[:, j],
-                    X_posterior[:, i],
-                    c="#31a354",
-                    s=0.05,
-                    alpha=0.01,
-                    label="Posterior",
-                    rasterized=True,
-                )
+    #             axs[i, j].scatter(
+    #                 X_posterior[:, j],
+    #                 X_posterior[:, i],
+    #                 c="#31a354",
+    #                 s=0.05,
+    #                 alpha=0.01,
+    #                 label="Posterior",
+    #                 rasterized=True,
+    #             )
 
-                min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
-                bins_y = np.linspace(min_val, max_val, 100)
+    #             min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
+    #             max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
+    #             bins_y = np.linspace(min_val, max_val, 100)
 
-                min_val = min(X_Prior[:, j].min(), X_posterior[:, j].min())
-                max_val = max(X_Prior[:, j].max(), X_posterior[:, j].max())
-                bins_x = np.linspace(min_val, max_val, 100)
+    #             min_val = min(X_Prior[:, j].min(), X_posterior[:, j].min())
+    #             max_val = max(X_Prior[:, j].max(), X_posterior[:, j].max())
+    #             bins_x = np.linspace(min_val, max_val, 100)
 
-                v = gaussian_kde(X_posterior[:, [j, i]].T)
-                bx = 0.5 * (bins_x[1:] + bins_x[:-1])
-                by = 0.5 * (bins_y[1:] + bins_y[:-1])
-                Bx, By = np.meshgrid(bx, by)
+    #             v = gaussian_kde(X_posterior[:, [j, i]].T)
+    #             bx = 0.5 * (bins_x[1:] + bins_x[:-1])
+    #             by = 0.5 * (bins_y[1:] + bins_y[:-1])
+    #             Bx, By = np.meshgrid(bx, by)
 
-                axs[i, j].contour(
-                    Bx,
-                    By,
-                    v(np.vstack((Bx.ravel(), By.ravel()))).reshape(Bx.shape),
-                    7,
-                    linewidths=0.5,
-                    colors="black",
-                )
+    #             axs[i, j].contour(
+    #                 Bx,
+    #                 By,
+    #                 v(np.vstack((Bx.ravel(), By.ravel()))).reshape(Bx.shape),
+    #                 7,
+    #                 linewidths=0.5,
+    #                 colors="black",
+    #             )
 
-                axs[i, j].set_xlim(X_Prior[:, j].min(), X_Prior[:, j].max())
-                axs[i, j].set_ylim(X_Prior[:, i].min(), X_Prior[:, i].max())
+    #             axs[i, j].set_xlim(X_Prior[:, j].min(), X_Prior[:, j].max())
+    #             axs[i, j].set_ylim(X_Prior[:, i].min(), X_Prior[:, i].max())
 
-            elif i < j:
-                patch_upper = Polygon(
-                    np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]),
-                    facecolor=plt.cm.seismic(Cn_0[i, j]),
-                )
-                axs[i, j].add_patch(patch_upper)
-                if C_0[i, j] > -0.5:
-                    color = "black"
-                else:
-                    color = "white"
-                axs[i, j].text(
-                    0.5,
-                    0.5,
-                    "{0:.2f}".format(C_0[i, j]),
-                    fontsize=6,
-                    horizontalalignment="center",
-                    verticalalignment="center",
-                    transform=axs[i, j].transAxes,
-                    color=color,
-                )
+    #         elif i < j:
+    #             patch_upper = Polygon(
+    #                 np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]),
+    #                 facecolor=plt.cm.seismic(Cn_0[i, j]),
+    #             )
+    #             axs[i, j].add_patch(patch_upper)
+    #             if C_0[i, j] > -0.5:
+    #                 color = "black"
+    #             else:
+    #                 color = "white"
+    #             axs[i, j].text(
+    #                 0.5,
+    #                 0.5,
+    #                 "{0:.2f}".format(C_0[i, j]),
+    #                 fontsize=6,
+    #                 horizontalalignment="center",
+    #                 verticalalignment="center",
+    #                 transform=axs[i, j].transAxes,
+    #                 color=color,
+    #             )
 
-            elif i == j:
+    #         elif i == j:
 
-                min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
-                max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
-                bins = np.linspace(min_val, max_val, 30)
-                X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
-                X_posterior_hist, _ = np.histogram(
-                    X_posterior[:, i], bins, density=True
-                )
-                b = 0.5 * (b[1:] + b[:-1])
+    #             min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
+    #             max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
+    #             bins = np.linspace(min_val, max_val, 30)
+    #             X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
+    #             X_posterior_hist, _ = np.histogram(
+    #                 X_posterior[:, i], bins, density=True
+    #             )
+    #             b = 0.5 * (b[1:] + b[:-1])
 
-                axs[i, j].plot(
-                    b,
-                    X_prior_hist,
-                    color=color_prior,
-                    linewidth=lw,
-                    label="Prior",
-                    linestyle="solid",
-                )
+    #             axs[i, j].plot(
+    #                 b,
+    #                 X_prior_hist,
+    #                 color=color_prior,
+    #                 linewidth=lw,
+    #                 label="Prior",
+    #                 linestyle="solid",
+    #             )
 
-                all_models = posterior_df["Model"].unique()
-                for k, m_model in enumerate(all_models):
-                    m_df = posterior_df[posterior_df["Model"] == m_model].drop(
-                        columns=["Model"]
-                    )
-                    X_model_posterior = m_df.values
-                    X_model_posterior_hist, _ = np.histogram(
-                        X_model_posterior[:, i], _, density=True
-                    )
-                    if k == 0:
-                        axs[i, j].plot(
-                            b,
-                            X_model_posterior_hist * 0.5,
-                            color="0.5",
-                            linewidth=lw * 0.25,
-                            linestyle="solid",
-                            alpha=0.5,
-                            label="Posterior (BayesBag)",
-                        )
-                    else:
-                        axs[i, j].plot(
-                            b,
-                            X_model_posterior_hist * 0.5,
-                            color="0.5",
-                            linewidth=lw * 0.25,
-                            linestyle="solid",
-                            alpha=0.5,
-                        )
+    #             all_models = posterior_df["Model"].unique()
+    #             for k, m_model in enumerate(all_models):
+    #                 m_df = posterior_df[posterior_df["Model"] == m_model].drop(
+    #                     columns=["Model"]
+    #                 )
+    #                 X_model_posterior = m_df.values
+    #                 X_model_posterior_hist, _ = np.histogram(
+    #                     X_model_posterior[:, i], _, density=True
+    #                 )
+    #                 if k == 0:
+    #                     axs[i, j].plot(
+    #                         b,
+    #                         X_model_posterior_hist * 0.5,
+    #                         color="0.5",
+    #                         linewidth=lw * 0.25,
+    #                         linestyle="solid",
+    #                         alpha=0.5,
+    #                         label="Posterior (BayesBag)",
+    #                     )
+    #                 else:
+    #                     axs[i, j].plot(
+    #                         b,
+    #                         X_model_posterior_hist * 0.5,
+    #                         color="0.5",
+    #                         linewidth=lw * 0.25,
+    #                         linestyle="solid",
+    #                         alpha=0.5,
+    #                     )
 
-                axs[i, j].plot(
-                    b,
-                    X_posterior_hist,
-                    color="black",
-                    linewidth=lw,
-                    linestyle="solid",
-                    label="Posterior",
-                )
+    #             axs[i, j].plot(
+    #                 b,
+    #                 X_posterior_hist,
+    #                 color="black",
+    #                 linewidth=lw,
+    #                 linestyle="solid",
+    #                 label="Posterior",
+    #             )
 
-                axs[i, j].set_xlim(min_val, max_val)
+    #             axs[i, j].set_xlim(min_val, max_val)
 
-            else:
-                axs[i, j].remove()
+    #         else:
+    #             axs[i, j].remove()
 
-    for i, ax in enumerate(axs[:, 0]):
-        ax.set_ylabel(keys_dict[X_keys[i]])
+    # for i, ax in enumerate(axs[:, 0]):
+    #     ax.set_ylabel(keys_dict[X_keys[i]])
 
-    for j, ax in enumerate(axs[-1, :]):
-        ax.set_xlabel(keys_dict[X_keys[j]])
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
-        plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
-        if j > 0:
-            ax.tick_params(axis="y", which="both", length=0)
-            ax.yaxis.set_minor_formatter(NullFormatter())
-            ax.yaxis.set_major_formatter(NullFormatter())
+    # for j, ax in enumerate(axs[-1, :]):
+    #     ax.set_xlabel(keys_dict[X_keys[j]])
+    #     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+    #     plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
+    #     if j > 0:
+    #         ax.tick_params(axis="y", which="both", length=0)
+    #         ax.yaxis.set_minor_formatter(NullFormatter())
+    #         ax.yaxis.set_major_formatter(NullFormatter())
 
-    for ax in axs[:-1, 0].ravel():
-        ax.xaxis.set_major_formatter(NullFormatter())
-        ax.xaxis.set_minor_formatter(NullFormatter())
-        ax.tick_params(axis="x", which="both", length=0)
+    # for ax in axs[:-1, 0].ravel():
+    #     ax.xaxis.set_major_formatter(NullFormatter())
+    #     ax.xaxis.set_minor_formatter(NullFormatter())
+    #     ax.tick_params(axis="x", which="both", length=0)
 
-    for ax in axs[:-1, 1:].ravel():
-        ax.xaxis.set_major_formatter(NullFormatter())
-        ax.xaxis.set_minor_formatter(NullFormatter())
-        ax.yaxis.set_major_formatter(NullFormatter())
-        ax.yaxis.set_minor_formatter(NullFormatter())
-        ax.tick_params(axis="both", which="both", length=0)
+    # for ax in axs[:-1, 1:].ravel():
+    #     ax.xaxis.set_major_formatter(NullFormatter())
+    #     ax.xaxis.set_minor_formatter(NullFormatter())
+    #     ax.yaxis.set_major_formatter(NullFormatter())
+    #     ax.yaxis.set_minor_formatter(NullFormatter())
+    #     ax.tick_params(axis="both", which="both", length=0)
 
-    l_prior = Line2D([], [], c=color_prior, lw=lw, ls="solid", label="Prior")
-    l_post = Line2D([], [], c="k", lw=lw, ls="solid", label="Posterior")
-    l_post_b = Line2D(
-        [], [], c="0.25", lw=lw * 0.25, ls="solid", label="Posterior (BayesBag)"
-    )
+    # l_prior = Line2D([], [], c=color_prior, lw=lw, ls="solid", label="Prior")
+    # l_post = Line2D([], [], c="k", lw=lw, ls="solid", label="Posterior")
+    # l_post_b = Line2D(
+    #     [], [], c="0.25", lw=lw * 0.25, ls="solid", label="Posterior (BayesBag)"
+    # )
 
-    legend = fig.legend(
-        handles=[l_prior, l_post, l_post_b], bbox_to_anchor=(0.3, 0.955)
-    )
-    legend.get_frame().set_linewidth(0.0)
-    legend.get_frame().set_alpha(0.0)
+    # legend = fig.legend(
+    #     handles=[l_prior, l_post, l_post_b], bbox_to_anchor=(0.3, 0.955)
+    # )
+    # legend.get_frame().set_linewidth(0.0)
+    # legend.get_frame().set_alpha(0.0)
 
-    figfile = f"{emulator_dir}/emulator_posterior.pdf"
-    print(f"Saving figure to {figfile}")
-    fig.savefig(figfile)
+    # figfile = f"{emulator_dir}/emulator_posterior.pdf"
+    # print(f"Saving figure to {figfile}")
+    # fig.savefig(figfile)

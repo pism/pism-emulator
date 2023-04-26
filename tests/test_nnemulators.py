@@ -29,7 +29,7 @@ from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import DNNEmulator, NNEmulator
 
 
-def tes_dataset():
+def test_dataset():
 
     """"""
 
@@ -142,4 +142,5 @@ def test_emulator_equivalence():
     de.eval()
     Y_e = e(X, add_mean=True).detach().numpy()
     Y_de = de(X, add_mean=True).detach().numpy()
+
     assert_array_almost_equal(Y_e, Y_de, decimal=1)
