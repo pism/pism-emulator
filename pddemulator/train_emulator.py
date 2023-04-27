@@ -412,7 +412,10 @@ def draw_samples(n_samples=250, random_seed=2):
     distributions = {
         "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
+        "refreeze_snow": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
+        "refreeze_ice": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
+        "temp_snow": uniform(loc=-1, scale=1.0),  # uniform between 0 and 1
+        "temp_rain": uniform(loc=0.5, scale=1.5),  # uniform between 0 and 1
     }
     # Names of all the variables
     keys = [x for x in distributions.keys()]
@@ -476,9 +479,7 @@ if __name__ == "__main__":
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    (temp, precip, a, m, r, b, rfr) = load_hirham_climate(
-        thinning_factor=thinning_factor
-    )
+    (temp, precip, a, m, r, b, f) = load_hirham_climate(thinning_factor=thinning_factor)
 
     temp = temp.reshape(1, -1)
     precip = precip.reshape(1, -1)
@@ -486,6 +487,7 @@ if __name__ == "__main__":
     m = m.reshape(1, -1)
     r = r.reshape(1, -1)
     b = b.reshape(1, -1)
+    f = f.reshape(1, -1)
 
     std_dev = np.zeros_like(temp)
     prior_df = draw_samples(n_samples=50)
@@ -497,15 +499,21 @@ if __name__ == "__main__":
     for k, row in prior_df.iterrows():
         m_f_snow = row["f_snow"]
         m_f_ice = row["f_ice"]
-        m_refreeze = row["refreeze"]
+        m_refreeze_snow = row["refreeze_snow"]
+        m_refreeze_ice = row["refreeze_ice"]
+        m_temp_snow = row["temp_snow"]
+        m_temp_rain = row["temp_rain"]
+        params = np.hstack(
+            [np.tile(row[k], (temp.shape[1], 1)) for k in range(len(row))]
+        )
 
         pdd = TorchPDDModel(
             pdd_factor_snow=m_f_snow,
             pdd_factor_ice=m_f_ice,
-            refreeze_snow=m_refreeze,
-            refreeze_ice=0,
-            temp_snow=0.0,
-            temp_rain=0.0,
+            refreeze_snow=m_refreeze_snow,
+            refreeze_ice=m_refreeze_ice,
+            temp_snow=m_temp_snow,
+            temp_rain=m_temp_rain,
             n_interpolate=12,
         )
         result = pdd(temp, precip, std_dev)
@@ -513,12 +521,15 @@ if __name__ == "__main__":
         A = result["accu"]
         M = result["melt"]
         R = result["runoff"]
+        F = result["refreeze"]
         B = result["smb"]
+
         m_Y = torch.vstack(
             (
                 A,
                 M,
                 R,
+                F,
                 B,
             )
         ).T
@@ -530,9 +541,7 @@ if __name__ == "__main__":
                         temp.T,
                         precip.T,
                         std_dev.T,
-                        np.tile(m_f_snow, (temp.shape[1], 1)),
-                        np.tile(m_f_ice, (temp.shape[1], 1)),
-                        np.tile(m_refreeze, (temp.shape[1], 1)),
+                        params,
                     )
                 )
             )
@@ -638,39 +647,39 @@ if __name__ == "__main__":
     axs[3].legend()
     fig.savefig(f"{emulator_dir}/validation.pdf")
 
-    # Create observations using the forward model
-    obs_df = draw_samples(n_samples=100, random_seed=4)
-    temp_obs, precip_obs, _, _, _, _, _ = load_hirham_climate(thinning_factor=100)
-    std_dev_obs = np.zeros_like(temp_obs)
+    # # Create observations using the forward model
+    # obs_df = draw_samples(n_samples=100, random_seed=4)
+    # temp_obs, precip_obs, _, _, _, _, _ = load_hirham_climate(thinning_factor=100)
+    # std_dev_obs = np.zeros_like(temp_obs)
 
-    f_snow_obs = 3.44
-    f_ice_obs = 7.79
-    refreeze_obs = 0.0
-    f_true = [f_snow_obs, f_ice_obs, refreeze_obs]
+    # f_snow_obs = 3.44
+    # f_ice_obs = 7.79
+    # refreeze_obs = 0.0
+    # f_true = [f_snow_obs, f_ice_obs, refreeze_obs]
 
-    pdd = TorchPDDModel(
-        pdd_factor_snow=f_snow_obs,
-        pdd_factor_ice=f_ice_obs,
-        refreeze_snow=refreeze_obs,
-        refreeze_ice=0,
-        temp_snow=0.0,
-        temp_rain=0.0,
-    )
-    result = pdd(temp_obs, precip_obs, std_dev_obs)
+    # pdd = TorchPDDModel(
+    #     pdd_factor_snow=f_snow_obs,
+    #     pdd_factor_ice=f_ice_obs,
+    #     refreeze_snow=refreeze_obs,
+    #     refreeze_ice=0,
+    #     temp_snow=0.0,
+    #     temp_rain=0.0,
+    # )
+    # result = pdd(temp_obs, precip_obs, std_dev_obs)
 
-    A_obs = result["accu"]
-    M_obs = result["melt"]
-    R_obs = result["runoff"]
-    B_obs = result["smb"]
+    # A_obs = result["accu"]
+    # M_obs = result["melt"]
+    # R_obs = result["runoff"]
+    # B_obs = result["smb"]
 
-    Y_obs = torch.vstack((A_obs, M_obs, R_obs, B_obs)).T.type(torch.FloatTensor)
+    # Y_obs = torch.vstack((A_obs, M_obs, R_obs, B_obs)).T.type(torch.FloatTensor)
 
-    # Create observations using the forward model
-    mcmc_df = draw_samples(n_samples=1_000, random_seed=5)
-    temp_prior, precip_prior, _, _, _, _, _ = load_hirham_climate(
-        thinning_factor=thinning_factor
-    )
-    std_dev_prior = np.zeros_like(temp_prior)
+    # # Create observations using the forward model
+    # mcmc_df = draw_samples(n_samples=1_000, random_seed=5)
+    # temp_prior, precip_prior, _, _, _, _, _ = load_hirham_climate(
+    #     thinning_factor=thinning_factor
+    # )
+    # std_dev_prior = np.zeros_like(temp_prior)
 
     # Y_obs = torch.vstack(
     #     (
@@ -680,65 +689,65 @@ if __name__ == "__main__":
     #     )
     # ).T.type(torch.FloatTensor)
 
-    X_m = []
-    for k, row in mcmc_df.iterrows():
-        m_f_snow = row["f_snow"]
-        m_f_ice = row["f_ice"]
-        m_refreeze = row["refreeze"]
-        X_m.append(
-            torch.from_numpy(
-                np.hstack(
-                    (
-                        np.tile(m_f_snow, (temp_prior.shape[1], 1)),
-                        np.tile(m_f_ice, (temp_prior.shape[1], 1)),
-                        np.tile(m_refreeze, (temp_prior.shape[1], 1)),
-                    )
-                )
-            )
-        )
+    # X_m = []
+    # for k, row in mcmc_df.iterrows():
+    #     m_f_snow = row["f_snow"]
+    #     m_f_ice = row["f_ice"]
+    #     m_refreeze = row["refreeze"]
+    #     X_m.append(
+    #         torch.from_numpy(
+    #             np.hstack(
+    #                 (
+    #                     np.tile(m_f_snow, (temp_prior.shape[1], 1)),
+    #                     np.tile(m_f_ice, (temp_prior.shape[1], 1)),
+    #                     np.tile(m_refreeze, (temp_prior.shape[1], 1)),
+    #                 )
+    #             )
+    #         )
+    #     )
 
-    X_prior = torch.vstack(X_m).type(torch.FloatTensor)
-    X_min = X_prior.cpu().numpy().min(axis=0)
-    X_max = X_prior.cpu().numpy().max(axis=0)
+    # X_prior = torch.vstack(X_m).type(torch.FloatTensor)
+    # X_min = X_prior.cpu().numpy().min(axis=0)
+    # X_max = X_prior.cpu().numpy().max(axis=0)
 
-    sigma_hat = torch.tensor([0.1, 0.1, 0.1, 0.1])
-    sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.5, 0.5, 0.1, 0.1])
-    X_keys = ["f_snow", "f_ice", "refreeze"]
+    # sigma_hat = torch.tensor([0.1, 0.1, 0.1, 0.1])
+    # sh = torch.ones_like(Y_obs)
+    # sigma_hat = sh * torch.tensor([0.5, 0.5, 0.1, 0.1])
+    # X_keys = ["f_snow", "f_ice", "refreeze"]
 
-    burn = 1000
-    alpha = 100
-    alpha_b = 3.0
-    beta_b = 3.0
-    X_prior = beta.rvs(alpha_b, beta_b, size=(samples, 3)) * (X_max - X_min) + X_min
-    # Initial condition for MAP. Note that using 0 yields similar results
-    X_0 = torch.tensor(
-        X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
-    )
+    # burn = 1000
+    # alpha = 100
+    # alpha_b = 3.0
+    # beta_b = 3.0
+    # X_prior = beta.rvs(alpha_b, beta_b, size=(samples, 3)) * (X_max - X_min) + X_min
+    # # Initial condition for MAP. Note that using 0 yields similar results
+    # X_0 = torch.tensor(
+    #     X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
+    # )
 
-    start = time.process_time()
-    sampler = MALASampler(
-        e,
-        torch.from_numpy(temp_obs),
-        torch.from_numpy(precip_obs),
-        torch.from_numpy(std_dev_obs),
-        X_min,
-        X_max,
-        Y_obs,
-        sigma_hat,
-        posterior_dir=".",
-        device=device,
-        alpha=alpha,
-    )
-    X_map = sampler.find_MAP(X_0)
-    X_posterior = sampler.sample(
-        X_map,
-        samples=samples,
-        burn=burn,
-        save_interval=1000,
-        print_interval=100,
-    )
-    print(time.process_time() - start)
+    # start = time.process_time()
+    # sampler = MALASampler(
+    #     e,
+    #     torch.from_numpy(temp_obs),
+    #     torch.from_numpy(precip_obs),
+    #     torch.from_numpy(std_dev_obs),
+    #     X_min,
+    #     X_max,
+    #     Y_obs,
+    #     sigma_hat,
+    #     posterior_dir=".",
+    #     device=device,
+    #     alpha=alpha,
+    # )
+    # X_map = sampler.find_MAP(X_0)
+    # X_posterior = sampler.sample(
+    #     X_map,
+    #     samples=samples,
+    #     burn=burn,
+    #     save_interval=1000,
+    #     print_interval=100,
+    # )
+    # print(time.process_time() - start)
 
     # mala = MALAPDDSampler(e, emulator_dir=emulator_dir)
     # X_map = mala.find_MAP(
