@@ -591,370 +591,129 @@ if __name__ == "__main__":
     print(f"Training took {timer.time_elapsed():.0f}s")
     trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
 
-    # Out-Of-Set validation
+    # # Out-Of-Set validation
 
-    # Is there a better way to re-use the device for inference?
-    device = e.device.type
-    e.to(device)
+    # # Is there a better way to re-use the device for inference?
+    # device = e.device.type
+    # e.to(device)
 
-    # Load trained emulator
-    e = PDDEmulator.load_from_checkpoint(
-        f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
-        n_parameters=n_parameters,
-        n_outputs=n_outputs,
-    )
-
-    X_val = torch.vstack([d[0] for d in data_loader.val_data])
-    Y_val = torch.vstack([d[1] for d in data_loader.val_data])
-
-    e.eval()
-
-    Y_pred = e(X_val).detach().cpu()
-    rmse = [
-        np.sqrt(
-            mean_squared_error(
-                Y_pred.detach().cpu().numpy()[:, i], Y_val.detach().cpu().numpy()[:, i]
-            )
-        )
-        for i in range(Y_val.shape[1])
-    ]
-    print("RMSE")
-    print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}", f"R={rmse[2]:.6f}, B={rmse[3]:.6f}")
-
-    fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(12, 4))
-    fig.subplots_adjust(hspace=0.25, wspace=0.25)
-    axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Accumulation")
-    axs[1].plot(Y_val[:, 1], Y_pred[:, 1], ".", ms=0.25, label="Melt")
-    axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="Runoff")
-    axs[3].plot(Y_val[:, 3], Y_pred[:, 3], ".", ms=0.25, label="SMB")
-    for k in range(4):
-        m_max = np.ceil(np.maximum(Y_val[:, k].max(), Y_pred[:, k].max()))
-        m_min = np.floor(np.minimum(Y_val[:, k].min(), Y_pred[:, k].min()))
-        axs[k].set_xlim(m_min, m_max)
-        axs[k].set_ylim(m_min, m_max)
-    # axs[0].axis("equal")
-    # axs[1].axis("equal")
-    # axs[2].axis("equal")
-    axs[0].legend()
-    axs[1].legend()
-    axs[2].legend()
-    axs[3].legend()
-    fig.savefig(f"{emulator_dir}/validation.pdf")
-
-    # Create observations using the forward model
-    obs_df = draw_samples(n_samples=100, random_seed=4)
-    temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=100)
-    std_dev_obs = np.zeros_like(temp_obs)
-
-    f_snow_obs = 3.44
-    f_ice_obs = 7.79
-    refreeze_snow_obs = 0.4
-    refreeze_ice_obs = 0.0
-    temp_snow_obs = 0.0
-    temp_rain_obs = 1.0
-    f_true = [f_snow_obs, f_ice_obs, refreeze_snow_obs, refreeze_ice_obs, temp_snow_obs, temp_rain_obs]
-
-    pdd = TorchPDDModel(
-        pdd_factor_snow=f_snow_obs,
-        pdd_factor_ice=f_ice_obs,
-        refreeze_snow=refreeze_snow_obs,
-        refreeze_ice=refreeze_ice_obs,
-        temp_snow=temp_snow_obs,
-        temp_rain=temp_rain_obs,
-    )
-    result = pdd(temp_obs, precip_obs, std_dev_obs)
-
-    A_obs = result["accu"]
-    M_obs = result["melt"]
-    R_obs = result["runoff"]
-    F_obs = result["refreeze"]
-    B_obs = result["smb"]
-
-    Y_obs = torch.vstack((A_obs, M_obs, R_obs, F_obs, B_obs)).T.type(torch.FloatTensor)
-    # Y_obs = torch.vstack((torch.from_numpy(a_obs), torch.from_numpy(m_obs), torch.from_numpy(r_obs), torch.from_numpy(f_obs), torch.from_numpy(b_obs))).T.type(torch.FloatTensor)
-
-    # Create observations using the forward model
-    mcmc_df = draw_samples(n_samples=1_000, random_seed=5)
-
-    X_prior = torch.from_numpy(prior_df.values).type(torch.FloatTensor)
-    X_min = X_prior.cpu().numpy().min(axis=0)
-    X_max = X_prior.cpu().numpy().max(axis=0)
-
-    sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.01, 0.01, 0.01, 0.01, 0.01])
-    X_keys = ["f_snow", "f_ice", "refreeze_snow", "refreeze_ice", "temp_snow", "temp_rain"]
-
-    burn = 1000
-    alpha = 1
-    alpha_b = 3.0
-    beta_b = 3.0
-    X_prior = beta.rvs(alpha_b, beta_b, size=(samples, X_prior.shape[-1])) * (X_max - X_min) + X_min
-    # Initial condition for MAP. Note that using 0 yields similar results
-    X_0 = torch.tensor(
-        X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
-    )
-
-    start = time.process_time()
-    sampler = MALASampler(
-        e,
-        torch.from_numpy(temp_obs),
-        torch.from_numpy(precip_obs),
-        torch.from_numpy(std_dev_obs),
-        X_min,
-        X_max,
-        Y_obs,
-        sigma_hat,
-        posterior_dir=".",
-        device=device,
-        alpha=alpha,
-    )
-    X_map = sampler.find_MAP(X_0)
-    X_posterior = sampler.sample(
-        X_map,
-        samples=samples,
-        burn=burn,
-        save_interval=1000,
-        print_interval=100,
-    )
-    print(time.process_time() - start)
-
-    # mala = MALAPDDSampler(e, emulator_dir=emulator_dir)
-    # X_map = mala.find_MAP(
-    #     X_P_0, temp_obs, precip_obs, std_dev_obs, Y_target, X_P_min, X_P_max
+    # # Load trained emulator
+    # e = PDDEmulator.load_from_checkpoint(
+    #     f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
+    #     n_parameters=n_parameters,
+    #     n_outputs=n_outputs,
     # )
 
-    # # To reproduce the paper, n_iters should be 10^5
-    # X_posterior = mala.MALA(
+    # X_val = torch.vstack([d[0] for d in data_loader.val_data])
+    # Y_val = torch.vstack([d[1] for d in data_loader.val_data])
+
+    # e.eval()
+
+    # Y_pred = e(X_val).detach().cpu()
+    # rmse = [
+    #     np.sqrt(
+    #         mean_squared_error(
+    #             Y_pred.detach().cpu().numpy()[:, i], Y_val.detach().cpu().numpy()[:, i]
+    #         )
+    #     )
+    #     for i in range(Y_val.shape[1])
+    # ]
+    # print("RMSE")
+    # print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}", f"R={rmse[2]:.6f}, B={rmse[3]:.6f}")
+
+    # fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(12, 4))
+    # fig.subplots_adjust(hspace=0.25, wspace=0.25)
+    # axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Accumulation")
+    # axs[1].plot(Y_val[:, 1], Y_pred[:, 1], ".", ms=0.25, label="Melt")
+    # axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="Runoff")
+    # axs[3].plot(Y_val[:, 3], Y_pred[:, 3], ".", ms=0.25, label="SMB")
+    # for k in range(4):
+    #     m_max = np.ceil(np.maximum(Y_val[:, k].max(), Y_pred[:, k].max()))
+    #     m_min = np.floor(np.minimum(Y_val[:, k].min(), Y_pred[:, k].min()))
+    #     axs[k].set_xlim(m_min, m_max)
+    #     axs[k].set_ylim(m_min, m_max)
+    # # axs[0].axis("equal")
+    # # axs[1].axis("equal")
+    # # axs[2].axis("equal")
+    # axs[0].legend()
+    # axs[1].legend()
+    # axs[2].legend()
+    # axs[3].legend()
+    # fig.savefig(f"{emulator_dir}/validation.pdf")
+
+    # # Create observations using the forward model
+    # obs_df = draw_samples(n_samples=100, random_seed=4)
+    # temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=100)
+    # std_dev_obs = np.zeros_like(temp_obs)
+
+    # f_snow_obs = 3.44
+    # f_ice_obs = 7.79
+    # refreeze_snow_obs = 0.4
+    # refreeze_ice_obs = 0.0
+    # temp_snow_obs = 0.0
+    # temp_rain_obs = 1.0
+    # f_true = [f_snow_obs, f_ice_obs, refreeze_snow_obs, refreeze_ice_obs, temp_snow_obs, temp_rain_obs]
+
+    # pdd = TorchPDDModel(
+    #     pdd_factor_snow=f_snow_obs,
+    #     pdd_factor_ice=f_ice_obs,
+    #     refreeze_snow=refreeze_snow_obs,
+    #     refreeze_ice=refreeze_ice_obs,
+    #     temp_snow=temp_snow_obs,
+    #     temp_rain=temp_rain_obs,
+    # )
+    # result = pdd(temp_obs, precip_obs, std_dev_obs)
+
+    # A_obs = result["accu"]
+    # M_obs = result["melt"]
+    # R_obs = result["runoff"]
+    # F_obs = result["refreeze"]
+    # B_obs = result["smb"]
+
+    # Y_obs = torch.vstack((A_obs, M_obs, R_obs, F_obs, B_obs)).T.type(torch.FloatTensor)
+    # # Y_obs = torch.vstack((torch.from_numpy(a_obs), torch.from_numpy(m_obs), torch.from_numpy(r_obs), torch.from_numpy(f_obs), torch.from_numpy(b_obs))).T.type(torch.FloatTensor)
+
+    # # Create observations using the forward model
+    # mcmc_df = draw_samples(n_samples=1_000, random_seed=5)
+
+    # X_prior = torch.from_numpy(prior_df.values).type(torch.FloatTensor)
+    # X_min = X_prior.cpu().numpy().min(axis=0)
+    # X_max = X_prior.cpu().numpy().max(axis=0)
+
+    # sh = torch.ones_like(Y_obs)
+    # sigma_hat = sh * torch.tensor([0.01, 0.01, 0.01, 0.01, 0.01])
+    # X_keys = ["f_snow", "f_ice", "refreeze_snow", "refreeze_ice", "temp_snow", "temp_rain"]
+
+    # burn = 1000
+    # alpha = 1
+    # alpha_b = 3.0
+    # beta_b = 3.0
+    # X_prior = beta.rvs(alpha_b, beta_b, size=(samples, X_prior.shape[-1])) * (X_max - X_min) + X_min
+    # # Initial condition for MAP. Note that using 0 yields similar results
+    # X_0 = torch.tensor(
+    #     X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
+    # )
+
+    # start = time.process_time()
+    # sampler = MALASampler(
+    #     e,
+    #     torch.from_numpy(temp_obs),
+    #     torch.from_numpy(precip_obs),
+    #     torch.from_numpy(std_dev_obs),
+    #     X_min,
+    #     X_max,
+    #     Y_obs,
+    #     sigma_hat,
+    #     posterior_dir=".",
+    #     device=device,
+    #     alpha=alpha,
+    # )
+    # X_map = sampler.find_MAP(X_0)
+    # X_posterior = sampler.sample(
     #     X_map,
-    #     X_P_min,
-    #     X_P_max,
-    #     temp_obs,
-    #     precip_obs,
-    #     std_dev_obs,
-    #     Y_target,
-    #     n_iters=n_iters,
-    #     model_index=int(model_index),
+    #     samples=samples,
+    #     burn=burn,
     #     save_interval=1000,
     #     print_interval=100,
     # )
-
-    # X_std = X_P_std
-    # X_mean = X_P_mean
-    # frac = 1.0
-    # lw = 1
-    # color_prior = "b"
-    # X_list = []
-    # X_keys = ["f_snow", "f_ice", "refreeze"]
-    # X_Prior = (
-    #     X_P_prior.detach().cpu().numpy() * X_P_std[-3::].detach().cpu().numpy()
-    #     + X_P_mean[-3::].detach().cpu().numpy()
-    # )
-    # keys_dict = {
-    #     "f_ice": "$f_{\mathrm{ice}}$",
-    #     "f_snow": "$f_{\mathrm{snoe}}$",
-    #     "refreeze": "$r$",
-    # }
-    # p = Path(f"{emulator_dir}/posterior_samples/")
-    # print("Loading posterior samples\n")
-    # for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
-    #     print(f"  -- {m_file}")
-    #     df = pd.read_csv(m_file).sample(frac=frac)
-    #     if "Unnamed: 0" in df.columns:
-    #         df.drop(columns=["Unnamed: 0"], inplace=True)
-    #     model = m_file.name.split("_")[-1].split(".")[0]
-    #     df["Model"] = int(model)
-    #     X_list.append(df)
-
-    # print(f"Merging posteriors into dataframe")
-    # posterior_df = pd.concat(X_list)
-
-    # X_posterior = posterior_df.drop(columns=["Model"]).values
-    # C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
-    # Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
-
-    # fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 4))
-    # fig.subplots_adjust(hspace=0.25, wspace=0.25)
-    # for i in range(3):
-    #     min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
-    #     max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
-    #     bins = np.linspace(min_val, max_val, 100)
-    #     X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
-    #     X_posterior_hist, _ = np.histogram(X_posterior[:, i], bins, density=True)
-    #     b = 0.5 * (b[1:] + b[:-1])
-    #     axs[i].plot(
-    #         b,
-    #         X_posterior_hist * 0.5,
-    #         color="k",
-    #         linewidth=lw,
-    #         linestyle="solid",
-    #     )
-    #     axs[i].axvline(f_true[i], lw=3, color="orange", label="true")
-
-    # figfile = f"{emulator_dir}/posterior.pdf"
-    # print(f"Saving figure to {figfile}")
-    # fig.savefig(figfile)
-
-    # fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(5.4, 5.6))
-    # fig.subplots_adjust(hspace=0.0, wspace=0.0)
-    # for i in range(3):
-    #     for j in range(3):
-    #         if i > j:
-
-    #             axs[i, j].scatter(
-    #                 X_posterior[:, j],
-    #                 X_posterior[:, i],
-    #                 c="#31a354",
-    #                 s=0.05,
-    #                 alpha=0.01,
-    #                 label="Posterior",
-    #                 rasterized=True,
-    #             )
-
-    #             min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
-    #             max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
-    #             bins_y = np.linspace(min_val, max_val, 100)
-
-    #             min_val = min(X_Prior[:, j].min(), X_posterior[:, j].min())
-    #             max_val = max(X_Prior[:, j].max(), X_posterior[:, j].max())
-    #             bins_x = np.linspace(min_val, max_val, 100)
-
-    #             v = gaussian_kde(X_posterior[:, [j, i]].T)
-    #             bx = 0.5 * (bins_x[1:] + bins_x[:-1])
-    #             by = 0.5 * (bins_y[1:] + bins_y[:-1])
-    #             Bx, By = np.meshgrid(bx, by)
-
-    #             axs[i, j].contour(
-    #                 Bx,
-    #                 By,
-    #                 v(np.vstack((Bx.ravel(), By.ravel()))).reshape(Bx.shape),
-    #                 7,
-    #                 linewidths=0.5,
-    #                 colors="black",
-    #             )
-
-    #             axs[i, j].set_xlim(X_Prior[:, j].min(), X_Prior[:, j].max())
-    #             axs[i, j].set_ylim(X_Prior[:, i].min(), X_Prior[:, i].max())
-
-    #         elif i < j:
-    #             patch_upper = Polygon(
-    #                 np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]),
-    #                 facecolor=plt.cm.seismic(Cn_0[i, j]),
-    #             )
-    #             axs[i, j].add_patch(patch_upper)
-    #             if C_0[i, j] > -0.5:
-    #                 color = "black"
-    #             else:
-    #                 color = "white"
-    #             axs[i, j].text(
-    #                 0.5,
-    #                 0.5,
-    #                 "{0:.2f}".format(C_0[i, j]),
-    #                 fontsize=6,
-    #                 horizontalalignment="center",
-    #                 verticalalignment="center",
-    #                 transform=axs[i, j].transAxes,
-    #                 color=color,
-    #             )
-
-    #         elif i == j:
-
-    #             min_val = min(X_Prior[:, i].min(), X_posterior[:, i].min())
-    #             max_val = max(X_Prior[:, i].max(), X_posterior[:, i].max())
-    #             bins = np.linspace(min_val, max_val, 30)
-    #             X_prior_hist, b = np.histogram(X_Prior[:, i], bins, density=True)
-    #             X_posterior_hist, _ = np.histogram(
-    #                 X_posterior[:, i], bins, density=True
-    #             )
-    #             b = 0.5 * (b[1:] + b[:-1])
-
-    #             axs[i, j].plot(
-    #                 b,
-    #                 X_prior_hist,
-    #                 color=color_prior,
-    #                 linewidth=lw,
-    #                 label="Prior",
-    #                 linestyle="solid",
-    #             )
-
-    #             all_models = posterior_df["Model"].unique()
-    #             for k, m_model in enumerate(all_models):
-    #                 m_df = posterior_df[posterior_df["Model"] == m_model].drop(
-    #                     columns=["Model"]
-    #                 )
-    #                 X_model_posterior = m_df.values
-    #                 X_model_posterior_hist, _ = np.histogram(
-    #                     X_model_posterior[:, i], _, density=True
-    #                 )
-    #                 if k == 0:
-    #                     axs[i, j].plot(
-    #                         b,
-    #                         X_model_posterior_hist * 0.5,
-    #                         color="0.5",
-    #                         linewidth=lw * 0.25,
-    #                         linestyle="solid",
-    #                         alpha=0.5,
-    #                         label="Posterior (BayesBag)",
-    #                     )
-    #                 else:
-    #                     axs[i, j].plot(
-    #                         b,
-    #                         X_model_posterior_hist * 0.5,
-    #                         color="0.5",
-    #                         linewidth=lw * 0.25,
-    #                         linestyle="solid",
-    #                         alpha=0.5,
-    #                     )
-
-    #             axs[i, j].plot(
-    #                 b,
-    #                 X_posterior_hist,
-    #                 color="black",
-    #                 linewidth=lw,
-    #                 linestyle="solid",
-    #                 label="Posterior",
-    #             )
-
-    #             axs[i, j].set_xlim(min_val, max_val)
-
-    #         else:
-    #             axs[i, j].remove()
-
-    # for i, ax in enumerate(axs[:, 0]):
-    #     ax.set_ylabel(keys_dict[X_keys[i]])
-
-    # for j, ax in enumerate(axs[-1, :]):
-    #     ax.set_xlabel(keys_dict[X_keys[j]])
-    #     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
-    #     plt.setp(ax.xaxis.get_minorticklabels(), rotation=45)
-    #     if j > 0:
-    #         ax.tick_params(axis="y", which="both", length=0)
-    #         ax.yaxis.set_minor_formatter(NullFormatter())
-    #         ax.yaxis.set_major_formatter(NullFormatter())
-
-    # for ax in axs[:-1, 0].ravel():
-    #     ax.xaxis.set_major_formatter(NullFormatter())
-    #     ax.xaxis.set_minor_formatter(NullFormatter())
-    #     ax.tick_params(axis="x", which="both", length=0)
-
-    # for ax in axs[:-1, 1:].ravel():
-    #     ax.xaxis.set_major_formatter(NullFormatter())
-    #     ax.xaxis.set_minor_formatter(NullFormatter())
-    #     ax.yaxis.set_major_formatter(NullFormatter())
-    #     ax.yaxis.set_minor_formatter(NullFormatter())
-    #     ax.tick_params(axis="both", which="both", length=0)
-
-    # l_prior = Line2D([], [], c=color_prior, lw=lw, ls="solid", label="Prior")
-    # l_post = Line2D([], [], c="k", lw=lw, ls="solid", label="Posterior")
-    # l_post_b = Line2D(
-    #     [], [], c="0.25", lw=lw * 0.25, ls="solid", label="Posterior (BayesBag)"
-    # )
-
-    # legend = fig.legend(
-    #     handles=[l_prior, l_post, l_post_b], bbox_to_anchor=(0.3, 0.955)
-    # )
-    # legend.get_frame().set_linewidth(0.0)
-    # legend.get_frame().set_alpha(0.0)
-
-    # figfile = f"{emulator_dir}/emulator_posterior.pdf"
-    # print(f"Saving figure to {figfile}")
-    # fig.savefig(figfile)
+    # print(time.process_time() - start)
