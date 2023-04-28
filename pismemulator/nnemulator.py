@@ -156,6 +156,7 @@ class PDDEmulator(pl.LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
+            sync_dist=True
         )
         self.log(
             "test_loss",
@@ -163,6 +164,7 @@ class PDDEmulator(pl.LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
+            sync_dist=True
         )
 
 
