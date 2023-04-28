@@ -143,8 +143,8 @@ class PDDEmulator(pl.LightningModule):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
 
-        self.log("train_loss", self.train_ae(f_pred, f, o))
-        self.log("test_loss", self.test_ae(f_pred, f, o_0))
+        self.log("train_loss", self.train_ae(f_pred, f, o), sync_dist=True)
+        self.log("test_loss", self.test_ae(f_pred, f, o_0), sync_dist=True)
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
