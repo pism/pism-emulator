@@ -470,6 +470,9 @@ if __name__ == "__main__":
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
 
+    if not os.path.isdir(emulator_dir):
+        os.makedirs(emulator_dir)
+        os.makedirs(os.path.join(emulator_dir, "emulator"))
     posteriors = []
     for model_index in range(num_models):
         
@@ -477,9 +480,6 @@ if __name__ == "__main__":
         pl.seed_everything(0)
         np.random.seed(model_index)
 
-        if not os.path.isdir(emulator_dir):
-            os.makedirs(emulator_dir)
-            os.makedirs(os.path.join(emulator_dir, "emulator"))
 
         (temp, precip, a, m, r, b, f) = load_hirham_climate(thinning_factor=thinning_factor)
 
