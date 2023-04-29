@@ -603,20 +603,13 @@ if __name__ == "__main__":
 
         trainer.fit(e, train_loader, val_loader)
         print(f"Training took {timer.time_elapsed():.0f}s")
-        trainer.save_checkpoint(f"{emulator_dir}/emulator/emulator_{model_index}.ckpt")
+        torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
 
         # Out-Of-Set validation
 
         # Is there a better way to re-use the device for inference?
         device = e.device.type
         e.to(device)
-
-        # Load trained emulator
-        e = PDDEmulator.load_from_checkpoint(
-            f"{emulator_dir}/emulator/emulator_{model_index}.ckpt",
-            n_parameters=n_parameters,
-            n_outputs=n_outputs,
-        )
 
         X_val = torch.vstack([d[0] for d in data_loader.val_data])
         Y_val = torch.vstack([d[1] for d in data_loader.val_data])
