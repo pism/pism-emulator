@@ -35,6 +35,7 @@ import seaborn as sns
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
+# from lightning.pytorch.tuner import Tuner
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
@@ -593,6 +594,11 @@ if __name__ == "__main__":
         train_loader = data_loader.train_loader
         val_loader = data_loader.val_loader
 
+        #tuner = Tuner(trainer)
+
+        # Auto-scale batch size by growing it exponentially (default)
+        #tuner.scale_batch_size(model, mode="power")
+    
         # Train the emulator
 
         trainer.fit(e, train_loader, val_loader)

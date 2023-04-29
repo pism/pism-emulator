@@ -103,8 +103,8 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
         snowfall.sum(axis=0)[::thinning_factor],
         melt.sum(axis=0)[::thinning_factor],
         runoff.sum(axis=0)[::thinning_factor],
-        smb.sum(axis=0)[::thinning_factor],
         refreeze.sum(axis=0)[::thinning_factor],
+        smb.sum(axis=0)[::thinning_factor],
     )
 
 
