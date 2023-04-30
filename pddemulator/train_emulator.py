@@ -103,7 +103,7 @@ class MALASampler(object):
         alpha_b: Union[float, torch.tensor] = 3.0,
         beta_b: Union[float, torch.tensor] = 3.0,
         nu: Union[float, torch.tensor] = 1.0,
-        posterior_dir="./posterior",
+        emulator_dir="./emulator",
         device="cpu",
     ):
         super().__init__()
@@ -163,7 +163,7 @@ class MALASampler(object):
             if not isinstance(nu, torch.Tensor)
             else nu.to(device)
         )
-        self.posterior_dir = posterior_dir
+        self.emulator_dir = emulator_dir
         self.hessian_counter = 0
 
     def find_MAP(
@@ -363,7 +363,7 @@ class MALASampler(object):
             "****************************************************************************"
         )
 
-        posterior_dir = self.posterior_dir
+        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
 
@@ -380,22 +380,14 @@ class MALASampler(object):
             log_p = local_data[0].item()
             desc = f"sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f} "
             progress.set_description(desc=desc)
-
-            if (i + burn % save_interval == 0) & (i >= burn):
-                print("///////////////////////////////////////////////")
-                print(f"Saving samples")
-                print("///////////////////////////////////////////////")
+            if ((i + burn) % save_interval == 0) & (i >= burn):
                 X_posterior = torch.stack(m_vars).cpu().numpy()
                 df = pd.DataFrame(
                     data=X_posterior.astype("float32"),
                     columns=X_keys,
                 )
-                if out_format == "csv":
-                    df.to_csv(join(posterior_dir, f"X_posterior.csv.gz"))
-                elif out_format == "parquet":
-                    df.to_parquet(join(posterior_dir, f"X_posterior.parquet"))
-                else:
-                    raise NotImplementedError(f"{out_format} not implemented")
+
+                df.to_parquet(join(posterior_dir, f"X_posterior_model_{0}.parquet"))
 
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
@@ -646,7 +638,7 @@ if __name__ == "__main__":
         axs[1].legend()
         axs[2].legend()
         axs[3].legend()
-        fig.savefig(f"{emulator_dir}/validation.pdf")
+        fig.savefig(f"{emulator_dir}/validation_{model_index}.pdf")
 
         # Create observations using the forward model
         obs_df = draw_samples(n_samples=1_000, random_seed=4)
@@ -709,7 +701,7 @@ if __name__ == "__main__":
             X_max,
             Y_obs,
             sigma_hat,
-            posterior_dir=".",
+            emulator_dir=emulator_dir,
             device=device,
             alpha=alpha,
         )
