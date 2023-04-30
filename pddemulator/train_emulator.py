@@ -618,7 +618,7 @@ if __name__ == "__main__":
             for i in range(Y_val.shape[1])
         ]
         print("RMSE")
-        print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}", f"R={rmse[2]:.6f}, B={rmse[3]:.6f}")
+        print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}", f"R={rmse[2]:.6f}, F={rmse[3]:.6f}")
 
         fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(12, 4))
         fig.subplots_adjust(hspace=0.25, wspace=0.25)
@@ -641,8 +641,8 @@ if __name__ == "__main__":
         fig.savefig(f"{emulator_dir}/validation_{model_index}.pdf")
 
         # Create observations using the forward model
-        obs_df = draw_samples(n_samples=1_000, random_seed=4)
-        temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=100)
+        obs_df = draw_samples(n_samples=200, random_seed=4)
+        temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=200)
         std_dev_obs = np.zeros_like(temp_obs)
 
         f_snow_obs = 3.44
@@ -673,7 +673,7 @@ if __name__ == "__main__":
         # Y_obs = torch.vstack((torch.from_numpy(a_obs), torch.from_numpy(m_obs), torch.from_numpy(r_obs), torch.from_numpy(f_obs), torch.from_numpy(b_obs))).T.type(torch.FloatTensor)
 
         # Create observations using the forward model
-        mcmc_df = draw_samples(n_samples=1_000, random_seed=5)
+        mcmc_df = draw_samples(n_samples=250, random_seed=5)
 
         X_prior = torch.from_numpy(prior_df.values).type(torch.FloatTensor)
         X_min = X_prior.cpu().numpy().min(axis=0)
