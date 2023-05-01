@@ -174,9 +174,7 @@ class MALASampler(object):
         print_interval: int = 10,
     ):
         print("***********************************************")
-        print("***********************************************")
         print("Finding MAP point")
-        print("***********************************************")
         print("***********************************************")
         # Line search distances
         alphas = torch.logspace(-4, 0, 11)
@@ -264,9 +262,9 @@ class MALASampler(object):
         log_prior = torch.sum(
             (alpha_b - 1) * torch.log(X_bar)
             + (beta_b - 1) * torch.log(1 - X_bar)
-            # + torch.lgamma(alpha_b + beta_b)
-            # - torch.lgamma(alpha_b)
-            # - torch.lgamma(beta_b)
+            + torch.lgamma(alpha_b + beta_b)
+            - torch.lgamma(alpha_b)
+            - torch.lgamma(beta_b)
         )
         return -(self.alpha * log_likelihood + log_prior)
 
@@ -350,19 +348,12 @@ class MALASampler(object):
         print_interval: int = 50,
     ):
         print(
-            "****************************************************************************"
-        )
-        print(
-            "****************************************************************************"
+            "***************************************************"
         )
         print("Running Metropolis-Adjusted Langevin Algorithm")
         print(
-            "****************************************************************************"
+            "***************************************************"
         )
-        print(
-            "****************************************************************************"
-        )
-
         posterior_dir = f"{self.emulator_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
@@ -387,7 +378,7 @@ class MALASampler(object):
                     columns=X_keys,
                 )
 
-                df.to_parquet(join(posterior_dir, f"X_posterior_model_{0}.parquet"))
+                df.to_parquet(join(posterior_dir, f"X_posterior_model_{model_index}.parquet"))
 
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
@@ -443,7 +434,8 @@ if __name__ == "__main__":
     parser.add_argument("--burn", type=int, default=1_000)
     parser.add_argument("--train_size", type=float, default=0.8)
     parser.add_argument("--thinning_factor", type=int, default=1)
-
+    parser.add_argument("--validate", action="store_true", default=False)
+    
     parser = PDDEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
@@ -462,10 +454,12 @@ if __name__ == "__main__":
     train_size = args.train_size
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
+    validate = args.validate
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
+        
     posteriors = []
     for model_index in range(num_models):
         
@@ -474,15 +468,8 @@ if __name__ == "__main__":
         np.random.seed(model_index)
 
 
-        (temp, precip, a, m, r, b, f) = load_hirham_climate(thinning_factor=thinning_factor)
+        temp, precip, a, m, r, f, b = load_hirham_climate(thinning_factor=thinning_factor)
 
-        # temp = temp.reshape(1, -1)
-        # precip = precip.reshape(1, -1)
-        # a = a.reshape(1, -1)
-        # m = m.reshape(1, -1)
-        # r = r.reshape(1, -1)
-        # b = b.reshape(1, -1)
-        # f = f.reshape(1, -1)
 
         std_dev = np.zeros_like(temp)
         prior_df = draw_samples(n_samples=250)
@@ -592,12 +579,19 @@ if __name__ == "__main__":
         #tuner.scale_batch_size(model, mode="power")
     
         # Train the emulator
-
+        emulator_file = f"{emulator_dir}/emulator/emulator_{model_index}.h5"
         trainer.fit(e, train_loader, val_loader)
         print(f"Training took {timer.time_elapsed():.0f}s")
-        torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
+        torch.save(e.state_dict(), emulator_file)
 
         # Out-Of-Set validation
+        state_dict = torch.load(emulator_file)
+        e = PDDEmulator(
+            n_parameters,
+            n_outputs,
+            hparams,
+        )
+        e.load_state_dict(state_dict)
 
         # Is there a better way to re-use the device for inference?
         device = e.device.type
@@ -620,23 +614,27 @@ if __name__ == "__main__":
         print("RMSE")
         print(f"A={rmse[0]:.6f}, M={rmse[1]:.6f}", f"R={rmse[2]:.6f}, F={rmse[3]:.6f}")
 
-        fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(12, 4))
+        fig, axs = plt.subplots(nrows=1, ncols=5, figsize=(12, 4))
         fig.subplots_adjust(hspace=0.25, wspace=0.25)
         axs[0].plot(Y_val[:, 0], Y_pred[:, 0], ".", ms=0.25, label="Accumulation")
         axs[1].plot(Y_val[:, 1], Y_pred[:, 1], ".", ms=0.25, label="Melt")
         axs[2].plot(Y_val[:, 2], Y_pred[:, 2], ".", ms=0.25, label="Runoff")
         axs[3].plot(Y_val[:, 3], Y_pred[:, 3], ".", ms=0.25, label="Refreeze")
-        for k in range(4):
+        axs[4].plot(Y_val[:, 4], Y_pred[:, 4], ".", ms=0.25, label="SMB")
+        for k in range(5):
             m_max = np.ceil(np.maximum(Y_val[:, k].max(), Y_pred[:, k].max()))
             m_min = np.floor(np.minimum(Y_val[:, k].min(), Y_pred[:, k].min()))
             axs[k].set_xlim(m_min, m_max)
             axs[k].set_ylim(m_min, m_max)
-        # axs[0].axis("equal")
-        # axs[1].axis("equal")
-        # axs[2].axis("equal")
+        axs[0].axis("equal")
+        axs[1].axis("equal")
+        axs[2].axis("equal")
+        axs[3].axis("equal")
+        axs[4].axis("equal")
         axs[0].legend()
         axs[1].legend()
         axs[2].legend()
+        axs[3].legend()
         axs[3].legend()
         fig.savefig(f"{emulator_dir}/validation_{model_index}.pdf")
 
@@ -645,32 +643,34 @@ if __name__ == "__main__":
         temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=250)
         std_dev_obs = np.zeros_like(temp_obs)
 
-        f_snow_obs = 3.44
-        f_ice_obs = 7.79
-        refreeze_snow_obs = 0.4
-        refreeze_ice_obs = 0.0
-        temp_snow_obs = 0.4
-        temp_rain_obs = 1.0
-        f_true = [f_snow_obs, f_ice_obs, refreeze_snow_obs, refreeze_ice_obs, temp_snow_obs, temp_rain_obs]
+        if validate:
+            f_snow_val = 3.0
+            f_ice_val = 8.0
+            refreeze_snow_val = 0.4
+            refreeze_ice_val = 0.0
+            temp_snow_val = 0.0
+            temp_rain_val = 2.0
+            f_true = [f_snow_val, f_ice_val, refreeze_snow_val, refreeze_ice_val, temp_snow_val, temp_rain_val]
 
-        pdd = TorchPDDModel(
-            pdd_factor_snow=f_snow_obs,
-            pdd_factor_ice=f_ice_obs,
-            refreeze_snow=refreeze_snow_obs,
-            refreeze_ice=refreeze_ice_obs,
-            temp_snow=temp_snow_obs,
-            temp_rain=temp_rain_obs,
-        )
-        result = pdd(temp_obs, precip_obs, std_dev_obs)
+            pdd = TorchPDDModel(
+                pdd_factor_snow=f_snow_val,
+                pdd_factor_ice=f_ice_val,
+                refreeze_snow=refreeze_snow_val,
+                refreeze_ice=refreeze_ice_val,
+                temp_snow=temp_snow_val,
+                temp_rain=temp_rain_val,
+            )
+            result = pdd(temp_obs, precip_obs, std_dev_obs)
 
-        A_obs = result["accu"]
-        M_obs = result["melt"]
-        R_obs = result["runoff"]
-        F_obs = result["refreeze"]
-        B_obs = result["smb"]
+            A_obs = result["accu"]
+            M_obs = result["melt"]
+            R_obs = result["runoff"]
+            F_obs = result["refreeze"]
+            B_obs = result["smb"]
 
-        Y_obs = torch.vstack((A_obs, M_obs, R_obs, F_obs, B_obs)).T.type(torch.FloatTensor)
-        # Y_obs = torch.vstack((torch.from_numpy(a_obs), torch.from_numpy(m_obs), torch.from_numpy(r_obs), torch.from_numpy(f_obs), torch.from_numpy(b_obs))).T.type(torch.FloatTensor)
+            Y_obs = torch.vstack((A_obs, M_obs, R_obs, F_obs, B_obs)).T.type(torch.FloatTensor)
+        else:
+            Y_obs = torch.vstack((torch.from_numpy(a_obs), torch.from_numpy(m_obs), torch.from_numpy(r_obs), torch.from_numpy(f_obs), torch.from_numpy(b_obs))).T.type(torch.FloatTensor)
 
         # Create observations using the forward model
         mcmc_df = draw_samples(n_samples=250, random_seed=5)
@@ -713,18 +713,22 @@ if __name__ == "__main__":
             save_interval=1000,
             print_interval=100,
         )
-        print(time.process_time() - start)
-        posterior_df = pd.DataFrame(data=X_posterior, columns=["f_snow", "f_ice", "refreeze_snow", "refreeze_ice", "temp_snow", "temp_rain"])
+        elapsed_time = time.process_time() - start
+        print(f"Sampling took {elapsed_time:.0f}s")
+        posterior_df = pd.DataFrame(data=X_posterior, columns=X_keys)
         posterior_df["Model"] = model_index
         posteriors.append(posterior_df)
 
     posterior = pd.concat(posteriors).reset_index(drop=True)
-        
+
     g = sns.PairGrid(posterior.sample(frac=0.1), diag_sharey=False, hue="Model")
     g.map_upper(sns.scatterplot, s=5)
     g.map_lower(sns.kdeplot)
     g.map_diag(sns.kdeplot, lw=2)
     [g.axes.ravel()[k].set_xlim(X_min[k % 6], X_max[k % 6]) for k in range(36)]
-    [g.axes.ravel()[k].axvline(f_true[k % 6], color="k", ls="dashed", lw=3) for k in range(36)]
-    g.fig.savefig("posterior.pdf")
+    if validate:
+        [g.axes.ravel()[k].axvline(f_true[k % 6], color="k", ls="dashed", lw=2) for k in range(36)]
+        g.fig.savefig(os.path.join(emulator_dir, "posterior_validation.pdf"))
+    else:
+        g.fig.savefig(os.path.join(emulator_dir, "posterior.pdf"))
 

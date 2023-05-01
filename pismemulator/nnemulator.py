@@ -127,7 +127,7 @@ class PDDEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
+            "scheduler": ExponentialLR(optimizer, 0.99, verbose=False),
         }
 
         return [optimizer], [scheduler]
