@@ -340,6 +340,7 @@ class MALASampler(object):
     def sample(
         self,
         X,
+            num_chains: int = 1,
         burn: int = 1000,
         samples: int = 10001,
         h: float = 0.1,
@@ -512,6 +513,8 @@ if __name__ == "__main__":
         alpha=alpha,
     )
     X_map = sampler.find_MAP(X_0)
+    X_map_new = sampler.torch_find_MAP(X_0)
+    
     X_posterior = sampler.sample(
         X_map,
         samples=samples,

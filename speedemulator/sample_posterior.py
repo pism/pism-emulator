@@ -251,9 +251,8 @@ class MALASampler(object):
             # - torch.lgamma(alpha_b)
             # - torch.lgamma(beta_b)
         )
-        print(log_likelihood, log_prior)
-        log_likelihood = torch.distributions.StudentT(nu).log_prob(t).sum()
-        log_prior = torch.distributions.Beta(alpha_b, beta_b).log_prob(X_bar).sum()
+        # log_likelihood = torch.distributions.StudentT(nu).log_prob(t).sum()
+        # log_prior = torch.distributions.Beta(alpha_b, beta_b).log_prob(X_bar).sum()
         return -(self.alpha * log_likelihood + log_prior)
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
@@ -340,15 +339,9 @@ class MALASampler(object):
             "****************************************************************************"
         )
         print(
-            "****************************************************************************"
-        )
-        print(
             "Running Metropolis-Adjusted Langevin Algorithm for model {0}".format(
                 model_index
             )
-        )
-        print(
-            "****************************************************************************"
         )
         print(
             "****************************************************************************"
@@ -524,6 +517,7 @@ if __name__ == "__main__":
         ax.set_ylabel(None)
         ax.axes.yaxis.set_visible(False)
     fig.tight_layout()
+    
     d = {}
     for k, key in enumerate(dataset.X_keys):
         d[key] = X_posterior[:, k]

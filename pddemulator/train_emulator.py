@@ -641,8 +641,8 @@ if __name__ == "__main__":
         fig.savefig(f"{emulator_dir}/validation_{model_index}.pdf")
 
         # Create observations using the forward model
-        obs_df = draw_samples(n_samples=200, random_seed=4)
-        temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=200)
+        obs_df = draw_samples(n_samples=100, random_seed=4)
+        temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=250)
         std_dev_obs = np.zeros_like(temp_obs)
 
         f_snow_obs = 3.44
