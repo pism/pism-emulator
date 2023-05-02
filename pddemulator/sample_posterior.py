@@ -426,7 +426,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--checkpoint", default=False, action="store_true")
-    parser.add_argument("--data_dir", default="../tests/training_data")
+    parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=0)
@@ -445,7 +445,7 @@ if __name__ == "__main__":
     burn = args.burn
     batch_size = args.batch_size
     checkpoint = args.checkpoint
-    data_dir = args.data_dir
+    device = args.device
     emulator_dir = args.emulator_dir
     max_epochs = args.max_epochs
     num_models = args.num_models
@@ -484,7 +484,7 @@ if __name__ == "__main__":
         e.load_state_dict(state_dict)
 
         # Is there a better way to re-use the device for inference?
-        device = e.device.type
+        #device = e.device.type
         e.to(device)
 
         e.eval()
@@ -532,7 +532,7 @@ if __name__ == "__main__":
         X_max = X_prior.cpu().numpy().max(axis=0)
 
         sh = torch.ones_like(Y_obs)
-        sigma_hat = sh * torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1])
+        sigma_hat = sh * torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1]).to(device)
         X_keys = ["f_snow", "f_ice", "refreeze_snow", "refreeze_ice", "temp_snow", "temp_rain"]
 
         alpha_b = 3.0
