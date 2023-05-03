@@ -5,6 +5,7 @@ import time
 from argparse import ArgumentParser
 from os.path import join
 from typing import Union
+from collections import OrderedDict
 
 import arviz as az
 import lightning as pl
@@ -135,6 +136,9 @@ class mMALA(pl.LightningModule):
             else X_0,
             requires_grad=True,
         )
+        self.parameters = torch.nn.ParameterList([torch.nn.Parameter(X_0[i], requires_grad=True) for i in range(len(X_0))])
+    
+        #self.params = torch.nn.ParameterDict(OrderedDict(zip(X_keys, X_0)))
         if pretrain:
             self.pretrain()
         self.local_data = self.get_log_like_gradient_and_hessian(
@@ -278,6 +282,7 @@ class mMALA(pl.LightningModule):
         self.X = X
         self.X_posterior.append(X.cpu().detach().numpy())
         self.accept = self.beta * self.accept + (1 - self.beta) * s
+        print(X)
 
     def training_epoch_end(self, outputs):
 
