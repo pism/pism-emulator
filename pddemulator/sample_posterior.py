@@ -35,10 +35,8 @@ import seaborn as sns
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
+
 # from lightning.pytorch.tuner import Tuner
-from matplotlib.lines import Line2D
-from matplotlib.patches import Polygon
-from matplotlib.ticker import NullFormatter
 from pyDOE import lhs
 from scipy.special import gamma
 from scipy.stats import dirichlet, gaussian_kde
@@ -50,11 +48,9 @@ from scipy.stats import beta
 
 import time
 
-from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
+from pismemulator.nnemulator import PDDEmulator, PDDModel
 from pismemulator.datamodules import PDDDataModule
 from pismemulator.utils import load_hirham_climate_simple, load_hirham_climate
-
-np.random.seed(2)
 
 
 class MALASampler(object):
@@ -233,12 +229,14 @@ class MALASampler(object):
         self,
         X,
     ):
-        Xp = torch.vstack((
-            self.temp_obs,
-            self.precip_obs,
-            self.std_dev_obs,
-            torch.tile(X, (temp_obs.shape[1], 1)).T
-            )).T
+        Xp = torch.vstack(
+            (
+                self.temp_obs,
+                self.precip_obs,
+                self.std_dev_obs,
+                torch.tile(X, (temp_obs.shape[1], 1)).T,
+            )
+        ).T
 
         Y_pred = self.model(Xp)
 
@@ -280,6 +278,7 @@ class MALASampler(object):
             lamda_prime_inv = 1.0 / lamda_prime
             H = Q @ torch.diag(lamda_prime) @ Q.T
             Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
+            # The determinant is the product of the eigen values
             log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
             return log_pi, g, H, Hinv, log_det_Hinv
         else:
@@ -290,8 +289,17 @@ class MALASampler(object):
         return mu + L @ torch.randn(L.shape[0], device=device)
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
+        """
+        Log-likelihood for a multivariate Normal distribution
+
+        """
         # - 0.5 * log_det_Hinv - 0.5 * (Y - mu) @ H / (2*h) * (Y - mu)
-        return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+        k = Y.shape[0]
+        return (
+            -0.5 * log_det_cov
+            - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+            + k * torch.log(torch.tensor(2) * torch.pi)
+        )
 
     def MALA_step(self, X, h, local_data=None):
         if local_data is not None:
@@ -304,6 +312,13 @@ class MALASampler(object):
         X_.requires_grad = True
 
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
+        # Not always positive definite
+        logq = (
+            torch.distributions.MultivariateNormal(X, precision_matrix=H / (2 * h))
+            .log_prob(X_)
+            .sum()
+        )
+
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
@@ -347,13 +362,9 @@ class MALASampler(object):
         save_interval: int = 1000,
         print_interval: int = 50,
     ):
-        print(
-            "***************************************************"
-        )
+        print("***************************************************")
         print("Running Metropolis-Adjusted Langevin Algorithm")
-        print(
-            "***************************************************"
-        )
+        print("***************************************************")
         posterior_dir = f"{self.emulator_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
@@ -378,7 +389,9 @@ class MALASampler(object):
                     columns=X_keys,
                 )
 
-                df.to_parquet(join(posterior_dir, f"X_posterior_model_{model_index}.parquet"))
+                df.to_parquet(
+                    join(posterior_dir, f"X_posterior_model_{model_index}.parquet")
+                )
 
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
@@ -425,17 +438,15 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--alpha", type=float, default=1.0)
-    parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--burn", type=int, default=1_000)
-    parser.add_argument("--train_size", type=float, default=0.8)
-    parser.add_argument("--thinning_factor", type=int, default=1)
+    parser.add_argument("--thinning_factor", type=int, default=100)
     parser.add_argument("--validate", action="store_true", default=False)
-    
+
     parser = PDDEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
@@ -443,15 +454,11 @@ if __name__ == "__main__":
 
     alpha = args.alpha
     burn = args.burn
-    batch_size = args.batch_size
-    checkpoint = args.checkpoint
     device = args.device
     emulator_dir = args.emulator_dir
-    max_epochs = args.max_epochs
-    num_models = args.num_models
+    model_index = args.model_index
     num_workers = args.num_workers
     samples = args.samples
-    train_size = args.train_size
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
     validate = args.validate
@@ -463,124 +470,139 @@ if __name__ == "__main__":
     n_parameters = 42
     n_outputs = 5
     posteriors = []
-    for model_index in range(num_models):
-        
-        torch.manual_seed(0)
-        pl.seed_everything(0)
-        np.random.seed(model_index)
 
-        prior_df = draw_samples(n_samples=250)
+    torch.manual_seed(0)
+    pl.seed_everything(0)
+    np.random.seed(model_index)
 
-    
-        # Train the emulator
-        emulator_file = f"{emulator_dir}/emulator/emulator_{model_index}.h5"
+    prior_df = draw_samples(n_samples=250)
 
-        state_dict = torch.load(emulator_file)
-        e = PDDEmulator(
-            n_parameters,
-            n_outputs,
-            hparams,
-        )
-        e.load_state_dict(state_dict)
+    # Train the emulator
+    emulator_file = f"{emulator_dir}/emulator/emulator_{model_index}.h5"
 
-        # Is there a better way to re-use the device for inference?
-        #device = e.device.type
-        e.to(device)
+    state_dict = torch.load(emulator_file)
+    e = PDDEmulator(
+        n_parameters,
+        n_outputs,
+        hparams,
+    )
+    e.load_state_dict(state_dict)
 
-        e.eval()
+    # Is there a better way to re-use the device for inference?
+    # device = e.device.type
+    e.to(device)
 
+    e.eval()
 
-        # Create observations using the forward model
-        obs_df = draw_samples(n_samples=100, random_seed=4)
-        temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(thinning_factor=250)
-        std_dev_obs = np.zeros_like(temp_obs)
+    # Create observations using the forward model
+    obs_df = draw_samples(n_samples=100, random_seed=4)
+    temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(
+        thinning_factor=thinning_factor
+    )
+    std_dev_obs = np.zeros_like(temp_obs)
 
-        if validate:
-            f_snow_val = 3.0
-            f_ice_val = 8.0
-            refreeze_snow_val = 0.4
-            refreeze_ice_val = 0.0
-            temp_snow_val = 0.0
-            temp_rain_val = 2.0
-            f_true = [f_snow_val, f_ice_val, refreeze_snow_val, refreeze_ice_val, temp_snow_val, temp_rain_val]
-
-            pdd = TorchPDDModel(
-                pdd_factor_snow=f_snow_val,
-                pdd_factor_ice=f_ice_val,
-                refreeze_snow=refreeze_snow_val,
-                refreeze_ice=refreeze_ice_val,
-                temp_snow=temp_snow_val,
-                temp_rain=temp_rain_val,
-            )
-            result = pdd(temp_obs, precip_obs, std_dev_obs)
-
-            A_obs = result["accu"]
-            M_obs = result["melt"]
-            R_obs = result["runoff"]
-            F_obs = result["refreeze"]
-            B_obs = result["smb"]
-
-            Y_obs = torch.vstack((A_obs, M_obs, R_obs, F_obs, B_obs)).T.type(torch.FloatTensor).to(device)
-        else:
-            Y_obs = torch.vstack((torch.from_numpy(a_obs), torch.from_numpy(m_obs), torch.from_numpy(r_obs), torch.from_numpy(f_obs), torch.from_numpy(b_obs))).T.type(torch.FloatTensor).to(device)
-
-        # Create observations using the forward model
-        mcmc_df = draw_samples(n_samples=250, random_seed=5)
-
-        X_prior = torch.from_numpy(prior_df.values).type(torch.FloatTensor)
-        X_min = X_prior.cpu().numpy().min(axis=0)
-        X_max = X_prior.cpu().numpy().max(axis=0)
-
-        sh = torch.ones_like(Y_obs)
-        sigma_hat = sh * torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1]).to(device)
-        X_keys = ["f_snow", "f_ice", "refreeze_snow", "refreeze_ice", "temp_snow", "temp_rain"]
-
-        alpha_b = 3.0
-        beta_b = 3.0
-        X_prior = beta.rvs(alpha_b, beta_b, size=(samples, X_prior.shape[-1])) * (X_max - X_min) + X_min
-        # Initial condition for MAP. Note that using 0 yields similar results
-        X_0 = torch.tensor(
-            X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
-        )
-
-        start = time.process_time()
-        sampler = MALASampler(
-            e,
-            torch.from_numpy(temp_obs),
-            torch.from_numpy(precip_obs),
-            torch.from_numpy(std_dev_obs),
-            X_min,
-            X_max,
-            Y_obs,
-            sigma_hat,
-            emulator_dir=emulator_dir,
-            device=device,
-            alpha=alpha,
-        )
-        X_map = sampler.find_MAP(X_0)
-        X_posterior = sampler.sample(
-            X_map,
-            samples=samples,
-            burn=burn,
-            save_interval=1000,
-            print_interval=100,
-        )
-        elapsed_time = time.process_time() - start
-        print(f"Sampling took {elapsed_time:.0f}s")
-        posterior_df = pd.DataFrame(data=X_posterior, columns=X_keys)
-        posterior_df["Model"] = model_index
-        posteriors.append(posterior_df)
-
-    posterior = pd.concat(posteriors).reset_index(drop=True)
-
-    g = sns.PairGrid(posterior.sample(frac=0.1), diag_sharey=False, hue="Model")
-    g.map_upper(sns.scatterplot, s=5)
-    g.map_lower(sns.kdeplot)
-    g.map_diag(sns.kdeplot, lw=2)
-    [g.axes.ravel()[k].set_xlim(X_min[k % 6], X_max[k % 6]) for k in range(36)]
     if validate:
-        [g.axes.ravel()[k].axvline(f_true[k % 6], color="k", ls="dashed", lw=2) for k in range(36)]
-        g.fig.savefig(os.path.join(emulator_dir, "posterior_validation.pdf"))
-    else:
-        g.fig.savefig(os.path.join(emulator_dir, "posterior.pdf"))
+        f_snow_val = 3.0
+        f_ice_val = 8.0
+        refreeze_snow_val = 0.4
+        refreeze_ice_val = 0.0
+        temp_snow_val = 0.0
+        temp_rain_val = 2.0
+        f_true = [
+            f_snow_val,
+            f_ice_val,
+            refreeze_snow_val,
+            refreeze_ice_val,
+            temp_snow_val,
+            temp_rain_val,
+        ]
 
+        pdd = PDDModel(
+            pdd_factor_snow=f_snow_val,
+            pdd_factor_ice=f_ice_val,
+            refreeze_snow=refreeze_snow_val,
+            refreeze_ice=refreeze_ice_val,
+            temp_snow=temp_snow_val,
+            temp_rain=temp_rain_val,
+        )
+        result = pdd(temp_obs, precip_obs, std_dev_obs)
+
+        A_obs = result["accu"]
+        M_obs = result["melt"]
+        R_obs = result["runoff"]
+        F_obs = result["refreeze"]
+        B_obs = result["smb"]
+
+        Y_obs = (
+            torch.vstack((A_obs, M_obs, R_obs, F_obs, B_obs))
+            .T.type(torch.FloatTensor)
+            .to(device)
+        )
+    else:
+        Y_obs = (
+            torch.vstack(
+                (
+                    torch.from_numpy(a_obs),
+                    torch.from_numpy(m_obs),
+                    torch.from_numpy(r_obs),
+                    torch.from_numpy(f_obs),
+                    torch.from_numpy(b_obs),
+                )
+            )
+            .T.type(torch.FloatTensor)
+            .to(device)
+        )
+
+    # Create observations using the forward model
+    mcmc_df = draw_samples(n_samples=250, random_seed=5)
+
+    X_prior = torch.from_numpy(prior_df.values).type(torch.FloatTensor)
+    X_min = X_prior.cpu().numpy().min(axis=0)
+    X_max = X_prior.cpu().numpy().max(axis=0)
+
+    sh = torch.ones_like(Y_obs)
+    sigma_hat = sh * torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1]).to(device)
+    X_keys = [
+        "f_snow",
+        "f_ice",
+        "refreeze_snow",
+        "refreeze_ice",
+        "temp_snow",
+        "temp_rain",
+    ]
+
+    alpha_b = 3.0
+    beta_b = 3.0
+    X_prior = (
+        beta.rvs(alpha_b, beta_b, size=(samples, X_prior.shape[-1])) * (X_max - X_min)
+        + X_min
+    )
+    # Initial condition for MAP. Note that using 0 yields similar results
+    X_0 = torch.tensor(
+        X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
+    )
+
+    start = time.process_time()
+    sampler = MALASampler(
+        e,
+        torch.from_numpy(temp_obs),
+        torch.from_numpy(precip_obs),
+        torch.from_numpy(std_dev_obs),
+        X_min,
+        X_max,
+        Y_obs,
+        sigma_hat,
+        emulator_dir=emulator_dir,
+        device=device,
+        alpha=alpha,
+    )
+    X_map = sampler.find_MAP(X_0)
+    X_posterior = sampler.sample(
+        X_map,
+        samples=samples,
+        burn=burn,
+        save_interval=1000,
+        print_interval=100,
+    )
+    elapsed_time = time.process_time() - start
+    print(f"Sampling took {elapsed_time:.0f}s")

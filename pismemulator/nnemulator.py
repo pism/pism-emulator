@@ -117,7 +117,7 @@ class PDDEmulator(pl.LightningModule):
         parser.add_argument("--batch_size", type=int, default=128)
         parser.add_argument("--n_hidden", type=int, default=128)
         parser.add_argument("--n_layers", type=int, default=5)
-        parser.add_argument("--learning_rate", type=float, default=0.01)
+        parser.add_argument("--learning_rate", type=float, default=0.001)
 
         return parent_parser
 
@@ -156,7 +156,7 @@ class PDDEmulator(pl.LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
-            sync_dist=True
+            sync_dist=True,
         )
         self.log(
             "test_loss",
@@ -164,7 +164,7 @@ class PDDEmulator(pl.LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
-            sync_dist=True
+            sync_dist=True,
         )
 
 
@@ -424,8 +424,6 @@ class NNEmulator(pl.LightningModule):
         )
 
 
-
-
 class PDDStddevModel(torch.nn.modules.Module):
     """
 
@@ -469,8 +467,8 @@ class PDDStddevModel(torch.nn.modules.Module):
         temp_snow: float = 0.0,
         temp_rain: float = 0.0,
         std_dev: float = 0.0,
-        interpolate_rule: str ="linear",
-        interpolate_n: int =12,
+        interpolate_rule: str = "linear",
+        interpolate_n: int = 12,
         device="cpu",
         *args,
         **kwargs,
@@ -574,7 +572,7 @@ class PDDStddevModel(torch.nn.modules.Module):
         prec = torch.asarray(prec, device=device)
 
         # expand arrays to the largest shape
-        maxshape = max(temp.shape, prec.shape, stdv.shape)
+        maxshape = max(temp.shape, prec.shape)
         temp = self._expand(temp, maxshape)
         prec = self._expand(prec, maxshape)
 
@@ -585,7 +583,7 @@ class PDDStddevModel(torch.nn.modules.Module):
 
         # compute accumulation and pdd
         accu_rate = self.accu_rate(temp, prec)
-        inst_pdd = self.inst_pdd(temp, stdv)
+        inst_pdd = self.inst_pdd(temp)
 
         # initialize snow depth, melt and refreeze rates
         snow_depth = torch.zeros_like(temp)
@@ -683,7 +681,7 @@ class PDDStddevModel(torch.nn.modules.Module):
 
         return torch.from_numpy(newy).to(self.device)
 
-    def inst_pdd(self, temp, stdv):
+    def inst_pdd(self, temp):
         """Compute instantaneous positive degree days from temperature.
 
         Use near-surface air temperature and standard deviation to compute
@@ -700,7 +698,7 @@ class PDDStddevModel(torch.nn.modules.Module):
         positivepart = torch.greater(temp, 0) * temp
 
         # compute Calov and Greve (2005) integrand, ignoring division by zero
-        stdv = self.std_dev
+        stdv = torch.tensor(self.std_dev)
         normtemp = temp / (torch.sqrt(torch.tensor(2)) * stdv)
         calovgreve = stdv / torch.sqrt(torch.tensor(2) * torch.pi) * torch.exp(
             -(normtemp**2)
@@ -761,6 +759,7 @@ class PDDStddevModel(torch.nn.modules.Module):
         # return melt rates
         return (snow_melt, ice_melt)
 
+
 class PDDModel(torch.nn.modules.Module):
     """
 
@@ -801,8 +800,8 @@ class PDDModel(torch.nn.modules.Module):
         refreeze_ice: float = 0.0,
         temp_snow: float = 0.0,
         temp_rain: float = 0.0,
-        interpolate_rule: str ="linear",
-        interpolate_n: int =12,
+        interpolate_rule: str = "linear",
+        interpolate_n: int = 12,
         device="cpu",
         *args,
         **kwargs,

@@ -50,7 +50,7 @@ from scipy.stats import beta
 
 import time
 
-from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
+from pismemulator.nnemulator import PDDEmulator, PDDStddevModel
 from pismemulator.datamodules import PDDDataModule
 from pismemulator.utils import load_hirham_climate_simple, load_hirham_climate
 
@@ -393,6 +393,7 @@ def draw_samples(n_samples=250, random_seed=2):
         "refreeze_ice": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-2, scale=2.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
+        "std_dev": uniform(loc=0.0, scale=10.0),  # uniform between 0 and 1
     }
     # Names of all the variables
     keys = [x for x in distributions.keys()]
@@ -490,7 +491,7 @@ if __name__ == "__main__":
                 [np.tile(row[k], (temp.shape[1], 1)) for k in range(len(row))]
             )
 
-            pdd = TorchPDDModel(
+            pdd = PDDStddevModel(
                 pdd_factor_snow=m_f_snow,
                 pdd_factor_ice=m_f_ice,
                 refreeze_snow=m_refreeze_snow,

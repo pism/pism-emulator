@@ -108,6 +108,38 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
     )
 
 
+def load_hirham_climate_w_std_dev(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
+    """
+    Read and return Obs
+    """
+
+    with xr.open_dataset(file) as Obs:
+
+        stacked = Obs.stack(z=("rlat", "rlon"))
+        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
+
+        temp = stacked.tas.dropna(dim="z").values - 273.15
+        temp_std_dev = stacked.tas_std_dev.dropna(dim="z").values
+        rainfall = stacked.rainfall.dropna(dim="z").values * 365.242198781 / 1000
+        snowfall = stacked.snfall.dropna(dim="z").values * 365.242198781 / 1000
+        smb = stacked.gld.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        refreeze = ncl_stacked.rfrz.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        melt = stacked.snmel.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        runoff = stacked.rogl.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        precip = rainfall + snowfall
+
+    return (
+        temp[..., ::thinning_factor],
+        precip[..., ::thinning_factor],
+        temp_std_dev[..., ::thinning_factor],
+        snowfall.sum(axis=0)[::thinning_factor],
+        melt.sum(axis=0)[::thinning_factor],
+        runoff.sum(axis=0)[::thinning_factor],
+        refreeze.sum(axis=0)[::thinning_factor],
+        smb.sum(axis=0)[::thinning_factor],
+    )
+
+
 def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
     """
     Read and return Obs
@@ -382,7 +414,7 @@ def plot_eigenglaciers(
 def calc_bic(
     X: Union[list, np.ndarray, pd.core.frame.DataFrame],
     Y: Union[list, np.ndarray, pd.core.frame.DataFrame],
-):
+) -> float:
     """
     Bayesian Information Criterion
 
@@ -409,7 +441,7 @@ def calc_bic(
           The Bayesian Information Criterion (BIC)
     """
 
-    lm = LinearRegression(normalize=False)
+    lm = LinearRegression()
     lm.fit(X, Y)
     Y_hat = lm.predict(X)
     res = Y - Y_hat

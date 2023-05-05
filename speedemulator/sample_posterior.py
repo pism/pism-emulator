@@ -225,6 +225,15 @@ class MALASampler(object):
         X,
     ):
 
+        """
+        The log likelihood and log prior could be written as
+        log_likelihood = torch.distributions.StudentT(nu).log_prob(t).sum()
+        log_prior = torch.distributions.Beta(alpha_b, beta_b).log_prob(X_bar).sum()
+        but X_bar may contain negative values, for which the Beta distribution bails but torch.log
+        returns NaN, which is then just ignored. We could do
+        log_prior = torch.distributions.Beta(alpha_b, beta_b, validate_args=False).log_prob(X_bar).sum()
+
+        """
         Y_pred = 10 ** self.model(X, add_mean=True)
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
@@ -247,12 +256,11 @@ class MALASampler(object):
         log_prior = torch.sum(
             (alpha_b - 1) * torch.log(X_bar)
             + (beta_b - 1) * torch.log(1 - X_bar)
-            # + torch.lgamma(alpha_b + beta_b)
-            # - torch.lgamma(alpha_b)
-            # - torch.lgamma(beta_b)
+            + torch.lgamma(alpha_b + beta_b)
+            - torch.lgamma(alpha_b)
+            - torch.lgamma(beta_b)
         )
-        # log_likelihood = torch.distributions.StudentT(nu).log_prob(t).sum()
-        # log_prior = torch.distributions.Beta(alpha_b, beta_b).log_prob(X_bar).sum()
+        
         return -(self.alpha * log_likelihood + log_prior)
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
