@@ -169,49 +169,26 @@ class MALASampler(object):
         verbose: bool = False,
         print_interval: int = 10,
     ):
+        # L-BFGS
+        def closure():
+            opt.zero_grad()
+            loss = self.neg_log_prob(X)
+            loss.backward()
+            return loss
+
+        opt = torch.optim.LBFGS([X], lr=0.1, max_iter=25, line_search_fn="strong_wolfe")
+
         print("***********************************************")
-        print("Finding MAP point")
+        print("Finding Maximum A-Posterior (MAP) point")
         print("***********************************************")
-        # Line search distances
-        alphas = torch.logspace(-4, 0, 11)
-        # Find MAP point
+
         for i in range(n_iters):
-            log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
-                X, compute_hessian=True
-            )
-            # - f'(x) / f''(x)
-            # g = f'(x), Hinv = 1 / f''(x)
-            p = Hinv @ -g
-            # Line search
-            alpha_index = np.nanargmin(
-                [
-                    self.get_log_like_gradient_and_hessian(
-                        X + alpha * p, compute_hessian=False
-                    )
-                    .detach()
-                    .cpu()
-                    .numpy()
-                    for alpha in alphas
-                ]
-            )
-            gamma = alphas[alpha_index]
-            mu = X + gamma * p
-            X.data = mu.data
-            if verbose & (i % print_interval == 0):
-                print("===============================================")
-                print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
-                print(
-                    "".join(
-                        [
-                            f"{key}: {val:.3f}\n"
-                            for key, val in zip(
-                                X_keys,
-                                X.data.cpu().numpy(),
-                            )
-                        ]
-                    )
-                )
-        print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+            log_pi = self.neg_log_prob(X)
+            log_pi.backward()
+            opt.step(closure)
+            opt.zero_grad()
+
+        print(f"\nMAP point with log(P): {log_pi:.1f}\n")
         print(
             "".join(
                 [
@@ -225,7 +202,70 @@ class MALASampler(object):
         )
         return X
 
-    def V(
+    # def find_MAP(
+    #     self,
+    #     X: torch.tensor,
+    #     n_iters: int = 51,
+    #     verbose: bool = False,
+    #     print_interval: int = 10,
+    # ):
+    #     print("***********************************************")
+    #     print("Finding Maximum A-Posterior (MAP) point")
+    #     print("***********************************************")
+    #     # Line search distances
+    #     alphas = torch.logspace(-4, 0, 11)
+    #     # Find MAP point
+    #     for i in range(n_iters):
+    #         log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+    #             X, compute_hessian=True
+    #         )
+    #         # - f'(x) / f''(x)
+    #         # g = f'(x), Hinv = 1 / f''(x)
+    #         p = Hinv @ -g
+    #         # Line search
+    #         alpha_index = np.nanargmin(
+    #             [
+    #                 self.get_log_like_gradient_and_hessian(
+    #                     X + alpha * p, compute_hessian=False
+    #                 )
+    #                 .detach()
+    #                 .cpu()
+    #                 .numpy()
+    #                 for alpha in alphas
+    #             ]
+    #         )
+    #         gamma = alphas[alpha_index]
+    #         mu = X + gamma * p
+    #         X.data = mu.data
+    #         if verbose & (i % print_interval == 0):
+    #             print("===============================================")
+    #             print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
+    #             print(
+    #                 "".join(
+    #                     [
+    #                         f"{key}: {val:.3f}\n"
+    #                         for key, val in zip(
+    #                             X_keys,
+    #                             X.data.cpu().numpy(),
+    #                         )
+    #                     ]
+    #                 )
+    #             )
+    #     print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+    #     print(
+    #         "".join(
+    #             [
+    #                 f"{key}: {val:.3f}\n"
+    #                 for key, val in zip(
+    #                     X_keys,
+    #                     X.data.cpu().numpy(),
+    #                 )
+    #             ]
+    #         )
+    #     )
+    #     return X
+
+    def neg_log_prob(
         self,
         X,
     ):
@@ -267,11 +307,13 @@ class MALASampler(object):
         return -(self.alpha * log_likelihood + log_prior)
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-24, compute_hessian=False):
-        log_pi = self.V(X)
+        log_pi = self.neg_log_prob(X)
         if compute_hessian:
             self.hessian_counter += 1
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
-            H = torch.autograd.functional.hessian(self.V, X, create_graph=True)
+            H = torch.autograd.functional.hessian(
+                self.neg_log_prob, X, create_graph=True
+            )
             lamda, Q = torch.linalg.eig(H)
             lamda, Q = torch.real(lamda), torch.real(Q)
             lamda_prime = torch.sqrt(lamda**2 + eps)
@@ -377,7 +419,7 @@ class MALASampler(object):
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
             log_p = local_data[0].item()
-            desc = f"sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f} "
+            desc = f"sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f}"
             progress.set_description(desc=desc)
             if ((i + burn) % save_interval == 0) & (i >= burn):
                 X_posterior = torch.stack(m_vars).cpu().numpy()
