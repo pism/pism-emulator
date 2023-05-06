@@ -50,7 +50,7 @@ import time
 
 from pismemulator.nnemulator import PDDEmulator, PDDModel
 from pismemulator.datamodules import PDDDataModule
-from pismemulator.utils import load_hirham_climate_simple, load_hirham_climate
+from pismemulator.utils import load_hirham_climate_w_std_dev
 
 
 class MALASampler(object):
@@ -234,7 +234,7 @@ class MALASampler(object):
                 self.temp_obs,
                 self.precip_obs,
                 self.std_dev_obs,
-                torch.tile(X, (temp_obs.shape[1], 1)).T,
+                torch.tile(X, (self.temp_obs.shape[1], 1)).T,
             )
         ).T
 
@@ -312,13 +312,6 @@ class MALASampler(object):
         X_.requires_grad = True
 
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
-        # Not always positive definite
-        logq = (
-            torch.distributions.MultivariateNormal(X, precision_matrix=H / (2 * h))
-            .log_prob(X_)
-            .sum()
-        )
-
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
@@ -441,11 +434,15 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--n_interpolate", type=int, default=12)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--burn", type=int, default=1_000)
     parser.add_argument("--thinning_factor", type=int, default=100)
     parser.add_argument("--validate", action="store_true", default=False)
+    parser.add_argument(
+        "--training_file", type=str, default="DMI-HIRHAM5_1980_2020_MMS.nc"
+    )
+    parser.add_argument("--use_observed_std_dev", default=False, action="store_true")
 
     parser = PDDEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
@@ -457,17 +454,18 @@ if __name__ == "__main__":
     device = args.device
     emulator_dir = args.emulator_dir
     model_index = args.model_index
-    num_workers = args.num_workers
+    n_interpolate = args.n_interpolate
     samples = args.samples
     thinning_factor = args.thinning_factor
-    tb_logs_dir = f"{emulator_dir}/tb_logs"
+    training_file = args.training_file
+    use_observed_std_dev = args.use_observed_std_dev
     validate = args.validate
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    n_parameters = 42
+    n_parameters = 12 * 3 + 6
     n_outputs = 5
     posteriors = []
 
@@ -496,10 +494,11 @@ if __name__ == "__main__":
 
     # Create observations using the forward model
     obs_df = draw_samples(n_samples=100, random_seed=4)
-    temp_obs, precip_obs, a_obs, m_obs, r_obs, f_obs, b_obs = load_hirham_climate(
-        thinning_factor=thinning_factor
+    temp, precip, std_dev, a, m, r, f, b = load_hirham_climate_w_std_dev(
+        training_file, thinning_factor=thinning_factor
     )
-    std_dev_obs = np.zeros_like(temp_obs)
+    if not use_observed_std_dev:
+        std_dev = np.zeros_like(temp)
 
     if validate:
         f_snow_val = 3.0
@@ -524,29 +523,26 @@ if __name__ == "__main__":
             refreeze_ice=refreeze_ice_val,
             temp_snow=temp_snow_val,
             temp_rain=temp_rain_val,
+            n_interpolate=n_interpolate,
         )
-        result = pdd(temp_obs, precip_obs, std_dev_obs)
+        result = pdd(temp, precip, std_dev)
 
-        A_obs = result["accu"]
-        M_obs = result["melt"]
-        R_obs = result["runoff"]
-        F_obs = result["refreeze"]
-        B_obs = result["smb"]
+        A = result["accu"]
+        M = result["melt"]
+        R = result["runoff"]
+        F = result["refreeze"]
+        B = result["smb"]
 
-        Y_obs = (
-            torch.vstack((A_obs, M_obs, R_obs, F_obs, B_obs))
-            .T.type(torch.FloatTensor)
-            .to(device)
-        )
+        Y_obs = torch.vstack((A, M, R, F, B)).T.type(torch.FloatTensor).to(device)
     else:
         Y_obs = (
             torch.vstack(
                 (
-                    torch.from_numpy(a_obs),
-                    torch.from_numpy(m_obs),
-                    torch.from_numpy(r_obs),
-                    torch.from_numpy(f_obs),
-                    torch.from_numpy(b_obs),
+                    torch.from_numpy(a),
+                    torch.from_numpy(m),
+                    torch.from_numpy(r),
+                    torch.from_numpy(f),
+                    torch.from_numpy(b),
                 )
             )
             .T.type(torch.FloatTensor)
@@ -585,9 +581,9 @@ if __name__ == "__main__":
     start = time.process_time()
     sampler = MALASampler(
         e,
-        torch.from_numpy(temp_obs),
-        torch.from_numpy(precip_obs),
-        torch.from_numpy(std_dev_obs),
+        torch.from_numpy(temp),
+        torch.from_numpy(precip),
+        torch.from_numpy(std_dev),
         X_min,
         X_max,
         Y_obs,

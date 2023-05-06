@@ -95,39 +95,34 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--checkpoint", default=False, action="store_true")
-    parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--n_interpolate", type=int, default=52)
+    parser.add_argument("--n_interpolate", type=int, default=12)
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--samples", type=int, default=10_000)
-    parser.add_argument("--burn", type=int, default=1_000)
     parser.add_argument("--train_size", type=float, default=0.8)
     parser.add_argument("--thinning_factor", type=int, default=1)
     parser.add_argument(
         "--training_file", type=str, default="DMI-HIRHAM5_1980_2020_MMS.nc"
     )
+    parser.add_argument("--use_observed_std_dev", default=False, action="store_true")
 
     parser = PDDEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
     hparams = vars(args)
 
-    alpha = args.alpha
-    burn = args.burn
     batch_size = args.batch_size
     checkpoint = args.checkpoint
-    data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     n_interpolate = args.n_interpolate
     max_epochs = args.max_epochs
     model_index = args.model_index
     num_workers = args.num_workers
-    samples = args.samples
     train_size = args.train_size
     thinning_factor = args.thinning_factor
     training_file = args.training_file
     tb_logs_dir = f"{emulator_dir}/tb_logs"
+    use_observed_std_dev = args.use_observed_std_dev
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
@@ -141,10 +136,12 @@ if __name__ == "__main__":
         training_file, thinning_factor=thinning_factor
     )
 
+    if not use_observed_std_dev:
+        std_dev = np.zeros_like(temp)
+
     prior_df = draw_samples(n_samples=250)
 
     nt = temp.shape[0]
-
     X_m = []
     Y_m = []
     for k, row in prior_df.iterrows():

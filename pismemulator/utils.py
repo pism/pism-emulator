@@ -108,7 +108,9 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
     )
 
 
-def load_hirham_climate_w_std_dev(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
+def load_hirham_climate_w_std_dev(
+    file="DMI-HIRHAM5_1980_2020_MMS.nc", thinning_factor=1
+):
     """
     Read and return Obs
     """
@@ -118,14 +120,76 @@ def load_hirham_climate_w_std_dev(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
-        temp = stacked.tas.dropna(dim="z").values - 273.15
-        temp_std_dev = stacked.tas_std_dev.dropna(dim="z").values
-        rainfall = stacked.rainfall.dropna(dim="z").values * 365.242198781 / 1000
-        snowfall = stacked.snfall.dropna(dim="z").values * 365.242198781 / 1000
-        smb = stacked.gld.dropna(dim="z").values * 365.242198781 / 1000 / 12
-        refreeze = ncl_stacked.rfrz.dropna(dim="z").values * 365.242198781 / 1000 / 12
-        melt = stacked.snmel.dropna(dim="z").values * 365.242198781 / 1000 / 12
-        runoff = stacked.rogl.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        temp = (
+            np.hstack(
+                [d.dropna(dim="z").values for _, d in stacked.tas.groupby("time.year")]
+            )
+            - 273.15
+        )
+        temp_std_dev = np.hstack(
+            [
+                d.dropna(dim="z").values
+                for _, d in stacked.tas_std_dev.groupby("time.year")
+            ]
+        )
+        rainfall = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in stacked.rainfall.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+        )
+        snowfall = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in stacked.snfall.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+        )
+        smb = (
+            np.hstack(
+                [d.dropna(dim="z").values for _, d in stacked.gld.groupby("time.year")]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
+        refreeze = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in ncl_stacked.rfrz.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
+        melt = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in stacked.snmel.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
+        runoff = (
+            np.hstack(
+                [d.dropna(dim="z").values for _, d in stacked.rogl.groupby("time.year")]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
         precip = rainfall + snowfall
 
     return (
