@@ -354,11 +354,15 @@ class MALASampler(object):
         beta: float = 0.99,
         save_interval: int = 1000,
         print_interval: int = 50,
+        validate: bool = False,
     ):
         print("***************************************************")
         print("Running Metropolis-Adjusted Langevin Algorithm")
         print("***************************************************")
-        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
+        if validate:
+            posterior_dir = f"{self.emulator_dir}/posterior_samples_validate/"
+        else:
+            posterior_dir = f"{self.emulator_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
 
@@ -381,7 +385,6 @@ class MALASampler(object):
                     data=X_posterior.astype("float32"),
                     columns=X_keys,
                 )
-
                 df.to_parquet(
                     join(posterior_dir, f"X_posterior_model_{model_index}.parquet")
                 )
@@ -599,6 +602,7 @@ if __name__ == "__main__":
         burn=burn,
         save_interval=1000,
         print_interval=100,
+        validate=validate,
     )
     elapsed_time = time.process_time() - start
     print(f"Sampling took {elapsed_time:.0f}s")
