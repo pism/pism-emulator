@@ -162,46 +162,6 @@ class MALASampler(object):
         self.emulator_dir = emulator_dir
         self.hessian_counter = 0
 
-    def find_MAP(
-        self,
-        X: torch.tensor,
-        n_iters: int = 51,
-        verbose: bool = False,
-        print_interval: int = 10,
-    ):
-        # L-BFGS
-        def closure():
-            opt.zero_grad()
-            loss = self.neg_log_prob(X)
-            loss.backward()
-            return loss
-
-        opt = torch.optim.LBFGS([X], lr=0.1, max_iter=25, line_search_fn="strong_wolfe")
-
-        print("***********************************************")
-        print("Finding Maximum A-Posterior (MAP) point")
-        print("***********************************************")
-
-        for i in range(n_iters):
-            log_pi = self.neg_log_prob(X)
-            log_pi.backward()
-            opt.step(closure)
-            opt.zero_grad()
-
-        print(f"\nMAP point with log(P): {log_pi:.1f}\n")
-        print(
-            "".join(
-                [
-                    f"{key}: {val:.3f}\n"
-                    for key, val in zip(
-                        X_keys,
-                        X.data.cpu().numpy(),
-                    )
-                ]
-            )
-        )
-        return X
-
     # def find_MAP(
     #     self,
     #     X: torch.tensor,
@@ -209,49 +169,26 @@ class MALASampler(object):
     #     verbose: bool = False,
     #     print_interval: int = 10,
     # ):
+    #     L-BFGS
+    #     def closure():
+    #         opt.zero_grad()
+    #         loss = self.neg_log_prob(X)
+    #         loss.backward()
+    #         return loss
+
+    #     opt = torch.optim.LBFGS([X], lr=0.1, max_iter=25, line_search_fn="strong_wolfe")
+
     #     print("***********************************************")
     #     print("Finding Maximum A-Posterior (MAP) point")
     #     print("***********************************************")
-    #     # Line search distances
-    #     alphas = torch.logspace(-4, 0, 11)
-    #     # Find MAP point
+
     #     for i in range(n_iters):
-    #         log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
-    #             X, compute_hessian=True
-    #         )
-    #         # - f'(x) / f''(x)
-    #         # g = f'(x), Hinv = 1 / f''(x)
-    #         p = Hinv @ -g
-    #         # Line search
-    #         alpha_index = np.nanargmin(
-    #             [
-    #                 self.get_log_like_gradient_and_hessian(
-    #                     X + alpha * p, compute_hessian=False
-    #                 )
-    #                 .detach()
-    #                 .cpu()
-    #                 .numpy()
-    #                 for alpha in alphas
-    #             ]
-    #         )
-    #         gamma = alphas[alpha_index]
-    #         mu = X + gamma * p
-    #         X.data = mu.data
-    #         if verbose & (i % print_interval == 0):
-    #             print("===============================================")
-    #             print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
-    #             print(
-    #                 "".join(
-    #                     [
-    #                         f"{key}: {val:.3f}\n"
-    #                         for key, val in zip(
-    #                             X_keys,
-    #                             X.data.cpu().numpy(),
-    #                         )
-    #                     ]
-    #                 )
-    #             )
-    #     print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+    #         log_pi = self.neg_log_prob(X)
+    #         log_pi.backward()
+    #         opt.step(closure)
+    #         opt.zero_grad()
+
+    #     print(f"\nMAP point with log(P): {log_pi:.1f}\n")
     #     print(
     #         "".join(
     #             [
@@ -264,6 +201,69 @@ class MALASampler(object):
     #         )
     #     )
     #     return X
+
+    def find_MAP(
+        self,
+        X: torch.tensor,
+        n_iters: int = 51,
+        verbose: bool = False,
+        print_interval: int = 10,
+    ):
+        print("***********************************************")
+        print("Finding Maximum A-Posterior (MAP) point")
+        print("***********************************************")
+        # Line search distances
+        alphas = torch.logspace(-4, 0, 11)
+        # Find MAP point
+        for i in range(n_iters):
+            log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
+                X, compute_hessian=True
+            )
+            # - f'(x) / f''(x)
+            # g = f'(x), Hinv = 1 / f''(x)
+            p = Hinv @ -g
+            # Line search
+            alpha_index = np.nanargmin(
+                [
+                    self.get_log_like_gradient_and_hessian(
+                        X + alpha * p, compute_hessian=False
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    for alpha in alphas
+                ]
+            )
+            gamma = alphas[alpha_index]
+            mu = X + gamma * p
+            X.data = mu.data
+            if verbose & (i % print_interval == 0):
+                print("===============================================")
+                print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
+                print(
+                    "".join(
+                        [
+                            f"{key}: {val:.3f}\n"
+                            for key, val in zip(
+                                X_keys,
+                                X.data.cpu().numpy(),
+                            )
+                        ]
+                    )
+                )
+        print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
+        print(
+            "".join(
+                [
+                    f"{key}: {val:.3f}\n"
+                    for key, val in zip(
+                        X_keys,
+                        X.data.cpu().numpy(),
+                    )
+                ]
+            )
+        )
+        return X
 
     def neg_log_prob(
         self,

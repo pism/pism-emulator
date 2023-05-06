@@ -112,7 +112,22 @@ def load_hirham_climate_w_std_dev(
     file="DMI-HIRHAM5_1980_2020_MMS.nc", thinning_factor=1
 ):
     """
-    Read and return Obs
+    Read and return HIRHAM5 data grouped by year
+
+    n: monthly forcing (12
+
+    Returns
+
+    temp (n, m) array
+    precip (n, m) array
+    std_dev (n, m) array
+    a (1, m) array
+    m (1, m) array
+    r (1, m) array
+    f (1, m) array
+    b (1, m) array
+
+    (1, m)
     """
 
     with xr.open_dataset(file) as Obs:
