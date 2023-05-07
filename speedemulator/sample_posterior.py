@@ -260,7 +260,6 @@ class MALASampler(object):
             - torch.lgamma(alpha_b)
             - torch.lgamma(beta_b)
         )
-        
         return -(self.alpha * log_likelihood + log_prior)
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
@@ -286,7 +285,13 @@ class MALASampler(object):
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
         # - 0.5 * log_det_Hinv - 0.5 * (Y - mu) @ H / (2*h) * (Y - mu)
-        return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+        # Log-likelihood of a Multivariate Normal distribution
+        k = Y.shape[0]
+        return (
+            -0.5 * log_det_cov
+            - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+            + k * torch.log(torch.tensor(2) * torch.pi)
+        )
 
     def MALA_step(self, X, h, local_data=None):
         if local_data is not None:
@@ -525,7 +530,7 @@ if __name__ == "__main__":
         ax.set_ylabel(None)
         ax.axes.yaxis.set_visible(False)
     fig.tight_layout()
-    
+
     d = {}
     for k, key in enumerate(dataset.X_keys):
         d[key] = X_posterior[:, k]

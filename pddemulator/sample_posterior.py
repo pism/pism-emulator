@@ -557,7 +557,7 @@ if __name__ == "__main__":
         f_snow_val = 3.0
         f_ice_val = 8.0
         refreeze_snow_val = 0.4
-        refreeze_ice_val = 0.0
+        refreeze_ice_val = 0.4
         temp_snow_val = 0.0
         temp_rain_val = 2.0
         f_true = [

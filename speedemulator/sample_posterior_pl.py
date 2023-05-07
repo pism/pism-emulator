@@ -136,9 +136,11 @@ class mMALA(pl.LightningModule):
             else X_0,
             requires_grad=True,
         )
-        self.parameters = torch.nn.ParameterList([torch.nn.Parameter(X_0[i], requires_grad=True) for i in range(len(X_0))])
-    
-        #self.params = torch.nn.ParameterDict(OrderedDict(zip(X_keys, X_0)))
+        self.parameters = torch.nn.ParameterList(
+            [torch.nn.Parameter(X_0[i], requires_grad=True) for i in range(len(X_0))]
+        )
+
+        # self.params = torch.nn.ParameterDict(OrderedDict(zip(X_keys, X_0)))
         if pretrain:
             self.pretrain()
         self.local_data = self.get_log_like_gradient_and_hessian(
@@ -282,7 +284,7 @@ class mMALA(pl.LightningModule):
         self.X = X
         self.X_posterior.append(X.cpu().detach().numpy())
         self.accept = self.beta * self.accept + (1 - self.beta) * s
-        print(X)
+        print(X * self.X_std + self.X_mean)
 
     def training_epoch_end(self, outputs):
 
@@ -349,6 +351,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument("--burn", type=int, default=1000)
+    parser.add_argument("--samples", type=int, default=1_000)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
@@ -369,6 +372,7 @@ if __name__ == "__main__":
     model_index = args.model_index
     burn = args.burn
     out_format = args.out_format
+    n_samples = args.samples
     samples_file = args.samples_file
     target_file = args.target_file
     thinning_factor = args.thinning_factor
@@ -439,8 +443,8 @@ if __name__ == "__main__":
         X_keys=X_keys,
     )
     data_loader = DataLoader(
-        TensorDataset(torch.zeros_like(X_0)),
-        batch_size=len(X_0),
+        TensorDataset(torch.zeros(1, n_parameters)),
+        batch_size=1,
         num_workers=0,
     )  # bogus dataloader
 
@@ -455,7 +459,7 @@ if __name__ == "__main__":
         deterministic=True,
         num_sanity_val_steps=0,
     )
-    trainer.predict(mala, data_loader)
+    trainer.fit(mala, data_loader)
 
     print(time.process_time() - start)
     X_posterior = (
