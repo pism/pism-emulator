@@ -127,7 +127,6 @@ def load_hirham_climate_w_std_dev(
     f (1, m) array
     b (1, m) array
 
-    (1, m)
     """
 
     with xr.open_dataset(file) as Obs:
@@ -186,7 +185,7 @@ def load_hirham_climate_w_std_dev(
             / 1000
             / 12
         )
-        melt = (
+        snowmelt = (
             np.hstack(
                 [
                     d.dropna(dim="z").values
@@ -196,6 +195,9 @@ def load_hirham_climate_w_std_dev(
             * 365.242198781
             / 1000
             / 12
+        )
+        snowdepth = np.hstack(
+            [d.dropna(dim="z").values for _, d in stacked.sn.groupby("time.year")]
         )
         runoff = (
             np.hstack(
@@ -211,8 +213,9 @@ def load_hirham_climate_w_std_dev(
         temp[..., ::thinning_factor],
         precip[..., ::thinning_factor],
         temp_std_dev[..., ::thinning_factor],
+        snowdepth[..., ::thinning_factor] - snowdepth[0, ::thinning_factor],
         snowfall.sum(axis=0)[::thinning_factor],
-        melt.sum(axis=0)[::thinning_factor],
+        snowmelt.sum(axis=0)[::thinning_factor],
         runoff.sum(axis=0)[::thinning_factor],
         refreeze.sum(axis=0)[::thinning_factor],
         smb.sum(axis=0)[::thinning_factor],

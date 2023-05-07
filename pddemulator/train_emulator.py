@@ -132,9 +132,17 @@ if __name__ == "__main__":
     pl.seed_everything(0)
     np.random.seed(model_index)
 
-    temp, precip, std_dev, a, m, r, f, b = load_hirham_climate_w_std_dev(
-        training_file, thinning_factor=thinning_factor
-    )
+    (
+        temp,
+        precip,
+        std_dev,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = load_hirham_climate_w_std_dev(training_file, thinning_factor=thinning_factor)
 
     if not use_observed_std_dev:
         std_dev = np.zeros_like(temp)
@@ -167,7 +175,7 @@ if __name__ == "__main__":
         result = pdd(temp, precip, std_dev)
 
         A = result["accu"]
-        M = result["melt"]
+        SM = result["snow_melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]
@@ -175,7 +183,7 @@ if __name__ == "__main__":
         m_Y = torch.vstack(
             (
                 A,
-                M,
+                SM,
                 R,
                 F,
                 B,
