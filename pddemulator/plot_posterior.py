@@ -121,9 +121,10 @@ if __name__ == "__main__":
         posterior_df.reset_index(drop=True).sample(frac=0.1),
         diag_sharey=False,
         hue="Model",
+        palette="icefire",
     )
     g.map_upper(sns.scatterplot, s=5)
-    g.map_lower(sns.kdeplot)
+    g.map_lower(sns.kdeplot, levels=4)
     g.map_diag(sns.kdeplot, lw=2)
     if validate:
         g.fig.savefig(join(emulator_dir, "posterior_validation.pdf"))

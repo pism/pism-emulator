@@ -354,8 +354,28 @@ class MALASampler(object):
         X_.requires_grad = True
 
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
-        logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
-        logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
+        # logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
+        # logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
+        # logq = (
+        #     torch.distributions.MultivariateNormal(X_, precision_matrix=H / (2 * h))
+        #     .log_prob(X)
+        #     .sum()
+        # )
+        # logq_ = (
+        #     torch.distributions.MultivariateNormal(X, precision_matrix=H / (2 * h))
+        #     .log_prob(X_)
+        #     .sum()
+        # )
+        logq = (
+            torch.distributions.MultivariateNormal(X_, covariance_matrix=Hinv / (2 * h))
+            .log_prob(X)
+            .sum()
+        )
+        logq_ = (
+            torch.distributions.MultivariateNormal(X, covariance_matrix=Hinv / (2 * h))
+            .log_prob(X_)
+            .sum()
+        )
 
         # alpha = min(1, P * Q_ / (P_ * Q))
         # s = self.MetropolisHastingsAcceptance(log_pi, log_pi_, logq, logq_)

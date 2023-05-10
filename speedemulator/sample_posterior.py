@@ -304,6 +304,8 @@ class MALASampler(object):
         X_.requires_grad = True
 
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
+        # logq = torch.distributions.MultivariateNormal(X_, precision_matrix=H / (2 * h)).log_prob(X).sum()
+        # logq_ = torch.distributions.MultivariateNormal(X, precision_matrix=H / (2 * h)).log_prob(X_).sum()
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
@@ -521,7 +523,7 @@ if __name__ == "__main__":
     fig.subplots_adjust(wspace=0.05, hspace=0.5)
     for k in range(X_posterior.shape[1]):
         ax = axs.ravel()[k]
-        sns.kdeplot(
+  y      sns.kdeplot(
             X_posterior[:, k],
             ax=ax,
         )
