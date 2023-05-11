@@ -46,7 +46,7 @@ from scipy.stats import beta
 
 import time
 
-from pismemulator.nnemulator import PDDEmulator, PDDModel
+from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
 from pismemulator.datamodules import PDDDataModule
 from pismemulator.utils import load_hirham_climate_w_std_dev
 
@@ -59,8 +59,6 @@ def draw_samples(n_samples=250, random_seed=2):
     distributions = {
         "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
-        "refreeze_ice": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-2, scale=2.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
     }
@@ -155,19 +153,17 @@ if __name__ == "__main__":
     for k, row in prior_df.iterrows():
         m_f_snow = row["f_snow"]
         m_f_ice = row["f_ice"]
-        m_refreeze_snow = row["refreeze_snow"]
-        m_refreeze_ice = row["refreeze_ice"]
         m_temp_snow = row["temp_snow"]
         m_temp_rain = row["temp_rain"]
         params = np.hstack(
             [np.tile(row[k], (temp.shape[1], 1)) for k in range(len(row))]
         )
 
-        pdd = PDDModel(
+        pdd = TorchPDDModel(
             pdd_factor_snow=m_f_snow,
             pdd_factor_ice=m_f_ice,
-            refreeze_snow=m_refreeze_snow,
-            refreeze_ice=m_refreeze_ice,
+            refreeze_snow=0.5,
+            refreeze_ice=0.0,
             temp_snow=m_temp_snow,
             temp_rain=m_temp_rain,
             n_interpolate=n_interpolate,
@@ -175,7 +171,7 @@ if __name__ == "__main__":
         result = pdd(temp, precip, std_dev)
 
         A = result["accu"]
-        SM = result["snow_melt"]
+        M = result["melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]
@@ -183,7 +179,7 @@ if __name__ == "__main__":
         m_Y = torch.vstack(
             (
                 A,
-                SM,
+                M,
                 R,
                 F,
                 B,

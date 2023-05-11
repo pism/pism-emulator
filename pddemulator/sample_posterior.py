@@ -169,7 +169,6 @@ class MALASampler(object):
     #     verbose: bool = False,
     #     print_interval: int = 10,
     # ):
-    #     L-BFGS
     #     def closure():
     #         opt.zero_grad()
     #         loss = self.neg_log_prob(X)
@@ -461,8 +460,6 @@ def draw_samples(n_samples=250, random_seed=2):
     distributions = {
         "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
-        "refreeze_ice": uniform(loc=0, scale=1.0),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-2, scale=2.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
     }
@@ -530,7 +527,7 @@ if __name__ == "__main__":
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    n_parameters = 12 * 3 + 6
+    n_parameters = 12 * 3 + 4
     n_outputs = 5
     posteriors = []
 
@@ -576,8 +573,8 @@ if __name__ == "__main__":
     if validate:
         f_snow_val = 3.0
         f_ice_val = 8.0
-        refreeze_snow_val = 0.4
-        refreeze_ice_val = 0.4
+        refreeze_snow_val = 0.5
+        refreeze_ice_val = 0.5
         temp_snow_val = 0.0
         temp_rain_val = 2.0
         f_true = [
@@ -601,7 +598,7 @@ if __name__ == "__main__":
         result = pdd(temp, precip, std_dev)
 
         A = result["accu"]
-        SM = result["snow_melt"]
+        SM = result["melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]
@@ -634,8 +631,6 @@ if __name__ == "__main__":
     X_keys = [
         "f_snow",
         "f_ice",
-        "refreeze_snow",
-        "refreeze_ice",
         "temp_snow",
         "temp_rain",
     ]
