@@ -14,19 +14,16 @@ packages = ["pismemulator"]
 
 # Dependencies of pism-emulator
 requirements = [
-    "numpy>=1.10.0",
-    "scipy>=0.18.0",
-    "sklearn",
     "PyDOE",
     "SALib",
-    "pandas>=0.18.1",
+    "pandas",
     "pathlib",
-    "matplotlib>=2.2.2",
-    "openpyxl>=3.0.0",
-    "seaborn>=0.8",
+    "matplotlib",
+    "openpyxl",
+    "seaborn",
     "xarray",
     "torch",
-    "pytorch-lightning",
+    "lightning==1.9.0",
 ]
 
 setup(

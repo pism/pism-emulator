@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 import pylab as plt
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint, Timer
+from lightning.pytorch.callbacks import Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 
 # from lightning.pytorch.tuner import Tuner
@@ -59,6 +59,8 @@ def draw_samples(n_samples=250, random_seed=2):
     distributions = {
         "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
+        "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
+        "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-2, scale=2.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
     }
@@ -91,8 +93,6 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--alpha", type=float, default=1.0)
-    parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--n_interpolate", type=int, default=12)
     parser.add_argument("--model_index", type=int, default=0)
@@ -110,7 +110,6 @@ if __name__ == "__main__":
     hparams = vars(args)
 
     batch_size = args.batch_size
-    checkpoint = args.checkpoint
     emulator_dir = args.emulator_dir
     n_interpolate = args.n_interpolate
     max_epochs = args.max_epochs
@@ -153,6 +152,8 @@ if __name__ == "__main__":
     for k, row in prior_df.iterrows():
         m_f_snow = row["f_snow"]
         m_f_ice = row["f_ice"]
+        m_r_snow = row["refreeze_snow"]
+        m_r_ice = row["refreeze_ice"]
         m_temp_snow = row["temp_snow"]
         m_temp_rain = row["temp_rain"]
         params = np.hstack(
@@ -162,8 +163,8 @@ if __name__ == "__main__":
         pdd = TorchPDDModel(
             pdd_factor_snow=m_f_snow,
             pdd_factor_ice=m_f_ice,
-            refreeze_snow=0.5,
-            refreeze_ice=0.0,
+            refreeze_snow=m_r_snow,
+            refreeze_ice=m_r_ice,
             temp_snow=m_temp_snow,
             temp_rain=m_temp_rain,
             n_interpolate=n_interpolate,

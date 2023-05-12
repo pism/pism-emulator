@@ -18,6 +18,8 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import contextlib
+
 import os
 from argparse import ArgumentParser
 from os.path import join
@@ -35,6 +37,8 @@ import seaborn as sns
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
+import joblib
+from joblib import Parallel, delayed
 
 # from lightning.pytorch.tuner import Tuner
 from pyDOE import lhs
@@ -52,6 +56,22 @@ from pismemulator.nnemulator import PDDEmulator, PDDModel
 from pismemulator.datamodules import PDDDataModule
 from pismemulator.utils import load_hirham_climate_w_std_dev
 
+@contextlib.contextmanager
+def tqdm_joblib(tqdm_object):
+    """Context manager to patch joblib to report into tqdm progress bar given as argument"""
+
+    class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            tqdm_object.update(n=self.batch_size)
+            return super().__call__(*args, **kwargs)
+
+    old_batch_callback = joblib.parallel.BatchCompletionCallBack
+    joblib.parallel.BatchCompletionCallBack = TqdmBatchCompletionCallback
+    try:
+        yield tqdm_object
+    finally:
+        joblib.parallel.BatchCompletionCallBack = old_batch_callback
+        tqdm_object.close()
 
 class MALASampler(object):
     """
@@ -407,6 +427,7 @@ class MALASampler(object):
         self,
         X,
         burn: int = 1000,
+        chain: int = 0,
         samples: int = 10001,
         h: float = 0.1,
         h_max: float = 1.0,
@@ -417,9 +438,6 @@ class MALASampler(object):
         print_interval: int = 50,
         validate: bool = False,
     ):
-        print("***************************************************")
-        print("Running Metropolis-Adjusted Langevin Algorithm")
-        print("***************************************************")
         if validate:
             posterior_dir = f"{self.emulator_dir}/posterior_samples_validate/"
         else:
@@ -446,8 +464,9 @@ class MALASampler(object):
                     data=X_posterior.astype("float32"),
                     columns=X_keys,
                 )
+                df["Committee Member"] = model_index
                 df.to_parquet(
-                    join(posterior_dir, f"X_posterior_model_{model_index}.parquet")
+                    join(posterior_dir, f"X_posterior_model_{model_index}_chain_{chain}.parquet")
                 )
 
         X_posterior = torch.stack(m_vars).cpu().numpy()
@@ -460,6 +479,8 @@ def draw_samples(n_samples=250, random_seed=2):
     distributions = {
         "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
+        "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
+        "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-2, scale=2.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
     }
@@ -497,6 +518,7 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--n_interpolate", type=int, default=12)
+    parser.add_argument("--n_chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--burn", type=int, default=1_000)
     parser.add_argument("--thinning_factor", type=int, default=100)
@@ -517,6 +539,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     model_index = args.model_index
     n_interpolate = args.n_interpolate
+    n_chains = args.n_chains
     samples = args.samples
     thinning_factor = args.thinning_factor
     training_file = args.training_file
@@ -527,7 +550,7 @@ if __name__ == "__main__":
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    n_parameters = 12 * 3 + 4
+    n_parameters = 12 * 3 + 6
     n_outputs = 5
     posteriors = []
 
@@ -631,6 +654,8 @@ if __name__ == "__main__":
     X_keys = [
         "f_snow",
         "f_ice",
+        "refreeze_snow",
+        "refreeze_ice",
         "temp_snow",
         "temp_rain",
     ]
@@ -661,13 +686,20 @@ if __name__ == "__main__":
         alpha=alpha,
     )
     X_map = sampler.find_MAP(X_0)
-    X_posterior = sampler.sample(
-        X_map,
-        samples=samples,
-        burn=burn,
-        save_interval=1000,
-        print_interval=100,
-        validate=validate,
-    )
+
+    with tqdm_joblib(tqdm(desc=f"Sampling {samples} with {n_chains} chains", total=n_chains)) as progress_bar:
+        result = Parallel(n_jobs=n_chains)(
+            delayed(sampler.sample)(X_map,
+                                    samples=samples,
+                                    burn=burn,
+                                    chain=c,
+                                    save_interval=1000,
+                                    print_interval=100,
+                                    validate=validate,
+                                    )
+            for c in range(n_chains)
+        )
+        del progress_bar
+
     elapsed_time = time.process_time() - start
     print(f"Sampling took {elapsed_time:.0f}s")
