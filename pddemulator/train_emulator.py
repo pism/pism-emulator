@@ -50,7 +50,9 @@ from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
 from pismemulator.datamodules import PDDDataModule
 from pismemulator.utils import load_hirham_climate_w_std_dev
 
-np.random.seed(2)
+import warnings
+
+warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
 
 def draw_samples(n_samples=250, random_seed=2):
@@ -172,7 +174,7 @@ if __name__ == "__main__":
         result = pdd(temp, precip, std_dev)
 
         A = result["accu"]
-        M = result["melt"]
+        M = result["snow_melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]

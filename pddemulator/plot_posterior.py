@@ -16,10 +16,10 @@ from scipy.stats import beta, gaussian_kde
 import seaborn as sns
 from pismemulator.utils import param_keys_dict as keys_dict
 
-fontsize = 6
+fontsize = 8
 lw = 1.0
 aspect_ratio = 1
-markersize = 2
+markersize = 1
 
 params = {
     "backend": "ps",
@@ -47,47 +47,16 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
-    parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
-    )
     parser.add_argument("--fraction", type=float, default=0.1)
     parser.add_argument("--validate", default=False, action="store_true")
+    parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
 
     args = parser.parse_args()
 
     emulator_dir = args.emulator_dir
     frac = args.fraction
     out_format = args.out_format
-    samples_file = args.samples_file
     validate = args.validate
-
-    print("Loading prior samples\n")
-    samples = pd.read_csv(samples_file).drop(columns=["id"])
-
-    X = samples.values
-    X_mean = samples.mean(axis=0)
-    X_std = samples.std(axis=0)
-    X_keys = samples.keys()
-
-    n_samples = int(X.shape[0])
-    n_parameters = int(X.shape[1])
-
-    X_min = (((X.min(axis=0) - X_mean) / X_std - 1e-3) * X_std + X_mean).values
-    X_max = (((X.max(axis=0) - X_mean) / X_std + 1e-3) * X_std + X_mean).values
-
-    alpha_b = 3.0
-    beta_b = 3.0
-    X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(100000, n_parameters)) * (X_max - X_min) + X_min
-    )
-
-    color_post_0 = "#00B25F"
-    color_post_1 = "#132DD6"
-    color_prior = "#2171b5"
-    color_posterior = "k"
-    color_ensemble = "#BA9B00"
-    color_other = "#20484E0"
 
     X_list = []
     if validate:
@@ -105,27 +74,57 @@ if __name__ == "__main__":
         else:
             raise NotImplementedError(f"{out_format} not implemented")
 
-        df = df.sample(frac=frac)
         if "Unnamed: 0" in df.columns:
             df.drop(columns=["Unnamed: 0"], inplace=True)
-        model = m_file.name.split("_")[-1].split(".")[0]
-        df["Model"] = int(model)
         X_list.append(df)
 
     print(f"Merging posteriors into dataframe")
-    posterior_df = pd.concat(X_list)
+    posterior_df = pd.concat(X_list).reset_index(drop=True)
 
-    X_posterior = posterior_df.drop(columns=["Model"]).values
-
+    X_prior = {
+        "f_snow": [1, 6],  # uniform between 1 and 6
+        "f_ice": [3, 15],  # uniform between 3 and 15
+        "refreeze_snow": [0, 1],  # uniform between 0 and 1
+        "refreeze_ice": [0, 1],  # uniform between 0 and 1
+        "temp_snow": [-2, 0],  # uniform between 0 and 1
+        "temp_rain": [0, 4],  # uniform between 0 and 1
+    }
+    n_params = len(X_prior)
     g = sns.PairGrid(
-        posterior_df.reset_index(drop=True).sample(frac=0.1),
+        posterior_df.sample(frac=frac),
         diag_sharey=False,
-        hue="Model",
+        hue="Committee Member",
         palette="icefire",
+        height=1.0,
     )
-    g.map_upper(sns.scatterplot, s=5)
+    alpha_b = 3.0
+    beta_b = 3.0
+    X_min = np.array([x[0] for x in X_prior.values()])
+    X_max = np.array([x[1] for x in X_prior.values()])
+    rv = beta(alpha_b, beta_b)
+    x = np.linspace(0, 1, 101)
+    prior = rv.pdf(x)
+
+    g.map_upper(sns.scatterplot, s=2)
     g.map_lower(sns.kdeplot, levels=4)
-    g.map_diag(sns.kdeplot, lw=2)
+    g.map_diag(sns.kdeplot, lw=1)
+    [
+        g.axes[k, k].plot(
+            x * (X_max[k] - X_min[k]) + X_min[k],
+            (prior * (X_max[k] - X_min[k]) + X_min[k]) / 2,
+            lw=2,
+            color="r",
+        )
+        for k, _ in enumerate(X_prior.values())
+    ]
+    [
+        ax[k].set_xlim(X_min[k % n_params], X_max[k % n_params])
+        for k, ax in enumerate(g.axes)
+    ]
+    [
+        ax[k].set_ylim(X_min[k % n_params], X_max[k % n_params])
+        for k, ax in enumerate(g.axes)
+    ]
     if validate:
         g.fig.savefig(join(emulator_dir, "posterior_validation.pdf"))
     else:

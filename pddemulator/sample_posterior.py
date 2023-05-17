@@ -52,9 +52,10 @@ from scipy.stats import beta
 
 import time
 
-from pismemulator.nnemulator import PDDEmulator, PDDModel
+from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
 from pismemulator.datamodules import PDDDataModule
 from pismemulator.utils import load_hirham_climate_w_std_dev
+
 
 @contextlib.contextmanager
 def tqdm_joblib(tqdm_object):
@@ -72,6 +73,7 @@ def tqdm_joblib(tqdm_object):
     finally:
         joblib.parallel.BatchCompletionCallBack = old_batch_callback
         tqdm_object.close()
+
 
 class MALASampler(object):
     """
@@ -448,25 +450,27 @@ class MALASampler(object):
         local_data = None
         m_vars = []
         acc = acc_target
-        progress = tqdm(range(samples + burn))
+        progress = tqdm(range(samples + burn), position=chain, leave=False)
         for i in progress:
             X, local_data, s = self.MALA_step(X, h, local_data=local_data)
-            if i >= burn:
-                m_vars.append(X.detach())
+            m_vars.append(X.detach())
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
             log_p = local_data[0].item()
-            desc = f"sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f}"
+            desc = f"chain {chain} sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f}"
             progress.set_description(desc=desc)
             if ((i + burn) % save_interval == 0) & (i >= burn):
-                X_posterior = torch.stack(m_vars).cpu().numpy()
+                X_posterior = torch.stack(m_vars).cpu().numpy()[burn::]
                 df = pd.DataFrame(
                     data=X_posterior.astype("float32"),
                     columns=X_keys,
                 )
                 df["Committee Member"] = model_index
                 df.to_parquet(
-                    join(posterior_dir, f"X_posterior_model_{model_index}_chain_{chain}.parquet")
+                    join(
+                        posterior_dir,
+                        f"X_posterior_model_{model_index}_chain_{chain}.parquet",
+                    )
                 )
 
         X_posterior = torch.stack(m_vars).cpu().numpy()
@@ -513,12 +517,12 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--alpha", type=float, default=1.0)
+    parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--n_interpolate", type=int, default=12)
-    parser.add_argument("--n_chains", type=int, default=5)
+    parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--burn", type=int, default=1_000)
     parser.add_argument("--thinning_factor", type=int, default=100)
@@ -539,7 +543,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     model_index = args.model_index
     n_interpolate = args.n_interpolate
-    n_chains = args.n_chains
+    n_chains = args.chains
     samples = args.samples
     thinning_factor = args.thinning_factor
     training_file = args.training_file
@@ -609,7 +613,7 @@ if __name__ == "__main__":
             temp_rain_val,
         ]
 
-        pdd = PDDModel(
+        pdd = TorchPDDModel(
             pdd_factor_snow=f_snow_val,
             pdd_factor_ice=f_ice_val,
             refreeze_snow=refreeze_snow_val,
@@ -621,7 +625,7 @@ if __name__ == "__main__":
         result = pdd(temp, precip, std_dev)
 
         A = result["accu"]
-        SM = result["melt"]
+        SM = result["snow_melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]
@@ -687,19 +691,18 @@ if __name__ == "__main__":
     )
     X_map = sampler.find_MAP(X_0)
 
-    with tqdm_joblib(tqdm(desc=f"Sampling {samples} with {n_chains} chains", total=n_chains)) as progress_bar:
-        result = Parallel(n_jobs=n_chains)(
-            delayed(sampler.sample)(X_map,
-                                    samples=samples,
-                                    burn=burn,
-                                    chain=c,
-                                    save_interval=1000,
-                                    print_interval=100,
-                                    validate=validate,
-                                    )
-            for c in range(n_chains)
+    result = Parallel(n_jobs=n_chains)(
+        delayed(sampler.sample)(
+            X_map,
+            samples=samples,
+            burn=burn,
+            chain=c,
+            save_interval=1000,
+            print_interval=100,
+            validate=validate,
         )
-        del progress_bar
+        for c in range(n_chains)
+    )
 
     elapsed_time = time.process_time() - start
     print(f"Sampling took {elapsed_time:.0f}s")

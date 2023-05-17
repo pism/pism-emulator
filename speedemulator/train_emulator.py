@@ -34,6 +34,10 @@ from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import DNNEmulator, NNEmulator
 from pismemulator.utils import plot_eigenglaciers
 
+import warnings
+
+warnings.filterwarnings("ignore", ".*does not have many workers.*")
+
 
 def current_script_directory():
     import inspect
