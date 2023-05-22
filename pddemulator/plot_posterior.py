@@ -80,52 +80,106 @@ if __name__ == "__main__":
 
     print(f"Merging posteriors into dataframe")
     posterior_df = pd.concat(X_list).reset_index(drop=True)
+    # committee_df = posterior_df.copy(deep=True)
+    # committee_df["Committee Member"] = "Committee"
+    # posterior_df = pd.concat([posterior_df, committee_df]).reset_index(drop=True)
 
-    X_prior = {
+    X_priors = {
         "f_snow": [1, 6],  # uniform between 1 and 6
         "f_ice": [3, 15],  # uniform between 3 and 15
-        "refreeze_snow": [0, 1],  # uniform between 0 and 1
+        "refreeze_snow": [0.0, 1],  # uniform between 0 and 1
         "refreeze_ice": [0, 1],  # uniform between 0 and 1
-        "temp_snow": [-2, 0],  # uniform between 0 and 1
+        "temp_snow": [-2, 2],  # uniform between 0 and 1
         "temp_rain": [0, 4],  # uniform between 0 and 1
     }
-    n_params = len(X_prior)
-    g = sns.PairGrid(
-        posterior_df.sample(frac=frac),
-        diag_sharey=False,
-        hue="Committee Member",
-        palette="icefire",
-        height=1.0,
-    )
+    X_bounds = {
+        "f_snow": [0, 8],  # uniform between 1 and 6
+        "f_ice": [2, 16],  # uniform between 3 and 15
+        "refreeze_snow": [-0.1, 1.1],  # uniform between 0 and 1
+        "refreeze_ice": [-0.1, 1.1],  # uniform between 0 and 1
+        "temp_snow": [-3, 3],  # uniform between 0 and 1
+        "temp_rain": [-1, 5],  # uniform between 0 and 1
+    }
+    n_params = len(X_priors)
     alpha_b = 3.0
     beta_b = 3.0
-    X_min = np.array([x[0] for x in X_prior.values()])
-    X_max = np.array([x[1] for x in X_prior.values()])
+    X_min = np.array([x[0] for x in X_priors.values()])
+    X_max = np.array([x[1] for x in X_priors.values()])
     rv = beta(alpha_b, beta_b)
     x = np.linspace(0, 1, 101)
     prior = rv.pdf(x)
 
-    g.map_upper(sns.scatterplot, s=2)
+    X_lim_min = np.array([x[0] for x in X_bounds.values()])
+    X_lim_max = np.array([x[1] for x in X_bounds.values()])
+
+    print("Plotting committee members\n")
+    g = sns.PairGrid(
+        posterior_df.sample(frac=frac),
+        diag_sharey=False,
+        hue="Committee Member",
+        palette="crest",
+        height=1.0,
+    )
+
+    g.map_upper(sns.scatterplot, s=2, rasterized=True)
     g.map_lower(sns.kdeplot, levels=4)
     g.map_diag(sns.kdeplot, lw=1)
     [
-        g.axes[k, k].plot(
-            x * (X_max[k] - X_min[k]) + X_min[k],
-            (prior * (X_max[k] - X_min[k]) + X_min[k]) / 2,
-            lw=2,
-            color="r",
-        )
-        for k, _ in enumerate(X_prior.values())
-    ]
-    [
-        ax[k].set_xlim(X_min[k % n_params], X_max[k % n_params])
+        ax[k].set_xlim(X_lim_min[k % n_params], X_lim_max[k % n_params])
         for k, ax in enumerate(g.axes)
     ]
     [
-        ax[k].set_ylim(X_min[k % n_params], X_max[k % n_params])
+        ax[k].set_ylim(X_lim_min[k % n_params], X_lim_max[k % n_params])
         for k, ax in enumerate(g.axes)
     ]
     if validate:
-        g.fig.savefig(join(emulator_dir, "posterior_validation.pdf"))
+        outfile = join(emulator_dir, "posterior_validation.pdf")
     else:
-        g.fig.savefig(join(emulator_dir, "posterior.pdf"))
+        outfile = join(emulator_dir, "posterior.pdf")
+    print(f"Saving plot to {outfile}")
+    g.fig.savefig(outfile)
+
+    print("Plotting committee\n")
+
+    g = sns.PairGrid(
+        posterior_df.drop(columns=["Committee Member"]).sample(frac=frac),
+        diag_sharey=False,
+        height=1.0,
+    )
+
+    g.map_upper(sns.scatterplot, s=2, color="0.5", rasterized=True)
+    g.map_lower(sns.kdeplot, levels=4, color="k", linewidths=0.5)
+    g.map_diag(sns.kdeplot, lw=1.0, color="k")
+    [
+        g.axes[k, k].plot(
+            x * (X_max[k] - X_min[k]) + X_min[k],
+            prior * (X_max[k] - X_min[k]) / 2 + X_min[k],
+            color="r",
+            ls="dotted",
+        )
+        for k in range(n_params)
+    ]
+    [
+        g.axes[k, k].axvline(
+            x=posterior_df[key].median(), lw=0.75, color="k", ls="dashed"
+        )
+        for k, key in enumerate(X_priors)
+    ]
+    [
+        ax[k].set_xlim(X_lim_min[k % n_params], X_lim_max[k % n_params])
+        for k, ax in enumerate(g.axes)
+    ]
+    [
+        ax[k].set_ylim(X_lim_min[k % n_params], X_lim_max[k % n_params])
+        for k, ax in enumerate(g.axes)
+    ]
+    #  g.axes[-1, -1].legend()
+    g.fig.set_size_inches(6.2, 6.2)
+    g.fig.tight_layout()
+
+    if validate:
+        outfile = join(emulator_dir, "posterior_committee_validation.pdf")
+    else:
+        outfile = join(emulator_dir, "posterior_committee.pdf")
+    print(f"Saving plot to {outfile}")
+    g.fig.savefig(outfile)

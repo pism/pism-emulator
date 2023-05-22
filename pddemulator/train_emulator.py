@@ -63,7 +63,7 @@ def draw_samples(n_samples=250, random_seed=2):
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
         "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
-        "temp_snow": uniform(loc=-2, scale=2.0),  # uniform between 0 and 1
+        "temp_snow": uniform(loc=-2, scale=4.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
     }
     # Names of all the variables
