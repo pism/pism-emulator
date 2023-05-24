@@ -934,7 +934,13 @@ class TorchPDDModel(torch.nn.modules.Module):
 
             pot_snow_melt = ddf_snow * inst_pdd[i]
             # effective snow melt can't exceed amount of snow
-            s_min = torch.minimum(snow_depth[i], pot_snow_melt)
+            s_min = torch.zeros_like(pot_snow_melt)
+            for k in range(len(pot_snow_melt)):
+                if snow_depth[i, k] <= pot_snow_melt[k]:
+                    s_min[k] = snow_depth[i, k]
+                else:
+                    s_min[k] = pot_snow_melt[k]
+            # snow_melt_rate[i] = torch.minimum(snow_depth[i], pot_snow_melt)
             snow_melt_rate[i] = s_min
 
             # ice melt is proportional to excess snow melt
@@ -1089,7 +1095,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         return (snow_melt, ice_melt)
 
 
-class PDDModel():
+class PDDModel:
     """
 
     # Copyright (c) 2013--2018, Julien Seguinot <seguinot@vaw.baug.ethz.ch>
