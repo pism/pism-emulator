@@ -1250,13 +1250,18 @@ class TorchPDDModel(torch.nn.modules.Module):
         ddf_ice = self.pdd_factor_ice / 1000
 
         for i in range(len(temp)):
-            if i > 0:
-                snow_depth[i] = snow_depth[i - 1]
-            snow_depth[i] += accu_rate[i]
-            pot_snow_melt = ddf_snow * inst_pdd[i]
-            snow_melt_rate[i] = torch.minimum(snow_depth[i].clone(), pot_snow_melt)
+            if i == 0:
+                intermediate_snow_depth = accu_rate[i]
+            else:
+                intermediate_snow_depth = snow_depth[i - 1] + accu_rate[i]
+
+            potential_snow_melt = ddf_snow * inst_pdd[i]
+
+            snow_melt_rate[i] = torch.minimum(intermediate_snow_depth, potential_snow_melt)
+
             ice_melt_rate[i] = (pot_snow_melt - snow_melt_rate[i]) * ddf_ice / ddf_snow
-            snow_depth[i] -= snow_melt_rate[i]
+
+            snow_depth[i] = intermediate_snow_depth - snow_melt_rate[i]
 
         melt_rate = snow_melt_rate + ice_melt_rate
         snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
