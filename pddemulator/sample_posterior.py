@@ -525,6 +525,7 @@ if __name__ == "__main__":
     parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--burn", type=int, default=1_000)
+    parser.add_argument("--sigma", type=float, default=0.1)
     parser.add_argument("--thinning_factor", type=int, default=100)
     parser.add_argument("--validate", action="store_true", default=False)
     parser.add_argument(
@@ -545,6 +546,7 @@ if __name__ == "__main__":
     n_interpolate = args.n_interpolate
     n_chains = args.chains
     samples = args.samples
+    sigma = args.sigma
     thinning_factor = args.thinning_factor
     training_file = args.training_file
     use_observed_std_dev = args.use_observed_std_dev
@@ -599,11 +601,11 @@ if __name__ == "__main__":
 
     if validate:
         f_snow_val = 3.0
-        f_ice_val = 8.0
-        refreeze_snow_val = 0.5
-        refreeze_ice_val = 0.5
+        f_ice_val = 9.0
+        refreeze_snow_val = 0.6
+        refreeze_ice_val = 0.1
         temp_snow_val = 0.0
-        temp_rain_val = 2.0
+        temp_rain_val = 1.0
         f_true = [
             f_snow_val,
             f_ice_val,
@@ -654,7 +656,7 @@ if __name__ == "__main__":
     X_max = X_prior.cpu().numpy().max(axis=0)
 
     sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1]).to(device)
+    sigma_hat = sh * torch.tensor([sigma, sigma, sigma, sigma, sigma]).to(device)
     X_keys = [
         "f_snow",
         "f_ice",
@@ -701,7 +703,7 @@ if __name__ == "__main__":
             print_interval=100,
             validate=validate,
         )
-        for c in range(n_chains)
+        for c in tqdm(range(n_chains))
     )
 
     elapsed_time = time.process_time() - start

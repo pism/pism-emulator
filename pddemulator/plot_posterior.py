@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--fraction", type=float, default=0.1)
+    parser.add_argument("--fraction", type=float, default=0.01)
     parser.add_argument("--validate", default=False, action="store_true")
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
 
@@ -112,35 +112,24 @@ if __name__ == "__main__":
     X_lim_min = np.array([x[0] for x in X_bounds.values()])
     X_lim_max = np.array([x[1] for x in X_bounds.values()])
 
-    print("Plotting committee members\n")
-    g = sns.PairGrid(
-        posterior_df.sample(frac=frac),
-        diag_sharey=False,
-        hue="Committee Member",
-        palette="crest",
-        height=1.0,
-    )
-
-    g.map_upper(sns.scatterplot, s=2, rasterized=True)
-    g.map_lower(sns.kdeplot, levels=4)
-    g.map_diag(sns.kdeplot, lw=1)
-    [
-        ax[k].set_xlim(X_lim_min[k % n_params], X_lim_max[k % n_params])
-        for k, ax in enumerate(g.axes)
-    ]
-    [
-        ax[k].set_ylim(X_lim_min[k % n_params], X_lim_max[k % n_params])
-        for k, ax in enumerate(g.axes)
-    ]
-    if validate:
-        outfile = join(emulator_dir, "posterior_validation.pdf")
-    else:
-        outfile = join(emulator_dir, "posterior.pdf")
-    print(f"Saving plot to {outfile}")
-    g.fig.savefig(outfile)
+    X_val = {
+        "f_snow": 3.2,
+        "f_ice": 8.5,
+        "refreeze_snow": 0.6,
+        "refreeze_ice": 0.2,
+        "temp_snow": 0.0,
+        "temp_rain": 2.0,
+    }
 
     print("Plotting committee\n")
 
+    print("Posterior median\n")
+    print(
+        [
+            f"""{key}: {posterior_df[key].median():.2f}"""
+            for k, key in enumerate(X_priors)
+        ]
+    )
     g = sns.PairGrid(
         posterior_df.drop(columns=["Committee Member"]).sample(frac=frac),
         diag_sharey=False,
@@ -179,6 +168,10 @@ if __name__ == "__main__":
 
     if validate:
         outfile = join(emulator_dir, "posterior_committee_validation.pdf")
+        [
+            g.axes[k, k].axvline(x=X_val[key], lw=0.75, color="b", ls="dashed")
+            for k, key in enumerate(X_priors)
+        ]
     else:
         outfile = join(emulator_dir, "posterior_committee.pdf")
     print(f"Saving plot to {outfile}")

@@ -259,7 +259,6 @@ class MALASampler(object):
         self.model.refreeze_ice = X[3]
         self.model.temp_snow = X[4]
         self.model.temp_rain = X[5]
-
         result = self.model.forward(
             self.temp_obs,
             self.precip_obs,
@@ -267,12 +266,12 @@ class MALASampler(object):
         )
 
         A = result["accu"]
-        SM = result["snow_melt"]
+        M = result["snow_melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]
 
-        Y_pred = torch.vstack((A, SM, R, F, B)).T.type(torch.FloatTensor).to(device)
+        Y_pred = torch.vstack((A, M, R, F, B)).T.type(torch.FloatTensor).to(device)
 
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
@@ -314,7 +313,6 @@ class MALASampler(object):
             lamda_prime_inv = 1.0 / lamda_prime
             H = Q @ torch.diag(lamda_prime) @ Q.T
             Hinv = Q @ torch.diag(lamda_prime_inv) @ Q.T
-            # The determinant is the product of the eigen values
             log_det_Hinv = torch.sum(torch.log(lamda_prime_inv))
             return log_pi, g, H, Hinv, log_det_Hinv
         else:
@@ -346,20 +344,8 @@ class MALASampler(object):
         log_pi, g, H, Hinv, log_det_Hinv = local_data
         X_ = self.draw_sample(X, 2 * h * Hinv).detach()
         X_.requires_grad = True
-
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
-        # logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
-        # logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
-        # logq = (
-        #     torch.distributions.MultivariateNormal(X_, precision_matrix=H / (2 * h))
-        #     .log_prob(X)
-        #     .sum()
-        # )
-        # logq_ = (
-        #     torch.distributions.MultivariateNormal(X, precision_matrix=H / (2 * h))
-        #     .log_prob(X_)
-        #     .sum()
-        # )
+
         logq = (
             torch.distributions.MultivariateNormal(X_, covariance_matrix=Hinv / (2 * h))
             .log_prob(X)
@@ -371,10 +357,6 @@ class MALASampler(object):
             .sum()
         )
 
-        # alpha = min(1, P * Q_ / (P_ * Q))
-        # s = self.MetropolisHastingsAcceptance(log_pi, log_pi_, logq, logq_)
-        # if s == 1:
-        #     local_data = self.get_log_like_gradient_and_hessian(X, compute_hessian=True)
         log_alpha = -log_pi_ + logq_ + log_pi - logq
         alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
         u = torch.rand(1, device=device)
@@ -430,7 +412,7 @@ class MALASampler(object):
             acc = beta * acc + (1 - beta) * s
             h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
             log_p = local_data[0].item()
-            desc = f"chain {chain} sample: {(i):d}, accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f}"
+            desc = f"chain {chain}:  accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f}"
             progress.set_description(desc=desc)
             if ((i + burn) % save_interval == 0) & (i >= burn):
                 X_posterior = torch.stack(m_vars).cpu().numpy()[burn::]
@@ -494,7 +476,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--n_interpolate", type=int, default=12)
+    parser.add_argument("--n_interpolate", type=int, default=52)
     parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--burn", type=int, default=1_000)
@@ -503,7 +485,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--training_file", type=str, default="DMI-HIRHAM5_1980_2020_MMS.nc"
     )
-    parser.add_argument("--use_observed_std_dev", default=False, action="store_true")
+    parser.add_argument("--use_obs_sd", default=False, action="store_true")
 
     args = parser.parse_args()
     hparams = vars(args)
@@ -518,7 +500,7 @@ if __name__ == "__main__":
     samples = args.samples
     thinning_factor = args.thinning_factor
     training_file = args.training_file
-    use_observed_std_dev = args.use_observed_std_dev
+    use_observed_std_dev = args.use_obs_sd
     validate = args.validate
 
     if not os.path.isdir(emulator_dir):
@@ -543,7 +525,7 @@ if __name__ == "__main__":
         std_dev,
         snow_depth,
         accumulation,
-        snow_melt,
+        melt,
         runoff,
         refreeze,
         smb,
@@ -552,10 +534,10 @@ if __name__ == "__main__":
         std_dev = np.zeros_like(temp)
 
     if validate:
-        f_snow_val = 3.0
-        f_ice_val = 8.0
-        refreeze_snow_val = 0.5
-        refreeze_ice_val = 0.5
+        f_snow_val = 3.2
+        f_ice_val = 8.5
+        refreeze_snow_val = 0.6
+        refreeze_ice_val = 0.2
         temp_snow_val = 0.0
         temp_rain_val = 2.0
         f_true = [
@@ -579,18 +561,18 @@ if __name__ == "__main__":
         result = pdd(temp, precip, std_dev)
 
         A = result["accu"]
-        SM = result["snow_melt"]
+        M = result["melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]
 
-        Y_obs = torch.vstack((A, SM, R, F, B)).T.type(torch.FloatTensor).to(device)
+        Y_obs = torch.vstack((A, M, R, F, B)).T.type(torch.FloatTensor).to(device)
     else:
         Y_obs = (
             torch.vstack(
                 (
                     torch.from_numpy(accumulation),
-                    torch.from_numpy(snow_melt),
+                    torch.from_numpy(melt),
                     torch.from_numpy(runoff),
                     torch.from_numpy(refreeze),
                     torch.from_numpy(smb),
@@ -600,15 +582,12 @@ if __name__ == "__main__":
             .to(device)
         )
 
-    # Create observations using the forward model
-    mcmc_df = draw_samples(n_samples=250, random_seed=5)
-
     X_prior = torch.from_numpy(prior_df.values).type(torch.FloatTensor)
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
     sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.1, 0.1, 0.1, 0.1, 0.1]).to(device)
+    sigma_hat = sh * torch.tensor([0.01, 0.01, 0.01, 0.01, 0.01]).to(device)
     X_keys = [
         "f_snow",
         "f_ice",
@@ -621,7 +600,7 @@ if __name__ == "__main__":
     alpha_b = 3.0
     beta_b = 3.0
     X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(samples, X_prior.shape[-1])) * (X_max - X_min)
+        beta.rvs(alpha_b, beta_b, size=(10_000, X_prior.shape[-1])) * (X_max - X_min)
         + X_min
     )
     # Initial condition for MAP. Note that using 0 yields similar results
