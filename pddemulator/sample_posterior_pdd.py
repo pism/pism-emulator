@@ -189,7 +189,7 @@ class MALASampler(object):
     def find_MAP(
         self,
         X: torch.tensor,
-        n_iters: int = 51,
+        n_iters: int = 26,
         verbose: bool = False,
         print_interval: int = 10,
     ):
@@ -199,7 +199,7 @@ class MALASampler(object):
         # Line search distances
         alphas = torch.logspace(-4, 0, 11)
         # Find MAP point
-        for i in range(n_iters):
+        for i in tqdm(range(n_iters)):
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
                 X, compute_hessian=True
             )
@@ -266,7 +266,7 @@ class MALASampler(object):
         )
 
         A = result["accu"]
-        M = result["snow_melt"]
+        M = result["melt"]
         R = result["runoff"]
         F = result["refreeze"]
         B = result["smb"]
@@ -440,8 +440,8 @@ def draw_samples(n_samples=250, random_seed=2):
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
         "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
-        "temp_snow": uniform(loc=-2, scale=4.0),  # uniform between 0 and 1
-        "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
+        "temp_snow": uniform(loc=-1.0, scale=2.0),  # uniform between 0 and 1
+        "temp_rain": uniform(loc=1.0, scale=2.0),  # uniform between 0 and 1
     }
     # Names of all the variables
     keys = [x for x in distributions.keys()]
@@ -587,7 +587,7 @@ if __name__ == "__main__":
     X_max = X_prior.cpu().numpy().max(axis=0)
 
     sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.01, 0.01, 0.01, 0.01, 0.01]).to(device)
+    sigma_hat = sh * torch.tensor([0.001, 0.001, 0.001, 0.001, 0.001]).to(device)
     X_keys = [
         "f_snow",
         "f_ice",

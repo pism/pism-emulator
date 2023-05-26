@@ -24,6 +24,11 @@ requirements = [
     "xarray",
     "torch",
     "lightning==1.9.0",
+    "joblib",
+    "pyarrow",
+    "fastparquet",
+    "scikit-learn",
+    "tensorboard",
 ]
 
 setup(

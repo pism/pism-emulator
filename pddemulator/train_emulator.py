@@ -104,7 +104,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--training_file", type=str, default="DMI-HIRHAM5_1980_2020_MMS.nc"
     )
-    parser.add_argument("--use_observed_std_dev", default=False, action="store_true")
+    parser.add_argument("--use_obs_sd", default=False, action="store_true")
 
     parser = PDDEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     thinning_factor = args.thinning_factor
     training_file = args.training_file
     tb_logs_dir = f"{emulator_dir}/tb_logs"
-    use_observed_std_dev = args.use_observed_std_dev
+    use_observed_std_dev = args.use_obs_sd
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
