@@ -19,38 +19,32 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
+import time
+import warnings
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
-
 from typing import Union
 
 import lightning as pl
-from lightning import LightningModule
-
 import numpy as np
 import pandas as pd
 import pylab as plt
 import torch
+from lightning import LightningModule
 from lightning.pytorch.callbacks import Timer
 from lightning.pytorch.loggers import TensorBoardLogger
-
 # from lightning.pytorch.tuner import Tuner
 from pyDOE import lhs
-from scipy.stats import dirichlet
+from scipy.stats import beta, dirichlet
 from scipy.stats.distributions import uniform
 from sklearn.metrics import mean_squared_error
-
 from tqdm import tqdm
-from scipy.stats import beta
 
-import time
-
-from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
 from pismemulator.datamodules import PDDDataModule
+from pismemulator.models import TorchPDDModel
+from pismemulator.nnemulator import PDDEmulator
 from pismemulator.utils import load_hirham_climate_w_std_dev
-
-import warnings
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 

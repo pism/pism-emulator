@@ -19,20 +19,19 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
+import time
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
-
 from typing import Union
 
 import lightning as pl
-from lightning import LightningModule
-
 import numpy as np
 import pandas as pd
 import pylab as plt
 import seaborn as sns
 import torch
+from lightning import LightningModule
 from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 # from lightning.pytorch.tuner import Tuner
@@ -41,18 +40,14 @@ from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
 from pyDOE import lhs
 from scipy.special import gamma
-from scipy.stats import dirichlet, gaussian_kde
+from scipy.stats import beta, dirichlet, gaussian_kde
 from scipy.stats.distributions import uniform
 from sklearn.metrics import mean_squared_error
-
 from tqdm import tqdm
-from scipy.stats import beta
 
-import time
-
-from pismemulator.nnemulator import PDDEmulator, PDDStddevModel
 from pismemulator.datamodules import PDDDataModule
-from pismemulator.utils import load_hirham_climate_simple, load_hirham_climate
+from pismemulator.nnemulator import PDDEmulator, PDDStddevModel
+from pismemulator.utils import load_hirham_climate, load_hirham_climate_simple
 
 np.random.seed(2)
 
@@ -232,12 +227,14 @@ class MALASampler(object):
         self,
         X,
     ):
-        Xp = torch.vstack((
-            self.temp_obs,
-            self.precip_obs,
-            self.std_dev_obs,
-            torch.tile(X, (temp_obs.shape[1], 1)).T
-            )).T
+        Xp = torch.vstack(
+            (
+                self.temp_obs,
+                self.precip_obs,
+                self.std_dev_obs,
+                torch.tile(X, (temp_obs.shape[1], 1)).T,
+            )
+        ).T
 
         Y_pred = self.model(Xp)
 
@@ -346,13 +343,9 @@ class MALASampler(object):
         save_interval: int = 1000,
         print_interval: int = 50,
     ):
-        print(
-            "***************************************************"
-        )
+        print("***************************************************")
         print("Running Metropolis-Adjusted Langevin Algorithm")
-        print(
-            "***************************************************"
-        )
+        print("***************************************************")
         posterior_dir = f"{self.emulator_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
@@ -377,7 +370,9 @@ class MALASampler(object):
                     columns=X_keys,
                 )
 
-                df.to_parquet(join(posterior_dir, f"X_posterior_model_{model_index}.parquet"))
+                df.to_parquet(
+                    join(posterior_dir, f"X_posterior_model_{model_index}.parquet")
+                )
 
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
@@ -436,7 +431,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_size", type=float, default=0.8)
     parser.add_argument("--thinning_factor", type=int, default=1)
     parser.add_argument("--validate", action="store_true", default=False)
-    
+
     parser = PDDEmulator.add_model_specific_args(parser)
     parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
@@ -461,17 +456,16 @@ if __name__ == "__main__":
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
-        
+
     posteriors = []
     for model_index in range(num_models):
-        
         torch.manual_seed(0)
         pl.seed_everything(0)
         np.random.seed(model_index)
 
-
-        temp, precip, a, m, r, f, b = load_hirham_climate(thinning_factor=thinning_factor)
-
+        temp, precip, a, m, r, f, b = load_hirham_climate(
+            thinning_factor=thinning_factor
+        )
 
         prior_df = draw_samples(n_samples=250)
 
@@ -575,11 +569,11 @@ if __name__ == "__main__":
         train_loader = data_loader.train_loader
         val_loader = data_loader.val_loader
 
-        #tuner = Tuner(trainer)
+        # tuner = Tuner(trainer)
 
         # Auto-scale batch size by growing it exponentially (default)
-        #tuner.scale_batch_size(model, mode="power")
-    
+        # tuner.scale_batch_size(model, mode="power")
+
         # Train the emulator
         emulator_file = f"{emulator_dir}/emulator/emulator_{model_index}.h5"
         trainer.fit(e, train_loader, val_loader)
@@ -608,7 +602,8 @@ if __name__ == "__main__":
         rmse = [
             np.sqrt(
                 mean_squared_error(
-                    Y_pred.detach().cpu().numpy()[:, i], Y_val.detach().cpu().numpy()[:, i]
+                    Y_pred.detach().cpu().numpy()[:, i],
+                    Y_val.detach().cpu().numpy()[:, i],
                 )
             )
             for i in range(Y_val.shape[1])

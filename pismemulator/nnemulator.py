@@ -24,18 +24,14 @@ import pandas as pd
 import scipy
 import torch
 import torch.nn as nn
+import xarray as xr
 from torch import Tensor
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
-import xarray as xr
 
-from pismemulator.metrics import (
-    AbsoluteError,
-    AreaAbsoluteError,
-    absolute_error,
-    area_absolute_error,
-)
+from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
+                                  absolute_error, area_absolute_error)
 
 
 class PDDEmulator(pl.LightningModule):
@@ -150,7 +146,6 @@ class PDDEmulator(pl.LightningModule):
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
-
         self.log(
             "train_loss",
             self.train_ae,
@@ -278,7 +273,6 @@ class DNNEmulator(pl.LightningModule):
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
-
         self.log(
             "train_loss",
             self.train_ae,
@@ -408,7 +402,6 @@ class NNEmulator(pl.LightningModule):
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def validation_epoch_end(self, outputs):
-
         self.log(
             "train_loss",
             self.train_ae,
@@ -1257,7 +1250,9 @@ class TorchPDDModel(torch.nn.modules.Module):
 
             potential_snow_melt = ddf_snow * inst_pdd[i]
 
-            snow_melt_rate[i] = torch.minimum(intermediate_snow_depth, potential_snow_melt)
+            snow_melt_rate[i] = torch.minimum(
+                intermediate_snow_depth, potential_snow_melt
+            )
 
             ice_melt_rate[i] = (pot_snow_melt - snow_melt_rate[i]) * ddf_ice / ddf_snow
 

@@ -1,6 +1,6 @@
+import time
 from argparse import ArgumentParser
 
-import time
 import lightning as pl
 import matplotlib
 import numpy as np
@@ -12,7 +12,8 @@ from lightning.pytorch.callbacks import EarlyStopping, Timer
 from torch import Tensor, tensor
 
 from pismemulator.metrics import L2MeanSquaredError
-from pismemulator.svdinterpolation import DEMDataModule, DEMDataset, LinearRegression
+from pismemulator.svdinterpolation import (DEMDataModule, DEMDataset,
+                                           LinearRegression)
 
 # matplotlib.use("agg")
 

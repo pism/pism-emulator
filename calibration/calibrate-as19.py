@@ -45,7 +45,6 @@ def color_tint(m_color, alpha):
 
 
 def rgba2rgb(rgba, background=(255, 255, 255)):
-
     rgb = np.zeros((3), dtype="float32")
     r, g, b, a = rgba[0], rgba[1], rgba[2], rgba[3]
 
@@ -400,7 +399,6 @@ def plot_partitioning(
     simulated_ctrl=None,
     xlims=[2010, 2020],
 ):
-
     ncol = 0
     if simulated is not None:
         ncol += len(ensembles)
@@ -523,7 +521,6 @@ def plot_posterior_sle_pdfs(
     years=[2020, 2100],
     ylim=None,
 ):
-
     n_rcps = len(rcps)
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
@@ -761,7 +758,6 @@ def plot_posterior_sle_pdf(
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     ylim=None,
 ):
-
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
     m_alphas = alphas[: len(ensembles)]
@@ -1104,7 +1100,6 @@ def plot_histograms(
                 linestyle="dashed",
             )
         elif (X_prior_b is not None) and (key in m_star_keys):
-
             X_prior_b = X_prior[m_star_keys]
             X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_star_keys)
             X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
@@ -1194,12 +1189,10 @@ def plot_histograms(
 
 
 def plot_prior_histograms(out_filename, df):
-
     return None
 
 
 def load_df(respone_file, samples_file, return_samples=False):
-
     response = pd.read_csv(respone_file)
     response["SLE (cm)"] = -response["Mass (Gt)"] / 362.5 / 10
     response = response.astype({"RCP": int})
@@ -1445,7 +1438,6 @@ plt.rcParams.update(params)
 
 
 if __name__ == "__main__":
-
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.description = "Two-step Bayesian calibration for Aschwanden et al (2019) ."
     parser.add_argument(

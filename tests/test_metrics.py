@@ -25,7 +25,6 @@ from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
 
 
 def test_AreaAbsoluteError():
-
     x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
     y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
     o = torch.tensor([0.25, 0.25, 0.3, 0.2])
@@ -36,7 +35,6 @@ def test_AreaAbsoluteError():
 
 
 def test_AbsoluteError():
-
     x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
     y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
     o = torch.tensor([0.25, 0.25, 0.3, 0.2])

@@ -224,7 +224,6 @@ class MALASampler(object):
         self,
         X,
     ):
-
         """
         The log likelihood and log prior could be written as
         log_likelihood = torch.distributions.StudentT(nu).log_prob(t).sum()
@@ -523,7 +522,7 @@ if __name__ == "__main__":
     fig.subplots_adjust(wspace=0.05, hspace=0.5)
     for k in range(X_posterior.shape[1]):
         ax = axs.ravel()[k]
-  y      sns.kdeplot(
+        sns.kdeplot(
             X_posterior[:, k],
             ax=ax,
         )

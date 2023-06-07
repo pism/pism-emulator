@@ -107,7 +107,6 @@ if __name__ == "__main__":
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
         for model_index in tqdm(range(0, num_models)):
-
             emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
             state_dict = torch.load(emulator_file)
             e = NNEmulator(

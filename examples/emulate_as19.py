@@ -37,7 +37,6 @@ from pismemulator.utils import (gelman_rubin, golden_ratio, kl_divergence,
                                 prepare_data, rmsd, set_size)
 
 if __name__ == "__main__":
-
     __spec__ = None
 
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)

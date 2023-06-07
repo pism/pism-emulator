@@ -19,6 +19,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
+import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
 
@@ -33,8 +34,6 @@ from pismemulator.datamodules import PISMDataModule
 from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import DNNEmulator, NNEmulator
 from pismemulator.utils import plot_eigenglaciers
-
-import warnings
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 

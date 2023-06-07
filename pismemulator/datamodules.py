@@ -30,7 +30,6 @@ class PISMDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
 
     def setup(self, stage: Optional[str] = None):
-
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
 
@@ -147,7 +146,6 @@ class PDDDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
 
     def setup(self, stage: Optional[str] = None):
-
         all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
         self.all_data = all_data
 

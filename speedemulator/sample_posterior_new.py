@@ -229,7 +229,6 @@ class MALASampler(object):
         self,
         X,
     ):
-
         """
         Log Probability
 
@@ -282,7 +281,6 @@ class MALASampler(object):
         return log_prior
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
-
         log_pi = self.log_prob(X)
         if compute_hessian:
             self.hessian_counter += 1
@@ -340,7 +338,7 @@ class MALASampler(object):
     def sample(
         self,
         X,
-            num_chains: int = 1,
+        num_chains: int = 1,
         burn: int = 1000,
         samples: int = 10001,
         h: float = 0.1,
@@ -514,7 +512,7 @@ if __name__ == "__main__":
     )
     X_map = sampler.find_MAP(X_0)
     X_map_new = sampler.torch_find_MAP(X_0)
-    
+
     X_posterior = sampler.sample(
         X_map,
         samples=samples,

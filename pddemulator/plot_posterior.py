@@ -8,12 +8,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pylab as plt
+import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
 from scipy.stats import beta, gaussian_kde
 
-import seaborn as sns
 from pismemulator.utils import param_keys_dict as keys_dict
 
 fontsize = 8

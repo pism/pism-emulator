@@ -19,6 +19,35 @@
 
 import numpy as np
 import torch
-from numpy.testing import assert_almost_equal, assert_array_almost_equal, assert_equal
+from numpy.testing import assert_array_almost_equal
 
 from pismemulator.models import TorchDEBMModel
+
+
+def test_CalovGreveIntegrand():
+    sigma = np.array([2.0, 0.0, 1.0])
+    temperature = np.array([0.0, 2.0, -1.0])
+
+    sigma = torch.from_numpy(sigma)
+    temperature = torch.from_numpy(temperature)
+
+    debm = TorchDEBMModel()
+    cgi = debm.CalovGreveIntegrand(sigma, temperature)
+
+    assert_array_almost_equal(
+        np.array([0.7979, 2.0000, 0.0833]), cgi.numpy(), decimal=4
+    )
+
+
+def test_hour_angle():
+    phi = np.array([0.0, np.pi / 4.0, np.pi / 2.0])
+    latitude = np.array([-np.pi / 2.0, 0.0, np.pi / 4.0])
+    declination = np.array([np.pi / 8.0, 0.0, 0.0])
+
+    phi = torch.from_numpy(phi)
+    latitude = torch.from_numpy(latitude)
+    declination = torch.from_numpy(declination)
+
+    debm = TorchDEBMModel()
+    hour_angle = debm.hour_angle(phi, latitude, declination)
+    assert_array_almost_equal(np.array([0.0000, 0.7854, 0.0000]), hour_angle, decimal=4)

@@ -108,7 +108,6 @@ if __name__ == "__main__":
     for i in range(n_parameters):
         for j in range(n_parameters):
             if i > j:
-
                 axs[i, j].scatter(
                     X_posterior[:, j],
                     X_posterior[:, i],

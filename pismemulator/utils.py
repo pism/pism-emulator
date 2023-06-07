@@ -84,7 +84,6 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
     """
 
     with xr.open_dataset(file) as Obs:
-
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -130,7 +129,6 @@ def load_hirham_climate_w_std_dev(
     """
 
     with xr.open_dataset(file) as Obs:
-
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -228,7 +226,6 @@ def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1)
     """
 
     with xr.open_dataset(file) as Obs:
-
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -253,7 +250,6 @@ def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1)
 
 
 def load_imbie_csv(proj_start=2008):
-
     df = pd.read_csv("imbie_greenland_2021_Gt.csv")
 
     df = df.rename(
@@ -461,7 +457,6 @@ def plot_eigenglaciers(
     ncols=3,
     figsize=(3.2, 3.6),
 ):
-
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
 
     lamda_scaled = lamda / lamda.sum() * 100
@@ -706,7 +701,6 @@ def prepare_data(
     return_missing=False,
     return_numpy=False,
 ):
-
     """
     Reads samples_file and response_file as a pandas.DataFrame. Removes samples that do
     not have a response by differencing the DataFrames based on "id", i.e.
@@ -772,7 +766,6 @@ def prepare_data(
 
 
 def draw_samples(distributions, n_samples=100000, method="lhs"):
-
     """
     Draw n_samples Sobol sequences using the Saltelli method
     or using Latin Hypercube Sampling (LHS)
@@ -828,7 +821,6 @@ def draw_samples(distributions, n_samples=100000, method="lhs"):
 
 
 def kl_divergence(p, q):
-
     """
     Kullback-Leibler divergence
 
@@ -850,7 +842,6 @@ def kl_divergence(p, q):
 
 
 def distributions_as19():
-
     """
 
     Returns the distributions used by Aschwanden et al (2019):
@@ -887,7 +878,6 @@ def distributions_as19():
 
 
 def rmsd(a, b):
-
     """
     Root mean square difference between a and b
 
@@ -897,7 +887,6 @@ def rmsd(a, b):
 
 
 def set_size(w, h, ax=None):
-
     """
     w, h: width, height in inches
     """
