@@ -1,3 +1,3 @@
 name = "pismemulator"
 
-__all__ = ["nnemulator", "utils", "datamodules", "datasets"]
+__all__ = ["nnemulator", "utils", "datamodules", "datasets", "models"]
