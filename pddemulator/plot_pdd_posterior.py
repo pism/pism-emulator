@@ -1,6 +1,5 @@
 #!/bin/env python3
 
-import os
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
@@ -9,12 +8,7 @@ import numpy as np
 import pandas as pd
 import pylab as plt
 import seaborn as sns
-from matplotlib.lines import Line2D
-from matplotlib.patches import Polygon
-from matplotlib.ticker import NullFormatter
-from scipy.stats import beta, gaussian_kde
-
-from pismemulator.utils import param_keys_dict as keys_dict
+from scipy.stats import beta
 
 fontsize = 8
 lw = 1.0
@@ -78,11 +72,8 @@ if __name__ == "__main__":
             df.drop(columns=["Unnamed: 0"], inplace=True)
         X_list.append(df)
 
-    print(f"Merging posteriors into dataframe")
+    print("Merging posteriors into dataframe")
     posterior_df = pd.concat(X_list).reset_index(drop=True)
-    # committee_df = posterior_df.copy(deep=True)
-    # committee_df["Committee Member"] = "Committee"
-    # posterior_df = pd.concat([posterior_df, committee_df]).reset_index(drop=True)
 
     X_priors = {
         "f_snow": [1, 6],  # uniform between 1 and 6

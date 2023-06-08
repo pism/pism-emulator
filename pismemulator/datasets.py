@@ -2,13 +2,11 @@ import re
 from collections import OrderedDict
 from glob import glob
 from os.path import join
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
-from torch.utils.data import TensorDataset
 from tqdm import tqdm
 
 
@@ -92,12 +90,12 @@ class PISMDataset(torch.utils.data.Dataset):
         self.grid_resolution = grid_resolution
         ds.close()
 
-        idx = (mask == False).nonzero()
+        idx = (mask is False).nonzero()
 
         data = data[idx]
         Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
-        if not return_numpy:
+        if return_numpy is False:
             Y_target = torch.from_numpy(Y_target)
         self.Y_target = Y_target
         self.Y_target_2d = Y_target_2d

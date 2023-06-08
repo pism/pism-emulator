@@ -1,4 +1,21 @@
 #!/bin/env python3
+# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
 import time
@@ -14,7 +31,6 @@ import seaborn as sns
 import torch
 from lightning import LightningModule
 from scipy.stats import beta
-from torch.profiler import ProfilerActivity, profile, record_function
 from tqdm import tqdm
 
 from pismemulator.datasets import PISMDataset
@@ -323,17 +339,6 @@ class MALASampler(object):
             s = 0
 
         return X, local_data, s
-
-    def MetropolisHastingsAcceptance(self, log_pi, log_pi_, logq, logq_):
-        log_alpha = -log_pi_ + logq_ + log_pi - logq
-        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
-        u = torch.rand(1, device=device)
-        if u <= alpha and log_alpha != np.inf:
-            X.data = X_.data
-            s = 1
-        else:
-            s = 0
-        return s
 
     def sample(
         self,

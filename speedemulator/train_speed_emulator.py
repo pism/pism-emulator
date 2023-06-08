@@ -32,7 +32,7 @@ from scipy.stats import dirichlet
 
 from pismemulator.datamodules import PISMDataModule
 from pismemulator.datasets import PISMDataset
-from pismemulator.nnemulator import DNNEmulator, NNEmulator
+from pismemulator.nnemulator import NNEmulator
 from pismemulator.utils import plot_eigenglaciers
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
 
-    callbacks = []
+    callbacks: list = []
 
     dataset = PISMDataset(
         data_dir=data_dir,

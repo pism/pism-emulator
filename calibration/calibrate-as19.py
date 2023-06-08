@@ -15,7 +15,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from scipy.interpolate import interp1d
 from scipy.stats import beta
-from scipy.stats.distributions import gamma, randint, truncnorm, uniform
+from scipy.stats.distributions import randint, truncnorm, uniform
 
 from pismemulator.utils import load_imbie, load_imbie_csv
 from pismemulator.utils import param_keys_dict as keys_dict
@@ -85,12 +85,12 @@ def set_size(w, h, ax=None):
 
     if not ax:
         ax = plt.gca()
-    l = ax.figure.subplotpars.left
-    r = ax.figure.subplotpars.right
-    t = ax.figure.subplotpars.top
-    b = ax.figure.subplotpars.bottom
-    figw = float(w) / (r - l)
-    figh = float(h) / (t - b)
+    left = ax.figure.subplotpars.left
+    right = ax.figure.subplotpars.right
+    top = ax.figure.subplotpars.top
+    bottom = ax.figure.subplotpars.bottom
+    figw = float(w) / (right - left)
+    figh = float(h) / (top - bottom)
     ax.figure.set_size_inches(figw, figh)
 
 
@@ -430,7 +430,7 @@ def plot_partitioning(
                     color=ts_median_palette_dict[ens],
                     linewidth=signal_lw,
                     zorder=r,
-                    label=f"Median",
+                    label="Median",
                 )
                 ci = axs[k].fill_between(
                     sim_median.index,
@@ -1664,35 +1664,39 @@ def resample_ensemble_by_data(
     simulated_calib_period = simulated[simulated_calib_time]
 
     resampled_list = []
-    log_likes = []
-    experiments = np.unique(simulated_calib_period["Experiment"])
-    evals = []
-    for i in experiments:
-        exp_ = simulated_calib_period[(simulated_calib_period["Experiment"] == i)]
-        log_like = 0.0
-        for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
-            try:
-                observed_mass = observed_interp_mean(year)
-                observed_std = observed_interp_std(year) * fudge_factor
-                log_like -= 0.5 * (
-                    (exp_mass - observed_mass) / observed_std
-                ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
-            except ValueError:
-                pass
-        if log_like != 0:
-            evals.append(i)
-            log_likes.append(log_like)
-            if verbose:
-                print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
-    experiments = np.array(evals)
-    w = np.array(log_likes)
-    w -= w.mean()
-    weights = np.exp(w)
-    weights /= weights.sum()
-    resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
-    new_frame = []
-    for i in resampled_experiments:
-        new_frame.append(simulated[(simulated["Experiment"] == i)])
-    simulated_resampled = pd.concat(new_frame)
+    for rcp in rcps:
+        log_likes = []
+        experiments = np.unique(simulated_calib_period["Experiment"])
+        evals = []
+        for i in experiments:
+            exp_ = simulated_calib_period[(simulated_calib_period["Experiment"] == i)]
+            log_like = 0.0
+            for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
+                try:
+                    observed_mass = observed_interp_mean(year)
+                    observed_std = observed_interp_std(year) * fudge_factor
+                    log_like -= 0.5 * (
+                        (exp_mass - observed_mass) / observed_std
+                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
+                except ValueError:
+                    pass
+            if log_like != 0:
+                evals.append(i)
+                log_likes.append(log_like)
+                if verbose:
+                    print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
+        experiments = np.array(evals)
+        w = np.array(log_likes)
+        w -= w.mean()
+        weights = np.exp(w)
+        weights /= weights.sum()
+        resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
+        new_frame = []
+        for i in resampled_experiments:
+            new_frame.append(simulated[(simulated["Experiment"] == i)])
+        simulated_resampled = pd.concat(new_frame)
+        resampled_list.append(simulated_resampled)
+
+    simulated_resampled = pd.concat(resampled_list)
 
     return simulated_resampled

@@ -16,12 +16,10 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import pytest
 import torch
 from numpy.testing import assert_almost_equal
 
-from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
-                                  L2MeanSquaredError)
+from pismemulator.metrics import AbsoluteError, AreaAbsoluteError, L2MeanSquaredError
 
 
 def test_AreaAbsoluteError():

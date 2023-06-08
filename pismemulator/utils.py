@@ -33,16 +33,10 @@ from pyDOE import lhs
 from SALib.sample import saltelli
 from scipy.stats.distributions import gamma, randint, truncnorm, uniform
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_squared_error
 
 np.random.seed(0)
 
-import logging
-import math
-import os
-from numbers import Number
-
-import torch
 
 param_keys_dict = {
     "GCM": "GCM (1)",
@@ -330,11 +324,11 @@ def load_imbie(proj_start=2008):
     s = df[(df["Year"] >= 1980) & (df["Year"] < 1990)]
     mass_mean = s["Mass (Gt)"].mean() / (1990 - 1980)
     smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
-    df[f"SMB (Gt/yr)"] += 2 * 1964 / 10
-    df[f"D (Gt/yr)"] -= 2 * 1964 / 10
+    df["SMB (Gt/yr)"] += 2 * 1964 / 10
+    df["D (Gt/yr)"] -= 2 * 1964 / 10
     cmSLE = 1.0 / 362.5 / 10.0
-    df[f"SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
-    df[f"SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
+    df["SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
+    df["SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
 
     return df
 
@@ -342,6 +336,8 @@ def load_imbie(proj_start=2008):
 def plot_compare(
     F_p,
     F_v,
+    dataset,
+    X_val_unscaled,
     validation=False,
     return_fig=False,
 ):
@@ -442,7 +438,7 @@ def plot_compare(
     else:
         mode = "train"
 
-    fig.savefig(f"test_comp.pdf")
+    fig.savefig("test_comp.pdf")
 
     if return_fig:
         return fig
@@ -489,8 +485,8 @@ def plot_eigenglaciers(
 
 
 def calc_bic(
-    X: Union[list, np.ndarray, pd.core.frame.DataFrame],
-    Y: Union[list, np.ndarray, pd.core.frame.DataFrame],
+    X: Union[np.ndarray, pd.core.frame.DataFrame],
+    Y: Union[np.ndarray, pd.core.frame.DataFrame],
 ) -> float:
     """
     Bayesian Information Criterion
@@ -893,12 +889,12 @@ def set_size(w, h, ax=None):
 
     if not ax:
         ax = plt.gca()
-    l = ax.figure.subplotpars.left
-    r = ax.figure.subplotpars.right
-    t = ax.figure.subplotpars.top
-    b = ax.figure.subplotpars.bottom
-    figw = float(w) / (r - l)
-    figh = float(h) / (t - b)
+    left = ax.figure.subplotpars.left
+    right = ax.figure.subplotpars.right
+    top = ax.figure.subplotpars.top
+    bottom = ax.figure.subplotpars.bottom
+    figw = float(w) / (right - left)
+    figh = float(h) / (top - bottom)
     ax.figure.set_size_inches(figw, figh)
 
 

@@ -55,11 +55,16 @@ from getpass import getpass
 try:
     from urllib.error import HTTPError, URLError
     from urllib.parse import urlparse
-    from urllib.request import (HTTPCookieProcessor, Request, build_opener,
-                                urlopen)
+    from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 except ImportError:
-    from urllib2 import (HTTPCookieProcessor, HTTPError, Request, URLError,
-                         build_opener, urlopen)
+    from urllib2 import (
+        HTTPCookieProcessor,
+        HTTPError,
+        Request,
+        URLError,
+        build_opener,
+        urlopen,
+    )
     from urlparse import urlparse
 
 short_name = "NSIDC-0670"

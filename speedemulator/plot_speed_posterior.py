@@ -1,6 +1,22 @@
 #!/bin/env python3
+# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import os
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
@@ -8,7 +24,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pylab as plt
-import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
@@ -47,15 +62,17 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
-    parser.add_argument("--fraction", type=float, default=1.0)
+    parser.add_argument("--fraction", type=float, default=0.1)
 
     args = parser.parse_args()
 
     emulator_dir = args.emulator_dir
     frac = args.fraction
+    out_format = args.out_format
     samples_file = args.samples_file
 
     print("Loading prior samples\n")
@@ -66,7 +83,8 @@ if __name__ == "__main__":
     X_std = samples.std(axis=0)
     X_keys = samples.keys()
 
-    n_samples, n_parameters = X.shape
+    n_samples = int(X.shape[0])
+    n_parameters = int(X.shape[1])
 
     X_min = (((X.min(axis=0) - X_mean) / X_std - 1e-3) * X_std + X_mean).values
     X_max = (((X.max(axis=0) - X_mean) / X_std + 1e-3) * X_std + X_mean).values
@@ -87,19 +105,31 @@ if __name__ == "__main__":
     X_list = []
     p = Path(f"{emulator_dir}/posterior_samples/")
     print("Loading posterior samples\n")
-    for m, m_file in enumerate(sorted(p.glob("X_posterior_model_*.csv.gz"))):
+    for m, m_file in enumerate(sorted(p.glob(f"X_posterior_model_*.{out_format}"))):
         print(f"  -- {m_file}")
-        df = pd.read_csv(m_file).sample(frac=frac)
+        if out_format == "csv":
+            df = pd.read_csv(m_file)
+        elif out_format == "parquet":
+            df = pd.read_parquet(m_file)
+        else:
+            raise NotImplementedError(f"{out_format} not implemented")
+
+        df = df.sample(frac=frac)
         if "Unnamed: 0" in df.columns:
             df.drop(columns=["Unnamed: 0"], inplace=True)
         model = m_file.name.split("_")[-1].split(".")[0]
         df["Model"] = int(model)
         X_list.append(df)
 
-    print(f"Merging posteriors into dataframe")
+    print("Merging posteriors into dataframe")
     posterior_df = pd.concat(X_list)
 
     X_posterior = posterior_df.drop(columns=["Model"]).values
+
+    print("P16", np.percentile(X_posterior, 16, axis=0))
+    print("P50", np.percentile(X_posterior, 50, axis=0))
+    print("P84", np.percentile(X_posterior, 84, axis=0))
+
     C_0 = np.corrcoef((X_posterior - X_posterior.mean(axis=0)).T)
     Cn_0 = (np.sign(C_0) * C_0**2 + 1) / 2.0
 
@@ -220,7 +250,14 @@ if __name__ == "__main__":
                     linestyle="solid",
                     label="Posterior",
                 )
+                p16 = np.percentile(X_posterior[:, i], 16)
+                p50 = np.percentile(X_posterior[:, i], 50)
+                p84 = np.percentile(X_posterior[:, i], 84)
+                print(X_keys[i], p16, p50, p84)
 
+                axs[i, j].axvline(p16, color="black", lw=0.5, ls="dotted")
+                axs[i, j].axvline(p84, color="black", lw=0.5, ls="dotted")
+                axs[i, j].axvline(p50, color="black", lw=1.0, ls="dotted")
                 axs[i, j].set_xlim(min_val, max_val)
 
             else:
@@ -262,6 +299,6 @@ if __name__ == "__main__":
     legend.get_frame().set_linewidth(0.0)
     legend.get_frame().set_alpha(0.0)
 
-    figfile = f"{emulator_dir}/speed_emulator_posterior.pdf"
+    figfile = join(emulator_dir, "speed_emulator_posterior.pdf")
     print(f"Saving figure to {figfile}")
     fig.savefig(figfile)

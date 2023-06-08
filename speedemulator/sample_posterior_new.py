@@ -14,7 +14,6 @@ import seaborn as sns
 import torch
 from lightning import LightningModule
 from scipy.stats import beta
-from torch.profiler import ProfilerActivity, profile, record_function
 from tqdm import tqdm
 
 from pismemulator.datasets import PISMDataset
