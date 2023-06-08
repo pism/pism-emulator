@@ -58,7 +58,7 @@ if __name__ == "__main__":
     else:
         p = Path(f"{emulator_dir}/posterior_samples/")
     print("Loading posterior samples\n")
-    infiles = f"X_posterior_model_*.{out_format}"
+    infiles = f"X_posterior_*.{out_format}"
     for m, m_file in enumerate(sorted(p.glob(infiles))):
         print(f"  -- {m_file}")
         if out_format == "csv":
@@ -78,10 +78,6 @@ if __name__ == "__main__":
     X_priors = {
         "f_snow": [1, 6],  # uniform between 1 and 6
         "f_ice": [3, 15],  # uniform between 3 and 15
-        "refreeze_snow": [0.0, 1],  # uniform between 0 and 1
-        "refreeze_ice": [0, 1],  # uniform between 0 and 1
-        "temp_snow": [-2, 2],  # uniform between 0 and 1
-        "temp_rain": [0, 4],  # uniform between 0 and 1
     }
     X_bounds = {
         "f_snow": [0, 8],  # uniform between 1 and 6
@@ -106,13 +102,7 @@ if __name__ == "__main__":
     X_val = {
         "f_snow": 3.2,
         "f_ice": 8.5,
-        "refreeze_snow": 0.6,
-        "refreeze_ice": 0.2,
-        "temp_snow": 0.0,
-        "temp_rain": 2.0,
     }
-
-    print("Plotting committee\n")
 
     print("Posterior median\n")
     print(
@@ -122,7 +112,9 @@ if __name__ == "__main__":
         ]
     )
     g = sns.PairGrid(
-        posterior_df.drop(columns=["Committee Member"]).sample(frac=frac),
+        posterior_df.drop(
+            columns=["refreeze_snow", "refreeze_ice", "temp_snow", "temp_rain"]
+        ).sample(frac=frac),
         diag_sharey=False,
         height=1.0,
     )

@@ -106,7 +106,7 @@ class MALASampler(object):
         alpha_b: Union[float, torch.tensor] = 3.0,
         beta_b: Union[float, torch.tensor] = 3.0,
         nu: Union[float, torch.tensor] = 1.0,
-        emulator_dir="./emulator",
+        output_dir="./output",
         device="cpu",
     ):
         super().__init__()
@@ -166,7 +166,7 @@ class MALASampler(object):
             if not isinstance(nu, torch.Tensor)
             else nu.to(device)
         )
-        self.emulator_dir = emulator_dir
+        self.output_dir = output_dir
         self.hessian_counter = 0
 
     def find_MAP(
@@ -368,9 +368,9 @@ class MALASampler(object):
         validate: bool = False,
     ):
         if validate:
-            posterior_dir = f"{self.emulator_dir}/posterior_samples_validate/"
+            posterior_dir = f"{self.output_dir}/posterior_samples_validate/"
         else:
-            posterior_dir = f"{self.emulator_dir}/posterior_samples/"
+            posterior_dir = f"{self.output_dir}/posterior_samples/"
         if not os.path.isdir(posterior_dir):
             os.makedirs(posterior_dir)
 
@@ -392,11 +392,10 @@ class MALASampler(object):
                     data=X_posterior.astype("float32"),
                     columns=X_keys,
                 )
-                df["Committee Member"] = model_index
                 df.to_parquet(
                     join(
                         posterior_dir,
-                        f"X_posterior_model_{model_index}_chain_{chain}.parquet",
+                        f"X_posterior__chain_{chain}.parquet",
                     )
                 )
 
@@ -410,10 +409,10 @@ def draw_samples(n_samples=250, random_seed=2):
     distributions = {
         "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
-        "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
-        "temp_snow": uniform(loc=-1.0, scale=2.0),  # uniform between 0 and 1
-        "temp_rain": uniform(loc=1.0, scale=2.0),  # uniform between 0 and 1
+        "refreeze_snow": uniform(loc=0.55, scale=0.01),  # uniform between 0 and 1
+        "refreeze_ice": uniform(loc=0.55, scale=0.01),  # uniform between 0 and 1
+        "temp_snow": uniform(loc=-0.01, scale=0.02),  # uniform between 0 and 1
+        "temp_rain": uniform(loc=1.99, scale=0.02),  # uniform between 0 and 1
     }
     # Names of all the variables
     keys = [x for x in distributions.keys()]
@@ -446,7 +445,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--output_dir", default="sampler")
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--n_interpolate", type=int, default=52)
     parser.add_argument("--chains", type=int, default=5)
@@ -465,8 +464,7 @@ if __name__ == "__main__":
     alpha = args.alpha
     burn = args.burn
     device = args.device
-    emulator_dir = args.emulator_dir
-    model_index = args.model_index
+    output_dir = args.output_dir
     n_interpolate = args.n_interpolate
     n_chains = args.chains
     samples = args.samples
@@ -475,9 +473,8 @@ if __name__ == "__main__":
     use_observed_std_dev = args.use_obs_sd
     validate = args.validate
 
-    if not os.path.isdir(emulator_dir):
-        os.makedirs(emulator_dir)
-        os.makedirs(os.path.join(emulator_dir, "emulator"))
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
 
     n_parameters = 12 * 3 + 6
     n_outputs = 5
@@ -485,7 +482,6 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
     pl.seed_everything(0)
-    np.random.seed(model_index)
 
     prior_df = draw_samples(n_samples=250)
 
@@ -592,7 +588,7 @@ if __name__ == "__main__":
         X_max,
         Y_obs,
         sigma_hat,
-        emulator_dir=emulator_dir,
+        output_dir=output_dir,
         device=device,
         alpha=alpha,
     )
