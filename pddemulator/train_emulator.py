@@ -19,38 +19,25 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
+import warnings
 from argparse import ArgumentParser
-from os.path import join
-from pathlib import Path
-
-from typing import Union
 
 import lightning as pl
-from lightning import LightningModule
-
 import numpy as np
 import pandas as pd
 import pylab as plt
 import torch
 from lightning.pytorch.callbacks import Timer
 from lightning.pytorch.loggers import TensorBoardLogger
-
-# from lightning.pytorch.tuner import Tuner
 from pyDOE import lhs
 from scipy.stats import dirichlet
 from scipy.stats.distributions import uniform
 from sklearn.metrics import mean_squared_error
 
-from tqdm import tqdm
-from scipy.stats import beta
-
-import time
-
-from pismemulator.nnemulator import PDDEmulator, TorchPDDModel
 from pismemulator.datamodules import PDDDataModule
+from pismemulator.models import TorchPDDModel
+from pismemulator.nnemulator import PDDEmulator
 from pismemulator.utils import load_hirham_climate_w_std_dev
-
-import warnings
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -107,7 +94,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_obs_sd", default=False, action="store_true")
 
     parser = PDDEmulator.add_model_specific_args(parser)
-    parser = pl.Trainer.add_argparse_args(parser)
+    parser = pl.Trainer.add_argparse_args(parser)  # type: ignore
     args = parser.parse_args()
     hparams = vars(args)
 
@@ -128,7 +115,7 @@ if __name__ == "__main__":
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
     torch.manual_seed(0)
-    pl.seed_everything(0)
+    pl.seed_everything(0)  # type: ignore
     np.random.seed(model_index)
 
     (
@@ -242,7 +229,7 @@ if __name__ == "__main__":
         deterministic=True,
         default_root_dir=emulator_dir,
         num_sanity_val_steps=0,
-    )
+    )  # type: ignore
     train_loader = data_loader.train_loader
     val_loader = data_loader.val_loader
 

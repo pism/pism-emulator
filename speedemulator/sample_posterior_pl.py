@@ -22,23 +22,23 @@ from pismemulator.nnemulator import NNEmulator
 from pismemulator.utils import param_keys_dict as keys_dict
 
 
-class mMALA(pl.LightningModule):
+class mMALA(pl.LightningModule):  # type: ignore
     def __init__(
         self,
-        emulator: pl.LightningModule,
+        emulator: pl.LightningModule,  # type: ignore
         X_0,
-        X_min: Union[float, torch.tensor],
-        X_max: Union[float, torch.tensor],
-        Y_target: Union[np.ndarray, torch.tensor],
-        sigma_hat: Union[np.ndarray, torch.tensor],
+        X_min: Union[float, torch.Tensor],
+        X_max: Union[float, torch.Tensor],
+        Y_target: Union[np.ndarray, torch.Tensor],
+        sigma_hat: Union[np.ndarray, torch.Tensor],
         hparams,
-        X_mean: Union[float, np.ndarray, torch.tensor] = 1.0,
-        X_std: Union[float, np.ndarray, torch.tensor] = 1.0,
+        X_mean: Union[float, np.ndarray, torch.Tensor] = 1.0,
+        X_std: Union[float, np.ndarray, torch.Tensor] = 1.0,
         X_keys: list = [],
-        alpha: Union[float, torch.tensor] = 0.01,
-        alpha_b: Union[float, torch.tensor] = 3.0,
-        beta_b: Union[float, torch.tensor] = 3.0,
-        nu: Union[float, torch.tensor] = 1.0,
+        alpha: Union[float, torch.Tensor] = 0.01,
+        alpha_b: Union[float, torch.Tensor] = 3.0,
+        beta_b: Union[float, torch.Tensor] = 3.0,
+        nu: Union[float, torch.Tensor] = 1.0,
         h_init: float = 0.1,
         h_max: float = 1,
         num_steps: int = 10000,
