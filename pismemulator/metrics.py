@@ -63,7 +63,6 @@ def area_absolute_error(
 
 
 class AreaAbsoluteError(Metric):
-
     # Set to True if the metric during 'update' requires access to the global metric
     # state for its calculations. If not, setting this to False indicates that all
     # batch states are independent and we will optimize the runtime of 'forward'
@@ -142,7 +141,6 @@ def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
 
 
 class AbsoluteError(Metric):
-
     # Set to True if the metric during 'update' requires access to the global metric
     # state for its calculations. If not, setting this to False indicates that all
     # batch states are independent and we will optimize the runtime of 'forward'

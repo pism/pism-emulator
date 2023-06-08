@@ -33,16 +33,10 @@ from pyDOE import lhs
 from SALib.sample import saltelli
 from scipy.stats.distributions import gamma, randint, truncnorm, uniform
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_squared_error
 
 np.random.seed(0)
 
-import logging
-import math
-import os
-from numbers import Number
-
-import torch
 
 param_keys_dict = {
     "GCM": "GCM (1)",
@@ -84,7 +78,6 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
     """
 
     with xr.open_dataset(file) as Obs:
-
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -130,7 +123,6 @@ def load_hirham_climate_w_std_dev(
     """
 
     with xr.open_dataset(file) as Obs:
-
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -228,7 +220,6 @@ def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1)
     """
 
     with xr.open_dataset(file) as Obs:
-
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -253,7 +244,6 @@ def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1)
 
 
 def load_imbie_csv(proj_start=2008):
-
     df = pd.read_csv("imbie_greenland_2021_Gt.csv")
 
     df = df.rename(
@@ -334,11 +324,11 @@ def load_imbie(proj_start=2008):
     s = df[(df["Year"] >= 1980) & (df["Year"] < 1990)]
     mass_mean = s["Mass (Gt)"].mean() / (1990 - 1980)
     smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
-    df[f"SMB (Gt/yr)"] += 2 * 1964 / 10
-    df[f"D (Gt/yr)"] -= 2 * 1964 / 10
+    df["SMB (Gt/yr)"] += 2 * 1964 / 10
+    df["D (Gt/yr)"] -= 2 * 1964 / 10
     cmSLE = 1.0 / 362.5 / 10.0
-    df[f"SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
-    df[f"SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
+    df["SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
+    df["SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
 
     return df
 
@@ -346,6 +336,8 @@ def load_imbie(proj_start=2008):
 def plot_compare(
     F_p,
     F_v,
+    dataset,
+    X_val_unscaled,
     validation=False,
     return_fig=False,
 ):
@@ -446,7 +438,7 @@ def plot_compare(
     else:
         mode = "train"
 
-    fig.savefig(f"test_comp.pdf")
+    fig.savefig("test_comp.pdf")
 
     if return_fig:
         return fig
@@ -461,7 +453,6 @@ def plot_eigenglaciers(
     ncols=3,
     figsize=(3.2, 3.6),
 ):
-
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
 
     lamda_scaled = lamda / lamda.sum() * 100
@@ -494,8 +485,8 @@ def plot_eigenglaciers(
 
 
 def calc_bic(
-    X: Union[list, np.ndarray, pd.core.frame.DataFrame],
-    Y: Union[list, np.ndarray, pd.core.frame.DataFrame],
+    X: Union[np.ndarray, pd.core.frame.DataFrame],
+    Y: Union[np.ndarray, pd.core.frame.DataFrame],
 ) -> float:
     """
     Bayesian Information Criterion
@@ -706,7 +697,6 @@ def prepare_data(
     return_missing=False,
     return_numpy=False,
 ):
-
     """
     Reads samples_file and response_file as a pandas.DataFrame. Removes samples that do
     not have a response by differencing the DataFrames based on "id", i.e.
@@ -772,7 +762,6 @@ def prepare_data(
 
 
 def draw_samples(distributions, n_samples=100000, method="lhs"):
-
     """
     Draw n_samples Sobol sequences using the Saltelli method
     or using Latin Hypercube Sampling (LHS)
@@ -828,7 +817,6 @@ def draw_samples(distributions, n_samples=100000, method="lhs"):
 
 
 def kl_divergence(p, q):
-
     """
     Kullback-Leibler divergence
 
@@ -850,7 +838,6 @@ def kl_divergence(p, q):
 
 
 def distributions_as19():
-
     """
 
     Returns the distributions used by Aschwanden et al (2019):
@@ -887,7 +874,6 @@ def distributions_as19():
 
 
 def rmsd(a, b):
-
     """
     Root mean square difference between a and b
 
@@ -897,19 +883,18 @@ def rmsd(a, b):
 
 
 def set_size(w, h, ax=None):
-
     """
     w, h: width, height in inches
     """
 
     if not ax:
         ax = plt.gca()
-    l = ax.figure.subplotpars.left
-    r = ax.figure.subplotpars.right
-    t = ax.figure.subplotpars.top
-    b = ax.figure.subplotpars.bottom
-    figw = float(w) / (r - l)
-    figh = float(h) / (t - b)
+    left = ax.figure.subplotpars.left
+    right = ax.figure.subplotpars.right
+    top = ax.figure.subplotpars.top
+    bottom = ax.figure.subplotpars.bottom
+    figw = float(w) / (right - left)
+    figh = float(h) / (top - bottom)
     ax.figure.set_size_inches(figw, figh)
 
 

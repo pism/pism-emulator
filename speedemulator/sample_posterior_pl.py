@@ -5,7 +5,6 @@ import time
 from argparse import ArgumentParser
 from os.path import join
 from typing import Union
-from collections import OrderedDict
 
 import arviz as az
 import lightning as pl
@@ -188,7 +187,6 @@ class mMALA(pl.LightningModule):
         return log_prob
 
     def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
-
         log_pi = self.forward(X)
         if compute_hessian:
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
@@ -205,7 +203,6 @@ class mMALA(pl.LightningModule):
             return log_pi
 
     def pretrain(self):
-
         print("***********************************************")
         print("Finding MAP point")
         print("***********************************************")
@@ -287,7 +284,6 @@ class mMALA(pl.LightningModule):
         print(X * self.X_std + self.X_mean)
 
     def training_epoch_end(self, outputs):
-
         self.log(
             "h",
             self.h,

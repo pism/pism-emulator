@@ -1,18 +1,13 @@
 #!/bin/env python3
 
-import os
 import time
 from argparse import ArgumentParser
 from os.path import join
-from typing import Union
 
 import numpy as np
-import pandas as pd
 import pylab as plt
 import seaborn as sns
 import torch
-from lightning import LightningModule
-from scipy.special import gamma
 from scipy.stats import beta
 
 from pismemulator.models import StudentT

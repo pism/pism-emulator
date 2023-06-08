@@ -19,41 +19,24 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import contextlib
-
 import os
+import time
 from argparse import ArgumentParser
 from os.path import join
-from pathlib import Path
-
 from typing import Union
 
+import joblib
 import lightning as pl
-from lightning import LightningModule
-
 import numpy as np
 import pandas as pd
-import pylab as plt
-import seaborn as sns
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint, Timer
-from lightning.pytorch.loggers import TensorBoardLogger
-import joblib
 from joblib import Parallel, delayed
-
-# from lightning.pytorch.tuner import Tuner
 from pyDOE import lhs
-from scipy.special import gamma
-from scipy.stats import dirichlet, gaussian_kde
-from scipy.stats.distributions import uniform
-from sklearn.metrics import mean_squared_error
-
-from tqdm import tqdm
 from scipy.stats import beta
+from scipy.stats.distributions import uniform
+from tqdm import tqdm
 
-import time
-
-from pismemulator.nnemulator import TorchPDDModel as PDDModel
-from pismemulator.datamodules import PDDDataModule
+from pismemulator.models import TorchPDDModel as PDDModel
 from pismemulator.utils import load_hirham_climate_w_std_dev
 
 torch.autograd.set_detect_anomaly(True)
@@ -368,17 +351,6 @@ class MALASampler(object):
             s = 0
 
         return X, local_data, s
-
-    def MetropolisHastingsAcceptance(self, log_pi, log_pi_, logq, logq_):
-        log_alpha = -log_pi_ + logq_ + log_pi - logq
-        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
-        u = torch.rand(1, device=device)
-        if u <= alpha and log_alpha != np.inf:
-            X.data = X_.data
-            s = 1
-        else:
-            s = 0
-        return s
 
     def sample(
         self,

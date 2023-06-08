@@ -18,17 +18,19 @@
 
 import numpy as np
 import pandas as pd
-import pytest
-import scipy
 from numpy.testing import assert_array_almost_equal
 
-from pismemulator.utils import (calc_bic, draw_samples, gelman_rubin,
-                                kl_divergence, prepare_data, rmsd,
-                                stepwise_bic)
+from pismemulator.utils import (
+    calc_bic,
+    gelman_rubin,
+    kl_divergence,
+    prepare_data,
+    rmsd,
+    stepwise_bic,
+)
 
 
 def test_calc_bic():
-
     X = np.array([[1.0, 4.0, 9.0], [2.0, 0.0, -1.0]])
     Y = X**2 - 1
     bic = calc_bic(X, Y)
@@ -36,7 +38,6 @@ def test_calc_bic():
 
 
 def test_kl_divergence(pq):
-
     p, q = pq
 
     assert_array_almost_equal(kl_divergence(p, q), 0.08529960)
@@ -44,7 +45,6 @@ def test_kl_divergence(pq):
 
 
 def test_gelman_rubin(pq):
-
     p, q = pq
 
     assert_array_almost_equal(gelman_rubin(p, q), 0.816496580927726)
@@ -52,7 +52,6 @@ def test_gelman_rubin(pq):
 
 
 def test_prepare_data(saltsamples, saltresponse, tmpdir):
-
     dfs = tmpdir.mkdir("tmpdir_samples").join("samples.csv")
     dfr = tmpdir.mkdir("tmpdir_response").join("response.csv")
     dfr_m = tmpdir.mkdir("tmpdir_response_missing").join("response_missing.csv")
@@ -76,14 +75,12 @@ def test_prepare_data(saltsamples, saltresponse, tmpdir):
 
 
 def test_rmsd():
-
     a = np.array([1.0, 2.0, 3.0])
     b = a + 1
     assert_array_almost_equal(rmsd(a, b), 1.0)
 
 
 def test_stepwise_bic(dp16data):
-
     """
     Test with and without first-order interactions
 

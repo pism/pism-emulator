@@ -15,7 +15,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from scipy.interpolate import interp1d
 from scipy.stats import beta
-from scipy.stats.distributions import gamma, randint, truncnorm, uniform
+from scipy.stats.distributions import randint, truncnorm, uniform
 
 from pismemulator.utils import load_imbie, load_imbie_csv
 from pismemulator.utils import param_keys_dict as keys_dict
@@ -45,7 +45,6 @@ def color_tint(m_color, alpha):
 
 
 def rgba2rgb(rgba, background=(255, 255, 255)):
-
     rgb = np.zeros((3), dtype="float32")
     r, g, b, a = rgba[0], rgba[1], rgba[2], rgba[3]
 
@@ -86,12 +85,12 @@ def set_size(w, h, ax=None):
 
     if not ax:
         ax = plt.gca()
-    l = ax.figure.subplotpars.left
-    r = ax.figure.subplotpars.right
-    t = ax.figure.subplotpars.top
-    b = ax.figure.subplotpars.bottom
-    figw = float(w) / (r - l)
-    figh = float(h) / (t - b)
+    left = ax.figure.subplotpars.left
+    right = ax.figure.subplotpars.right
+    top = ax.figure.subplotpars.top
+    bottom = ax.figure.subplotpars.bottom
+    figw = float(w) / (right - left)
+    figh = float(h) / (top - bottom)
     ax.figure.set_size_inches(figw, figh)
 
 
@@ -400,7 +399,6 @@ def plot_partitioning(
     simulated_ctrl=None,
     xlims=[2010, 2020],
 ):
-
     ncol = 0
     if simulated is not None:
         ncol += len(ensembles)
@@ -432,7 +430,7 @@ def plot_partitioning(
                     color=ts_median_palette_dict[ens],
                     linewidth=signal_lw,
                     zorder=r,
-                    label=f"Median",
+                    label="Median",
                 )
                 ci = axs[k].fill_between(
                     sim_median.index,
@@ -523,7 +521,6 @@ def plot_posterior_sle_pdfs(
     years=[2020, 2100],
     ylim=None,
 ):
-
     n_rcps = len(rcps)
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
@@ -761,7 +758,6 @@ def plot_posterior_sle_pdf(
     ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
     ylim=None,
 ):
-
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
     m_alphas = alphas[: len(ensembles)]
@@ -1104,7 +1100,6 @@ def plot_histograms(
                 linestyle="dashed",
             )
         elif (X_prior_b is not None) and (key in m_star_keys):
-
             X_prior_b = X_prior[m_star_keys]
             X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_star_keys)
             X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
@@ -1194,12 +1189,10 @@ def plot_histograms(
 
 
 def plot_prior_histograms(out_filename, df):
-
     return None
 
 
 def load_df(respone_file, samples_file, return_samples=False):
-
     response = pd.read_csv(respone_file)
     response["SLE (cm)"] = -response["Mass (Gt)"] / 362.5 / 10
     response = response.astype({"RCP": int})
@@ -1445,7 +1438,6 @@ plt.rcParams.update(params)
 
 
 if __name__ == "__main__":
-
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.description = "Two-step Bayesian calibration for Aschwanden et al (2019) ."
     parser.add_argument(
@@ -1672,35 +1664,39 @@ def resample_ensemble_by_data(
     simulated_calib_period = simulated[simulated_calib_time]
 
     resampled_list = []
-    log_likes = []
-    experiments = np.unique(simulated_calib_period["Experiment"])
-    evals = []
-    for i in experiments:
-        exp_ = simulated_calib_period[(simulated_calib_period["Experiment"] == i)]
-        log_like = 0.0
-        for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
-            try:
-                observed_mass = observed_interp_mean(year)
-                observed_std = observed_interp_std(year) * fudge_factor
-                log_like -= 0.5 * (
-                    (exp_mass - observed_mass) / observed_std
-                ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
-            except ValueError:
-                pass
-        if log_like != 0:
-            evals.append(i)
-            log_likes.append(log_like)
-            if verbose:
-                print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
-    experiments = np.array(evals)
-    w = np.array(log_likes)
-    w -= w.mean()
-    weights = np.exp(w)
-    weights /= weights.sum()
-    resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
-    new_frame = []
-    for i in resampled_experiments:
-        new_frame.append(simulated[(simulated["Experiment"] == i)])
-    simulated_resampled = pd.concat(new_frame)
+    for rcp in rcps:
+        log_likes = []
+        experiments = np.unique(simulated_calib_period["Experiment"])
+        evals = []
+        for i in experiments:
+            exp_ = simulated_calib_period[(simulated_calib_period["Experiment"] == i)]
+            log_like = 0.0
+            for year, exp_mass in zip(exp_["Year"], exp_[m_var]):
+                try:
+                    observed_mass = observed_interp_mean(year)
+                    observed_std = observed_interp_std(year) * fudge_factor
+                    log_like -= 0.5 * (
+                        (exp_mass - observed_mass) / observed_std
+                    ) ** 2 + 0.5 * np.log(2 * np.pi * observed_std**2)
+                except ValueError:
+                    pass
+            if log_like != 0:
+                evals.append(i)
+                log_likes.append(log_like)
+                if verbose:
+                    print(f"{rcp_dict[rcp]}, Experiment {i:.0f}: {log_like:.2f}")
+        experiments = np.array(evals)
+        w = np.array(log_likes)
+        w -= w.mean()
+        weights = np.exp(w)
+        weights /= weights.sum()
+        resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
+        new_frame = []
+        for i in resampled_experiments:
+            new_frame.append(simulated[(simulated["Experiment"] == i)])
+        simulated_resampled = pd.concat(new_frame)
+        resampled_list.append(simulated_resampled)
+
+    simulated_resampled = pd.concat(resampled_list)
 
     return simulated_resampled
