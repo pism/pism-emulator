@@ -20,6 +20,7 @@ import numpy as np
 import scipy
 import torch
 from scipy.interpolate import interp1d
+import xarray as xr
 
 
 class PDDModel:
@@ -127,113 +128,99 @@ class PDDModel:
     def refreeze_ice(self, value):
         self._refreeze_ice = value
 
-    def forward(self, temp, prec, stdv=0.0):
+    def __call__(self, temp, prec, stdv=0.0):
         """Run the positive degree day model.
-
         Use temperature, precipitation, and standard deviation of temperature
         to compute the number of positive degree days, accumulation and melt
         surface mass fluxes, and the resulting surface mass balance.
-
         *temp*: array_like
             Input near-surface air temperature in degrees Celcius.
         *prec*: array_like
             Input precipitation rate in meter per year.
         *stdv*: array_like (default 0.0)
             Input standard deviation of near-surface air temperature in Kelvin.
-
         By default, inputs are N-dimensional arrays whose first dimension is
         interpreted as time and as periodic. Arrays of dimensions
         N-1 are interpreted as constant in time and expanded to N dimensions.
         Arrays of dimension 0 and numbers are interpreted as constant in time
         and space and will be expanded too. The largest input array determines
         the number of dimensions N.
-
         Return the number of positive degree days ('pdd'), surface mass balance
         ('smb'), and many other output variables in a dictionary.
         """
 
         # ensure numpy arrays
+        # FIXME use data arrays instead
         temp = np.asarray(temp)
         prec = np.asarray(prec)
         stdv = np.asarray(stdv)
 
         # expand arrays to the largest shape
+        # FIXME use xarray auto-broadcasting instead
         maxshape = max(temp.shape, prec.shape, stdv.shape)
         temp = self._expand(temp, maxshape)
         prec = self._expand(prec, maxshape)
         stdv = self._expand(stdv, maxshape)
 
         # interpolate time-series
-        if self.interpolate_n >= 1:
-            temp = self._interpolate(temp)
-            prec = self._interpolate(prec)
-            stdv = self._interpolate(stdv)
+        # FIXME propagate data arrays, coordinates
+        temp = self._interpolate(temp)
+        prec = self._interpolate(prec)
+        stdv = self._interpolate(stdv)
 
         # compute accumulation and pdd
         accu_rate = self.accu_rate(temp, prec)
         inst_pdd = self.inst_pdd(temp, stdv)
 
-        # initialize snow depth, melt and refreeze rates
+        # initialize snow depth and melt rates
         snow_depth = np.zeros_like(temp)
         snow_melt_rate = np.zeros_like(temp)
         ice_melt_rate = np.zeros_like(temp)
-        snow_refreeze_rate = np.zeros_like(temp)
-        ice_refreeze_rate = np.zeros_like(temp)
 
-        # parse model parameters for readability
-        ddf_snow = self.pdd_factor_snow / 1000
-        ddf_ice = self.pdd_factor_ice / 1000
-
+        # compute snow depth and melt rates
         for i in range(len(temp)):
             if i > 0:
                 snow_depth[i] = snow_depth[i - 1]
             snow_depth[i] += accu_rate[i]
-            # parse model parameters for readability
-
-            pot_snow_melt = ddf_snow * inst_pdd[i]
-            # effective snow melt can't exceed amount of snow
-            s_min = np.minimum(snow_depth[i], pot_snow_melt)
-            snow_melt_rate[i] = s_min
-
-            # ice melt is proportional to excess snow melt
-            ice_melt_rate[i] = (pot_snow_melt - snow_melt_rate[i]) * ddf_ice / ddf_snow
-
+            snow_melt_rate[i], ice_melt_rate[i] = self.melt_rates(
+                snow_depth[i], inst_pdd[i]
+            )
             snow_depth[i] -= snow_melt_rate[i]
-
         melt_rate = snow_melt_rate + ice_melt_rate
-        snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
-        ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
-        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
-        runoff_rate = melt_rate - refreeze_rate
+        runoff_rate = (
+            melt_rate
+            - self.refreeze_snow * snow_melt_rate
+            - self.refreeze_ice * ice_melt_rate
+        )
         inst_smb = accu_rate - runoff_rate
 
-        # output
-        return {
-            "temp": temp,
-            "prec": prec,
-            "stdv": stdv,
-            "inst_pdd": inst_pdd,
-            "accu_rate": accu_rate,
-            "snow_melt_rate": snow_melt_rate,
-            "ice_melt_rate": ice_melt_rate,
-            "melt_rate": melt_rate,
-            "snow_refreeze_rate": snow_refreeze_rate,
-            "ice_refreeze_rate": ice_refreeze_rate,
-            "refreeze_rate": refreeze_rate,
-            "runoff_rate": runoff_rate,
-            "inst_smb": inst_smb,
-            "snow_depth": snow_depth,
-            "pdd": self._integrate(inst_pdd),
-            "accu": self._integrate(accu_rate),
-            "snow_melt": self._integrate(snow_melt_rate),
-            "ice_melt": self._integrate(ice_melt_rate),
-            "melt": self._integrate(melt_rate),
-            "runoff": self._integrate(runoff_rate),
-            "refreeze": self._integrate(refreeze_rate),
-            "snow_refreeze": self._integrate(snow_refreeze_rate),
-            "ice_refreeze": self._integrate(ice_refreeze_rate),
-            "smb": self._integrate(inst_smb),
-        }
+        # make a dataset
+        # FIXME add coordinate variables
+        ds = xr.Dataset(
+            data_vars={
+                "temp": (["time", "x", "y"], temp),
+                "prec": (["time", "x", "y"], prec),
+                "stdv": (["time", "x", "y"], stdv),
+                "inst_pdd": (["time", "x", "y"], inst_pdd),
+                "accu_rate": (["time", "x", "y"], accu_rate),
+                "snow_melt_rate": (["time", "x", "y"], snow_melt_rate),
+                "ice_melt_rate": (["time", "x", "y"], ice_melt_rate),
+                "melt_rate": (["time", "x", "y"], melt_rate),
+                "runoff_rate": (["time", "x", "y"], runoff_rate),
+                "inst_smb": (["time", "x", "y"], inst_smb),
+                "snow_depth": (["time", "x", "y"], snow_depth),
+                "pdd": (["x", "y"], self._integrate(inst_pdd)),
+                "accu": (["x", "y"], self._integrate(accu_rate)),
+                "snow_melt": (["x", "y"], self._integrate(snow_melt_rate)),
+                "ice_melt": (["x", "y"], self._integrate(ice_melt_rate)),
+                "melt": (["x", "y"], self._integrate(melt_rate)),
+                "runoff": (["x", "y"], self._integrate(runoff_rate)),
+                "smb": (["x", "y"], self._integrate(inst_smb)),
+            }
+        )
+
+        # return dataset
+        return ds
 
     def _expand(self, array, shape):
         """Expand an array to the given shape"""
@@ -257,37 +244,37 @@ class PDDModel:
 
     def _interpolate(self, array):
         """Interpolate an array through one year."""
+        from scipy.interpolate import interp1d
 
         rule = self.interpolate_rule
         npts = self.interpolate_n
         oldx = (np.arange(len(array) + 2) - 0.5) / len(array)
-        oldy = np.vstack((array[-1], array, array[0]))
+        oldy = np.vstack(([array[-1]], array, [array[0]]))
         newx = (np.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
         newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
-
         return newy
 
     def inst_pdd(self, temp, stdv):
         """Compute instantaneous positive degree days from temperature.
-
         Use near-surface air temperature and standard deviation to compute
         instantaneous positive degree days (effective temperature for melt,
         unit degrees C) using an integral formulation (Calov and Greve, 2005).
-
         *temp*: array_like
             Near-surface air temperature in degrees Celcius.
         *stdv*: array_like
             Standard deviation of near-surface air temperature in Kelvin.
         """
+        import scipy.special as sp
 
         # compute positive part of temperature everywhere
         positivepart = np.greater(temp, 0) * temp
 
         # compute Calov and Greve (2005) integrand, ignoring division by zero
-        normtemp = temp / (np.sqrt(2) * stdv)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            normtemp = temp / (np.sqrt(2) * stdv)
         calovgreve = stdv / np.sqrt(2 * np.pi) * np.exp(
             -(normtemp**2)
-        ) + temp / 2 * scipy.special.erfc(-normtemp)
+        ) + temp / 2 * sp.erfc(-normtemp)
 
         # use positive part where sigma is zero and Calov and Greve elsewhere
         teff = np.where(stdv == 0.0, positivepart, calovgreve)
@@ -297,11 +284,9 @@ class PDDModel:
 
     def accu_rate(self, temp, prec):
         """Compute accumulation rate from temperature and precipitation.
-
         The fraction of precipitation that falls as snow decreases linearly
         from one to zero between temperature thresholds defined by the
         `temp_snow` and `temp_rain` attributes.
-
         *temp*: array_like
             Near-surface air temperature in degrees Celcius.
         *prec*: array_like
@@ -314,6 +299,33 @@ class PDDModel:
 
         # return accumulation rate
         return snowfrac * prec
+
+    def melt_rates(self, snow, pdd):
+        """Compute melt rates from snow precipitation and pdd sum.
+        Snow melt is computed from the number of positive degree days (*pdd*)
+        and the `pdd_factor_snow` model attribute. If all snow is melted and
+        some energy (PDD) remains, ice melt is computed using `pdd_factor_ice`.
+        *snow*: array_like
+            Snow precipitation rate.
+        *pdd*: array_like
+            Number of positive degree days.
+        """
+
+        # parse model parameters for readability
+        ddf_snow = self.pdd_factor_snow
+        ddf_ice = self.pdd_factor_ice
+
+        # compute a potential snow melt
+        pot_snow_melt = ddf_snow * pdd
+
+        # effective snow melt can't exceed amount of snow
+        snow_melt = np.minimum(snow, pot_snow_melt)
+
+        # ice melt is proportional to excess snow melt
+        ice_melt = (pot_snow_melt - snow_melt) * ddf_ice / ddf_snow
+
+        # return melt rates
+        return (snow_melt, ice_melt)
 
 
 class TorchPDDModel(torch.nn.modules.Module):
