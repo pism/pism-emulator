@@ -17,10 +17,10 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import numpy as np
-import scipy
+import scipy.special as sp
 import torch
-from scipy.interpolate import interp1d
 import xarray as xr
+from scipy.interpolate import interp1d
 
 
 class PDDModel:
@@ -128,7 +128,7 @@ class PDDModel:
     def refreeze_ice(self, value):
         self._refreeze_ice = value
 
-    def __call__(self, temp, prec, stdv=0.0):
+    def __call__(self, temp, prec, stdv=0.0, return_xarray: bool = False):
         """Run the positive degree day model.
         Use temperature, precipitation, and standard deviation of temperature
         to compute the number of positive degree days, accumulation and melt
@@ -187,40 +187,69 @@ class PDDModel:
             )
             snow_depth[i] -= snow_melt_rate[i]
         melt_rate = snow_melt_rate + ice_melt_rate
-        runoff_rate = (
-            melt_rate
-            - self.refreeze_snow * snow_melt_rate
-            - self.refreeze_ice * ice_melt_rate
-        )
+        snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
+        ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
+        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
+        runoff_rate = melt_rate - refreeze_rate
         inst_smb = accu_rate - runoff_rate
 
-        # make a dataset
-        # FIXME add coordinate variables
-        ds = xr.Dataset(
-            data_vars={
-                "temp": (["time", "x", "y"], temp),
-                "prec": (["time", "x", "y"], prec),
-                "stdv": (["time", "x", "y"], stdv),
-                "inst_pdd": (["time", "x", "y"], inst_pdd),
-                "accu_rate": (["time", "x", "y"], accu_rate),
-                "snow_melt_rate": (["time", "x", "y"], snow_melt_rate),
-                "ice_melt_rate": (["time", "x", "y"], ice_melt_rate),
-                "melt_rate": (["time", "x", "y"], melt_rate),
-                "runoff_rate": (["time", "x", "y"], runoff_rate),
-                "inst_smb": (["time", "x", "y"], inst_smb),
-                "snow_depth": (["time", "x", "y"], snow_depth),
-                "pdd": (["x", "y"], self._integrate(inst_pdd)),
-                "accu": (["x", "y"], self._integrate(accu_rate)),
-                "snow_melt": (["x", "y"], self._integrate(snow_melt_rate)),
-                "ice_melt": (["x", "y"], self._integrate(ice_melt_rate)),
-                "melt": (["x", "y"], self._integrate(melt_rate)),
-                "runoff": (["x", "y"], self._integrate(runoff_rate)),
-                "smb": (["x", "y"], self._integrate(inst_smb)),
+        if return_xarray:
+            # make a dataset
+            # FIXME add coordinate variables
+            result = xr.Dataset(
+                data_vars={
+                    "temp": (["time", "x", "y"], temp),
+                    "prec": (["time", "x", "y"], prec),
+                    "stdv": (["time", "x", "y"], stdv),
+                    "inst_pdd": (["time", "x", "y"], inst_pdd),
+                    "accu_rate": (["time", "x", "y"], accu_rate),
+                    "snow_melt_rate": (["time", "x", "y"], snow_melt_rate),
+                    "ice_melt_rate": (["time", "x", "y"], ice_melt_rate),
+                    "melt_rate": (["time", "x", "y"], melt_rate),
+                    "runoff_rate": (["time", "x", "y"], runoff_rate),
+                    "inst_smb": (["time", "x", "y"], inst_smb),
+                    "snow_depth": (["time", "x", "y"], snow_depth),
+                    "pdd": (["x", "y"], self._integrate(inst_pdd)),
+                    "accu": (["x", "y"], self._integrate(accu_rate)),
+                    "snow_melt": (["x", "y"], self._integrate(snow_melt_rate)),
+                    "ice_melt": (["x", "y"], self._integrate(ice_melt_rate)),
+                    "melt": (["x", "y"], self._integrate(melt_rate)),
+                    "runoff": (["x", "y"], self._integrate(runoff_rate)),
+                    "refreeze": (["x", "y"], self._integrate(refreeze_rate)),
+                    "snow_refreeze": (["x", "y"], self._integrate(snow_refreeze_rate)),
+                    "ice_refreeze": (["x", "y"], self._integrate(ice_refreeze_rate)),
+                    "smb": (["x", "y"], self._integrate(inst_smb)),
+                }
+            )
+        else:
+            result = {
+                "temp": temp,
+                "prec": prec,
+                "stdv": stdv,
+                "inst_pdd": inst_pdd,
+                "accu_rate": accu_rate,
+                "snow_melt_rate": snow_melt_rate,
+                "ice_melt_rate": ice_melt_rate,
+                "melt_rate": melt_rate,
+                "snow_refreeze_rate": snow_refreeze_rate,
+                "ice_refreeze_rate": ice_refreeze_rate,
+                "refreeze_rate": refreeze_rate,
+                "runoff_rate": runoff_rate,
+                "inst_smb": inst_smb,
+                "snow_depth": snow_depth,
+                "pdd": self._integrate(inst_pdd),
+                "accu": self._integrate(accu_rate),
+                "snow_melt": self._integrate(snow_melt_rate),
+                "ice_melt": self._integrate(ice_melt_rate),
+                "melt": self._integrate(melt_rate),
+                "runoff": self._integrate(runoff_rate),
+                "refreeze": self._integrate(refreeze_rate),
+                "snow_refreeze": self._integrate(snow_refreeze_rate),
+                "ice_refreeze": self._integrate(ice_refreeze_rate),
+                "smb": self._integrate(inst_smb),
             }
-        )
 
-        # return dataset
-        return ds
+        return result
 
     def _expand(self, array, shape):
         """Expand an array to the given shape"""
@@ -244,7 +273,6 @@ class PDDModel:
 
     def _interpolate(self, array):
         """Interpolate an array through one year."""
-        from scipy.interpolate import interp1d
 
         rule = self.interpolate_rule
         npts = self.interpolate_n
@@ -264,7 +292,6 @@ class PDDModel:
         *stdv*: array_like
             Standard deviation of near-surface air temperature in Kelvin.
         """
-        import scipy.special as sp
 
         # compute positive part of temperature everywhere
         positivepart = np.greater(temp, 0) * temp
