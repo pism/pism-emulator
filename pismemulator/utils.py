@@ -527,11 +527,13 @@ def calc_bic(
     return BIC
 
 
-def stepwise_bic(X: np.array, Y: np.array, varnames=None, interactions=True, **kwargs):
+def stepwise_bic(
+    X: np.array, Y: np.array, varnames: list = [], interactions: bool = True, **kwargs
+):
     """
     Stepwise model selection using the Bayesian Information Criterion (BIC)
 
-    General fuction (not project-specific) modeled after R's stepAIC function.
+    General function modeled after R's stepAIC function.
 
     Starts with full least squares model as in backward selection. If interactions=True, performs
     bidirectional stepwise selection. Otherwise only performs backwards selection.
@@ -558,7 +560,7 @@ def stepwise_bic(X: np.array, Y: np.array, varnames=None, interactions=True, **k
 
     n = X.shape[1]
     names = ["X{}".format(x) for x in range(n)]
-    if not isinstance(varnames, type(None)):
+    if varnames is not []:
         names = varnames
 
     assert n == len(names)
@@ -600,11 +602,11 @@ def stepwise_bic(X: np.array, Y: np.array, varnames=None, interactions=True, **k
                 lm_bic = calc_bic(tempX, Y)
             else:
                 # Temporary X that drops main effect
-                tempX = np.delete(X, params_dict[i], axis=1)  # type: ignore
+                tempX = np.delete(X, params_dict[m_str], axis=1)  # type: ignore
                 # BIC for baseline model without main effect
                 lm_bic = calc_bic(tempX, Y)
             # Number of entries in bic_dict should equal the number of variables left to test
-            bic_dict[i] = lm_bic
+            bic_dict[m_str] = lm_bic
 
         # Lowest BIC and variable associated from variables left to test
         min_key = min(bic_dict.keys(), key=(lambda k: bic_dict[k]))

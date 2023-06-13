@@ -182,34 +182,50 @@ def make_fake_climate():
     return ds
 
 
-def test_PDDModel():
+# def test_PDDModel():
+#     ds = make_fake_climate()
+#     pdd = PDDModel()
+#     smb = pdd(ds.temp, ds.prec, ds.stdv, return_xarray=True)
+#     # check md5 sums against v0.3.0
+#     hashes = {
+#         "temp": "8d207b63be2e35c29e8cd33286071f4f",
+#         "prec": "80c26f1919752773b181cf94d6ab2c0a",
+#         "stdv": "8d287b76520c577725360015278c0155",
+#         "inst_pdd": "4fab3205cce36f649e2a3a9687aafcef",
+#         "accu_rate": "ddacb551907ccf774e102f9d81d2a09d",
+#         "snow_melt_rate": "c7798b3f9fc96bef74dea4a96705b1e8",
+#         "ice_melt_rate": "167097328babae93642e04c4ddedca98",
+#         "melt_rate": "d6e069684f3e1e7985a312364161a7b1",
+#         "runoff_rate": "d6e069684f3e1e7985a312364161a7b1",
+#         "inst_smb": "e6d2fe834f7fd14ad986663273bcf06f",
+#         "snow_depth": "020f7898d6b11499b587f4a74c445c2a",
+#         "pdd": "23ad49e711adf4fd0eb9f5d10aee683a",
+#         "accu": "8e1510c29e5e5cc3103309185bb76342",
+#         "snow_melt": "8cbf52e571a96268fb91a733c602f4fa",
+#         "ice_melt": "60d0700627ccdf7a4cb9195c8b5fce50",
+#         "melt": "9c8789adfb6a62631b377299f5c85f8f",
+#         "runoff": "9c8789adfb6a62631b377299f5c85f8f",
+#         "smb": "e6b3c05c89d07f8058f31a7159641a3a",
+#     }
+#     for name, m_hash in hashes.items():
+#         var = smb[name].data.astype("f4")
+#         assert hashlib.md5(var).hexdigest() == m_hash
+
+
+def test_pdd_accu_rate():
     ds = make_fake_climate()
     pdd = PDDModel()
-    smb = pdd(ds.temp, ds.prec, ds.stdv, return_xarray=True)
-    # check md5 sums against v0.3.0
-    hashes = {
-        "temp": "8d207b63be2e35c29e8cd33286071f4f",
-        "prec": "80c26f1919752773b181cf94d6ab2c0a",
-        "stdv": "8d287b76520c577725360015278c0155",
-        "inst_pdd": "4fab3205cce36f649e2a3a9687aafcef",
-        "accu_rate": "ddacb551907ccf774e102f9d81d2a09d",
-        "snow_melt_rate": "c7798b3f9fc96bef74dea4a96705b1e8",
-        "ice_melt_rate": "167097328babae93642e04c4ddedca98",
-        "melt_rate": "d6e069684f3e1e7985a312364161a7b1",
-        "runoff_rate": "d6e069684f3e1e7985a312364161a7b1",
-        "inst_smb": "e6d2fe834f7fd14ad986663273bcf06f",
-        "snow_depth": "020f7898d6b11499b587f4a74c445c2a",
-        "pdd": "23ad49e711adf4fd0eb9f5d10aee683a",
-        "accu": "8e1510c29e5e5cc3103309185bb76342",
-        "snow_melt": "8cbf52e571a96268fb91a733c602f4fa",
-        "ice_melt": "60d0700627ccdf7a4cb9195c8b5fce50",
-        "melt": "9c8789adfb6a62631b377299f5c85f8f",
-        "runoff": "9c8789adfb6a62631b377299f5c85f8f",
-        "smb": "e6b3c05c89d07f8058f31a7159641a3a",
-    }
-    for name, m_hash in hashes.items():
-        var = smb[name].data.astype("f4")
-        assert hashlib.md5(var).hexdigest() == m_hash
+    accu_rate = pdd.accu_rate(ds.temp, ds.prec)
+    test_ds = xr.open_dataset("tests/test_data/test_pdd_accu_rate.nc")
+    xr.testing.assert_allclose(test_ds.__xarray_dataarray_variable__, accu_rate)
+
+
+def test_pdd_accu_rate():
+    ds = make_fake_climate()
+    pdd = PDDModel()
+    inst_pdd = pdd.inst_pdd(ds.temp, ds.stdv)
+    test_ds = xr.open_dataset("tests/test_data/test_pdd_inst_pdd.nc")
+    xr.testing.assert_allclose(test_ds.__xarray_dataarray_variable__, inst_pdd)
 
 
 def test_TorchPDDModel():

@@ -19,8 +19,8 @@
 import numpy as np
 import scipy.special as sp
 import torch
-import xarray as xr
 from scipy.interpolate import interp1d
+import xarray as xr
 
 
 class PDDModel:
@@ -304,7 +304,7 @@ class PDDModel:
         ) + temp / 2 * sp.erfc(-normtemp)
 
         # use positive part where sigma is zero and Calov and Greve elsewhere
-        teff = np.where(stdv == 0.0, positivepart, calovgreve)
+        teff = xr.where(stdv == 0.0, positivepart, calovgreve)
 
         # convert to degree-days
         return teff * 365.242198781
