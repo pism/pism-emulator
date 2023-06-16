@@ -414,6 +414,14 @@ def draw_samples(n_samples=250, random_seed=2):
         "temp_snow": uniform(loc=-0.01, scale=0.02),  # uniform between 0 and 1
         "temp_rain": uniform(loc=1.99, scale=0.02),  # uniform between 0 and 1
     }
+    distributions = {
+        "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
+        "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
+        "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
+        "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
+        "temp_snow": uniform(loc=-1.0, scale=2.0),  # uniform between 0 and 1
+        "temp_rain": uniform(loc=0.0, scale=2.0),  # uniform between 0 and 1
+    }
     # Names of all the variables
     keys = [x for x in distributions.keys()]
 
@@ -446,7 +454,6 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output_dir", default="sampler")
-    parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--n_interpolate", type=int, default=52)
     parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
@@ -573,7 +580,10 @@ if __name__ == "__main__":
     )
     # Initial condition for MAP. Note that using 0 yields similar results
     X_0 = torch.tensor(
-        X_prior.mean(axis=0), requires_grad=True, dtype=torch.float, device=device
+        X_prior.mean(axis=0),
+        requires_grad=True,
+        dtype=torch.float,
+        device=device,
     )
 
     pdd = PDDModel()
@@ -592,7 +602,7 @@ if __name__ == "__main__":
         device=device,
         alpha=alpha,
     )
-    X_map = sampler.find_MAP(X_0)
+    X_map = sampler.find_MAP(X_0, verbose=False)
 
     result = Parallel(n_jobs=n_chains)(
         delayed(sampler.sample)(

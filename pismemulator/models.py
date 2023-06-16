@@ -64,7 +64,7 @@ class PDDModel:
         temp_snow: float = 0.0,
         temp_rain: float = 0.0,
         interpolate_rule: str = "linear",
-        interpolate_n: int = 12,
+        interpolate_n: int = 52,
         *args,
         **kwargs,
     ):
@@ -396,7 +396,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         temp_snow: float = 0.0,
         temp_rain: float = 0.0,
         interpolate_rule: str = "linear",
-        interpolate_n: int = 12,
+        interpolate_n: int = 52,
         device="cpu",
         *args,
         **kwargs,
@@ -532,9 +532,7 @@ class TorchPDDModel(torch.nn.modules.Module):
                 intermediate_snow_depth, potential_snow_melt
             )
 
-            ice_melt_rate[i] = (
-                (potential_snow_melt - snow_melt_rate[i]) * ddf_ice / ddf_snow
-            )
+            ice_melt_rate[i] = (pot_snow_melt - snow_melt_rate[i]) * ddf_ice / ddf_snow
 
             snow_depth[i] = intermediate_snow_depth - snow_melt_rate[i]
 
