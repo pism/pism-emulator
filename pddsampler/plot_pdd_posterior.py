@@ -100,8 +100,8 @@ if __name__ == "__main__":
     x = np.linspace(0, 1, 101)
     prior = rv.pdf(x)
 
-    X_lim_min = np.array([x[0] for x in X_bounds.values()])
-    X_lim_max = np.array([x[1] for x in X_bounds.values()])
+    X_lim_min = np.array([xm[0] for xm in X_bounds.values()])
+    X_lim_max = np.array([xm[1] for xm in X_bounds.values()])
 
     X_val = {
         "f_snow": 3.2,

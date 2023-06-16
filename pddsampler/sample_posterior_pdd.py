@@ -171,7 +171,7 @@ class MALASampler(object):
 
     def find_MAP(
         self,
-        X: torch.tensor,
+        X,
         n_iters: int = 26,
         verbose: bool = False,
         print_interval: int = 10,
@@ -236,8 +236,8 @@ class MALASampler(object):
         self,
         X,
     ):
-        self.model.f_snow = X[0]
-        self.model.f_ice = X[1]
+        self.model.pdd_factor_snow = X[0]
+        self.model.pdd_factor_ice = X[1]
         self.model.refreeze_snow = X[2]
         self.model.refreeze_ice = X[3]
         self.model.temp_snow = X[4]
@@ -282,7 +282,7 @@ class MALASampler(object):
         )
         return -(self.alpha * log_likelihood + log_prior)
 
-    def get_log_like_gradient_and_hessian(self, X, eps=1e-24, compute_hessian=False):
+    def get_log_like_gradient_and_hessian(self, X, eps=1e-6, compute_hessian=False):
         log_pi = self.neg_log_prob(X)
         if compute_hessian:
             self.hessian_counter += 1
@@ -355,7 +355,7 @@ class MALASampler(object):
     def sample(
         self,
         X,
-        burn: int = 1000,
+        burn: int = 500,
         chain: int = 0,
         samples: int = 10001,
         h: float = 0.1,
@@ -395,7 +395,7 @@ class MALASampler(object):
                 df.to_parquet(
                     join(
                         posterior_dir,
-                        f"X_posterior__chain_{chain}.parquet",
+                        f"X_posterior_chain_{chain}.parquet",
                     )
                 )
 
@@ -403,20 +403,12 @@ class MALASampler(object):
         return X_posterior
 
 
-def draw_samples(n_samples=250, random_seed=2):
+def draw_samples(n_samples=1_0000, random_seed=2):
     np.random.seed(random_seed)
 
     distributions = {
-        "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
-        "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0.55, scale=0.01),  # uniform between 0 and 1
-        "refreeze_ice": uniform(loc=0.55, scale=0.01),  # uniform between 0 and 1
-        "temp_snow": uniform(loc=-0.01, scale=0.02),  # uniform between 0 and 1
-        "temp_rain": uniform(loc=1.99, scale=0.02),  # uniform between 0 and 1
-    }
-    distributions = {
-        "f_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
-        "f_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
+        "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
+        "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
         "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-1.0, scale=2.0),  # uniform between 0 and 1
@@ -457,7 +449,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_interpolate", type=int, default=52)
     parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
-    parser.add_argument("--burn", type=int, default=1_000)
+    parser.add_argument("--burn", type=int, default=500)
     parser.add_argument("--thinning_factor", type=int, default=100)
     parser.add_argument("--validate", action="store_true", default=False)
     parser.add_argument(
@@ -490,10 +482,8 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     pl.seed_everything(0)
 
-    prior_df = draw_samples(n_samples=250)
+    prior_df = draw_samples(n_samples=20_000)
 
-    # Create observations using the forward model
-    obs_df = draw_samples(n_samples=100, random_seed=4)
     (
         temp,
         precip,
@@ -562,7 +552,7 @@ if __name__ == "__main__":
     X_max = X_prior.cpu().numpy().max(axis=0)
 
     sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.001, 0.001, 0.001, 0.001, 0.001]).to(device)
+    sigma_hat = sh * torch.tensor([0.0001]).to(device)
     X_keys = [
         "f_snow",
         "f_ice",
