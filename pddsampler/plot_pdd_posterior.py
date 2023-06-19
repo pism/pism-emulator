@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="data_dir")
-    parser.add_argument("--fraction", type=float, default=0.01)
+    parser.add_argument("--fraction", type=float, default=1.0)
     parser.add_argument("--validate", default=False, action="store_true")
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
 
@@ -76,8 +76,8 @@ if __name__ == "__main__":
     posterior_df = pd.concat(X_list).reset_index(drop=True)
 
     X_priors = {
-        "f_snow": [1, 6],  # uniform between 1 and 6
-        "f_ice": [3, 15],  # uniform between 3 and 15
+        "pdd_factor_snow": [1, 6],  # uniform between 1 and 6
+        "pdd_factor_ice": [3, 15],  # uniform between 3 and 15
         "refreeze_snow": [0, 1],  # uniform between 0 and 1
         "refreeze_ice": [0, 1],  # uniform between 0 and 1
         "temp_snow": [-1, 1],  # uniform between 0 and 1

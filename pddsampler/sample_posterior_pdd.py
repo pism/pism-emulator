@@ -282,7 +282,7 @@ class MALASampler(object):
         )
         return -(self.alpha * log_likelihood + log_prior)
 
-    def get_log_like_gradient_and_hessian(self, X, eps=1e-6, compute_hessian=False):
+    def get_log_like_gradient_and_hessian(self, X, eps=1e-4, compute_hessian=False):
         log_pi = self.neg_log_prob(X)
         if compute_hessian:
             self.hessian_counter += 1
@@ -412,8 +412,18 @@ def draw_samples(n_samples=1_0000, random_seed=2):
         "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-1.0, scale=2.0),  # uniform between 0 and 1
-        "temp_rain": uniform(loc=0.0, scale=2.0),  # uniform between 0 and 1
+        "temp_rain": uniform(loc=1.0, scale=2.0),  # uniform between 0 and 1
     }
+
+    # distributions = {
+    #     "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
+    #     "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
+    #     "refreeze_snow": uniform(loc=0.25, scale=0.5),  # uniform between 0 and 1
+    #     "refreeze_ice": uniform(loc=0.0, scale=0.25),  # uniform between 0 and 1
+    #     "temp_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
+    #     "temp_rain": uniform(loc=1.0, scale=1.0),  # uniform between 0 and 1
+    # }
+
     # Names of all the variables
     keys = [x for x in distributions.keys()]
 
@@ -449,8 +459,9 @@ if __name__ == "__main__":
     parser.add_argument("--n_interpolate", type=int, default=52)
     parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
-    parser.add_argument("--burn", type=int, default=500)
+    parser.add_argument("--sigma", type=float, default=0.01)
     parser.add_argument("--thinning_factor", type=int, default=100)
+    parser.add_argument("--burn", type=int, default=500)
     parser.add_argument("--validate", action="store_true", default=False)
     parser.add_argument(
         "--training_file", type=str, default="DMI-HIRHAM5_1980_2020_MMS.nc"
@@ -467,6 +478,7 @@ if __name__ == "__main__":
     n_interpolate = args.n_interpolate
     n_chains = args.chains
     samples = args.samples
+    sigma = args.sigma
     thinning_factor = args.thinning_factor
     training_file = args.training_file
     use_observed_std_dev = args.use_obs_sd
@@ -552,10 +564,10 @@ if __name__ == "__main__":
     X_max = X_prior.cpu().numpy().max(axis=0)
 
     sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.0001]).to(device)
+    sigma_hat = sh * torch.tensor([sigma]).to(device)
     X_keys = [
-        "f_snow",
-        "f_ice",
+        "pdd_factor_snow",
+        "pdd_factor_ice",
         "refreeze_snow",
         "refreeze_ice",
         "temp_snow",
