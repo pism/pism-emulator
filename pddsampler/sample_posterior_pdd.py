@@ -254,7 +254,7 @@ class MALASampler(object):
         F = result["refreeze"]
         B = result["smb"]
 
-        Y_pred = torch.vstack((A, M, R, F, B)).T.type(torch.FloatTensor).to(device)
+        Y_pred = torch.vstack((A, M, R, B)).T.type(torch.FloatTensor).to(device)
 
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
@@ -533,7 +533,7 @@ if __name__ == "__main__":
             refreeze_ice=refreeze_ice_val,
             temp_snow=temp_snow_val,
             temp_rain=temp_rain_val,
-            n_interpolate=n_interpolate,
+            interpolate_n=n_interpolate,
         )
         result = pdd(temp, precip, std_dev)
 
@@ -551,7 +551,6 @@ if __name__ == "__main__":
                     torch.from_numpy(accumulation),
                     torch.from_numpy(melt),
                     torch.from_numpy(runoff),
-                    torch.from_numpy(refreeze),
                     torch.from_numpy(smb),
                 )
             )

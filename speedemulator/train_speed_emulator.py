@@ -84,7 +84,7 @@ if __name__ == "__main__":
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
-    parser = pl.Trainer.add_argparse_args(parser)
+    #    parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
     hparams = vars(args)
 
@@ -92,9 +92,9 @@ if __name__ == "__main__":
     checkpoint = args.checkpoint
     data_dir = args.data_dir
     emulator_dir = args.emulator_dir
-    max_epochs = args.max_epochs
     model_index = args.model_index
     num_workers = args.num_workers
+    max_epochs = 1000
     q = args.q
     samples_file = args.samples_file
     target_file = args.target_file
@@ -109,6 +109,8 @@ if __name__ == "__main__":
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
+        target_error_var="land_ice_surface_velocity_magnitude_stddev",
+        target_var="land_ice_surface_velocity_magnitude",
         verbose=True,
     )
 

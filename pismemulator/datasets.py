@@ -20,7 +20,7 @@ class PISMDataset(torch.utils.data.Dataset):
         target_corr_threshold=25.0,
         target_corr_var="thickness",
         target_error_var="velsurf_mag_error",
-        training_var="velsurf_mag",
+        target_var="velsurf_mag",
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
