@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 import xarray as xr
 from torch.utils.data import TensorDataset
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 class PISMDataset(torch.utils.data.Dataset):
