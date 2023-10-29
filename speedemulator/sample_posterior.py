@@ -32,6 +32,7 @@ import torch
 from lightning import LightningModule
 from scipy.stats import beta
 from tqdm import tqdm
+from joblib import Parallel, delayed
 
 from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import NNEmulator
@@ -343,6 +344,7 @@ class MALASampler(object):
     def sample(
         self,
         X,
+        chain: int = 0,
         burn: int = 1000,
         samples: int = 10001,
         h: float = 0.1,
@@ -366,14 +368,10 @@ class MALASampler(object):
             "****************************************************************************"
         )
 
-        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
-        if not os.path.isdir(posterior_dir):
-            os.makedirs(posterior_dir)
-
         local_data = None
         m_vars = []
         acc = acc_target
-        progress = tqdm(range(samples + burn))
+        progress = tqdm(range(samples + burn), position=chain, leave=False)
         for i in progress:
             X, local_data, s = self.MALA_step(X, h, local_data=local_data)
             if i >= burn:
@@ -395,9 +393,19 @@ class MALASampler(object):
                     columns=dataset.X_keys,
                 )
                 if out_format == "csv":
-                    df.to_csv(join(posterior_dir, f"X_posterior_model_{0}.csv.gz"))
+                    df.to_csv(
+                        join(
+                            posterior_dir,
+                            f"X_posterior_model_{model_index}_chain_{chain}.csv.gz",
+                        )
+                    )
                 elif out_format == "parquet":
-                    df.to_parquet(join(posterior_dir, f"X_posterior_model_{0}.parquet"))
+                    df.to_parquet(
+                        join(
+                            posterior_dir,
+                            f"X_posterior_model_{model_index}_chain_{chain}.parquet",
+                        )
+                    )
                 else:
                     raise NotImplementedError(f"{out_format} not implemented")
 
@@ -410,6 +418,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
+    parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
@@ -438,6 +447,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     alpha = args.alpha
     model_index = args.model_index
+    chains = args.chains
     samples = args.samples
     burn = args.burn
     out_format = args.out_format
@@ -445,12 +455,18 @@ if __name__ == "__main__":
     target_file = args.target_file
     thinning_factor = args.thinning_factor
 
+    posterior_dir = f"{emulator_dir}/posterior_samples/"
+    if not os.path.isdir(posterior_dir):
+        os.makedirs(posterior_dir)
+
     dataset = PISMDataset(
         data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
         target_corr_threshold=0,
+        target_error_var="land_ice_surface_velocity_magnitude_stddev",
+        target_var="land_ice_surface_velocity_magnitude",
     )
 
     X = dataset.X
@@ -511,35 +527,32 @@ if __name__ == "__main__":
         alpha=alpha,
     )
     X_map = sampler.find_MAP(X_0)
-    X_posterior = sampler.sample(
-        X_map,
-        samples=samples,
-        model_index=int(model_index),
-        burn=burn,
-        save_interval=1000,
-        print_interval=100,
-    )
-    print(time.process_time() - start)
-    X_posterior *= dataset.X_std.cpu().numpy()
-    X_posterior += dataset.X_mean.cpu().numpy()
 
-    fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(12, 6))
-    fig.subplots_adjust(wspace=0.05, hspace=0.5)
-    for k in range(X_posterior.shape[1]):
-        ax = axs.ravel()[k]
-        sns.kdeplot(
-            X_posterior[:, k],
-            ax=ax,
+    result = Parallel(n_jobs=chains)(
+        delayed(sampler.sample)(
+            X_map,
+            samples=samples,
+            model_index=int(model_index),
+            burn=burn,
+            chain=c,
+            save_interval=1000,
+            print_interval=100,
         )
-        sns.despine(ax=ax, left=True, bottom=False)
-        ax.set_xlabel(keys_dict[dataset.X_keys[k]])
-        ax.set_ylabel(None)
-        ax.axes.yaxis.set_visible(False)
-    fig.tight_layout()
+        for c in range(chains)
+    )
 
-    d = {}
-    for k, key in enumerate(dataset.X_keys):
-        d[key] = X_posterior[:, k]
+    print(time.process_time() - start)
 
-    trace = az.convert_to_inference_data(d)
-    az.plot_trace(trace)
+    traces = []
+    for X_posterior in result:
+        d = {}
+        for k, key in enumerate(dataset.X_keys):
+            X_posterior *= dataset.X_std.cpu().numpy()
+            X_posterior += dataset.X_mean.cpu().numpy()
+            d[key] = X_posterior[:, k]
+
+        traces.append(az.convert_to_inference_data(d))
+
+    traces = az.concat(traces, dim="chain")
+    traces.to_zarr(store=join(posterior_dir, f"X_posterior_model_{model_index}.zarr"))
+    az.plot_trace(traces)

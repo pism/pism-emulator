@@ -59,8 +59,9 @@ if __name__ == "__main__":
         "--emulator", choices=["NNEmulator", "DNNEmulator"], default="NNEmulator"
     )
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--n_layers", type=int, default=5)
     parser.add_argument("--q", type=int, default=100)
     parser.add_argument(
@@ -80,11 +81,12 @@ if __name__ == "__main__":
             )
         ),
     )
+    parser.add_argument("--target_var", type=str, default="velsurf_mag")
+    parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--train_size", type=float, default=1.0)
     parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
-    #    parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
     hparams = vars(args)
 
@@ -94,10 +96,12 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     model_index = args.model_index
     num_workers = args.num_workers
-    max_epochs = 1000
+    max_epochs = args.max_epochs
     q = args.q
     samples_file = args.samples_file
     target_file = args.target_file
+    target_var = args.target_var
+    target_error_var = args.target_error_var
     train_size = args.train_size
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
@@ -108,9 +112,9 @@ if __name__ == "__main__":
         data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
+        target_var=target_var,
+        target_error_var=target_error_var,
         thinning_factor=thinning_factor,
-        target_error_var="land_ice_surface_velocity_magnitude_stddev",
-        target_var="land_ice_surface_velocity_magnitude",
         verbose=True,
     )
 
@@ -146,7 +150,7 @@ if __name__ == "__main__":
     V_hat = data_loader.V_hat
     F_mean = data_loader.F_mean
 
-    plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir)
+    plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, q=q)
 
     if checkpoint:
         checkpoint_callback = ModelCheckpoint(
@@ -176,6 +180,7 @@ if __name__ == "__main__":
         callbacks=callbacks,
         logger=logger,
         deterministic=True,
+        max_epochs=max_epochs,
         num_sanity_val_steps=0,
     )
     if train_size == 1.0:

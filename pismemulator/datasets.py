@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -20,7 +20,7 @@ class PISMDataset(torch.utils.data.Dataset):
         target_corr_threshold=25.0,
         target_corr_var="thickness",
         target_error_var="velsurf_mag_error",
-        target_var="velsurf_mag",
+        training_var="velsurf_mag",
         thinning_factor=1,
         normalize_x=True,
         log_y=True,
@@ -66,6 +66,7 @@ class PISMDataset(torch.utils.data.Dataset):
             data.values[::thinning_factor, ::thinning_factor],
             nan=epsilon,
         )
+        ny, nx = data.shape
         self.target_has_error = False
         if self.target_error_var in ds.variables:
             data_error = ds.variables[self.target_error_var].squeeze()
@@ -90,15 +91,13 @@ class PISMDataset(torch.utils.data.Dataset):
         self.grid_resolution = grid_resolution
         ds.close()
 
-        idx = (mask is False).nonzero()
+        idx = (mask == 0).nonzero()
 
         data = data[idx]
-        Y_target_2d = data
         Y_target = np.array(data.flatten(), dtype=np.float32)
         if return_numpy is False:
             Y_target = torch.from_numpy(Y_target)
         self.Y_target = Y_target
-        self.Y_target_2d = Y_target_2d
         if self.target_has_error:
             data_error = data_error[idx]
             Y_target_error_2d = data_error
@@ -120,6 +119,10 @@ class PISMDataset(torch.utils.data.Dataset):
         self.mask_2d = mask
         self.sparse_idx_2d = idx
         self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
+        data_2d = np.zeros((ny, nx))
+        data_2d.put(self.sparse_idx_1d, data)
+        Y_target_2d = np.ma.array(data=data_2d, mask=self.mask_2d)
+        self.Y_target_2d = Y_target_2d
 
     def load_data(self):
         epsilon = self.epsilon
@@ -168,7 +171,6 @@ class PISMDataset(torch.utils.data.Dataset):
         ds0.close()
         self.nx = nx
         self.ny = ny
-
         response = np.zeros((m_samples, len(self.sparse_idx_1d)))
 
         print("  Loading data sets...")
