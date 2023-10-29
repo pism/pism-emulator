@@ -63,7 +63,6 @@ def area_absolute_error(
 
 
 class AreaAbsoluteError(Metric):
-
     # Set to True if the metric during 'update' requires access to the global metric
     # state for its calculations. If not, setting this to False indicates that all
     # batch states are independent and we will optimize the runtime of 'forward'
@@ -76,13 +75,11 @@ class AreaAbsoluteError(Metric):
 
     full_state_update: bool = False
 
-    def __init__(self, compute_on_step: bool = True, dist_sync_on_step=False):
+    def __init__(self, dist_sync_on_step=False):
         # call `self.add_state`for every internal state that is needed for the metrics computations
         # dist_reduce_fx indicates the function that should be used to reduce
         # state from multiple processes
-        super().__init__(
-            compute_on_step=compute_on_step, dist_sync_on_step=dist_sync_on_step
-        )
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
 
         self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
 
@@ -142,7 +139,6 @@ def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
 
 
 class AbsoluteError(Metric):
-
     # Set to True if the metric during 'update' requires access to the global metric
     # state for its calculations. If not, setting this to False indicates that all
     # batch states are independent and we will optimize the runtime of 'forward'

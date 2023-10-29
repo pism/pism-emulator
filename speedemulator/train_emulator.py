@@ -44,7 +44,6 @@ def current_script_directory():
 
 script_directory = current_script_directory()
 
->>>>>>> dev
 if __name__ == "__main__":
     __spec__ = None
 
@@ -58,7 +57,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--n_layers", type=int, default=5)
     parser.add_argument("--q", type=int, default=100)
     parser.add_argument(
@@ -118,7 +117,6 @@ if __name__ == "__main__":
     n_samples = dataset.n_samples
 
     torch.manual_seed(0)
-    pl.lite.utilities.seed.seed_everything(0)
     np.random.seed(model_index)
 
     if not os.path.isdir(emulator_dir):
