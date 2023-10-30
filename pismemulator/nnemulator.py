@@ -364,7 +364,6 @@ class NNEmulator(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--batch_size", type=int, default=128)
         parser.add_argument("--n_hidden_1", type=int, default=128)
         parser.add_argument("--n_hidden_2", type=int, default=128)
         parser.add_argument("--n_hidden_3", type=int, default=128)

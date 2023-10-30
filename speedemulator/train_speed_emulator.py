@@ -51,10 +51,13 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
+    parser.add_argument("--accelerator", type=str, default=None)
+    parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument(
         "--data_dir", default=abspath(join(script_directory, "../tests/training_data"))
     )
+    parser.add_argument("--devices", default=None)
     parser.add_argument(
         "--emulator", choices=["NNEmulator", "DNNEmulator"], default="NNEmulator"
     )
@@ -90,9 +93,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     hparams = vars(args)
 
+    accelerator = args.accelerator
     batch_size = args.batch_size
     checkpoint = args.checkpoint
     data_dir = args.data_dir
+    devices = args.devices
     emulator_dir = args.emulator_dir
     model_index = args.model_index
     num_workers = args.num_workers
@@ -138,10 +143,18 @@ if __name__ == "__main__":
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
     if train_size == 1.0:
-        data_loader = PISMDataModule(X, F, omegas, omegas_0, num_workers=num_workers)
+        data_loader = PISMDataModule(
+            X, F, omegas, omegas_0, num_workers=num_workers, batch_size=batch_size
+        )
     else:
         data_loader = PISMDataModule(
-            X, F, omegas, omegas_0, train_size=train_size, num_workers=num_workers
+            X,
+            F,
+            omegas,
+            omegas_0,
+            train_size=train_size,
+            num_workers=num_workers,
+            batch_size=batch_size,
         )
 
     data_loader.prepare_data(q=q)
@@ -182,6 +195,8 @@ if __name__ == "__main__":
         deterministic=True,
         max_epochs=max_epochs,
         num_sanity_val_steps=0,
+        accelerator=accelerator,
+        devices=devices,
     )
     if train_size == 1.0:
         train_loader = data_loader.train_all_loader

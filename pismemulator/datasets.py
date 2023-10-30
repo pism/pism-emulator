@@ -176,7 +176,7 @@ class PISMDataset(torch.utils.data.Dataset):
         print("  Loading data sets...")
         training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
 
-        for idx, m_file in tqdm(enumerate(training_files)):
+        for idx, m_file in tqdm(enumerate(training_files), total=len(training_files)):
             ds = xr.open_dataset(m_file)
             data = np.squeeze(
                 np.nan_to_num(

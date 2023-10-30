@@ -125,7 +125,7 @@ class PISMDataModule(pl.LightningDataModule):
         else:
             S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
-            lamda, V = torch.eig(S, eigenvectors=True)  # Eq. 26
+            lamda, V = torch.linalg.eig(S)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
         print(f"...using the first {q} eigen values")

@@ -204,16 +204,21 @@ def load_hirham_climate_w_std_dev(
         )
         precip = rainfall + snowfall
 
+        obs = {
+            "snow_depth": snowdepth[..., ::thinning_factor]
+            - snowdepth[0, ::thinning_factor],
+            "accumulation": snowfall.sum(axis=0)[::thinning_factor],
+            "melt": snowmelt.sum(axis=0)[::thinning_factor],
+            "runoff": runoff.sum(axis=0)[::thinning_factor],
+            "refreeze": refreeze.sum(axis=0)[::thinning_factor],
+            "smb": smb.sum(axis=0)[::thinning_factor],
+        }
+
     return (
         temp[..., ::thinning_factor],
         precip[..., ::thinning_factor],
         temp_std_dev[..., ::thinning_factor],
-        snowdepth[..., ::thinning_factor] - snowdepth[0, ::thinning_factor],
-        snowfall.sum(axis=0)[::thinning_factor],
-        snowmelt.sum(axis=0)[::thinning_factor],
-        runoff.sum(axis=0)[::thinning_factor],
-        refreeze.sum(axis=0)[::thinning_factor],
-        smb.sum(axis=0)[::thinning_factor],
+        obs,
     )
 
 
