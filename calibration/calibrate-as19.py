@@ -1284,7 +1284,6 @@ def resample_ensemble_by_data(
         w -= w.mean()
         weights = np.exp(w)
         weights /= weights.sum()
-        print(weights)
         resampled_experiments = np.random.choice(experiments, n_samples, p=weights)
         new_frame = []
         for i in resampled_experiments:
@@ -1562,6 +1561,13 @@ if __name__ == "__main__":
         all_df,
         observed=observed,
         years=years,
+    )
+    plot_posterior_sle_pdfs(
+        f"sle_pdf_prior_posterior_w_obs_{years[0]}_{years[1]}.pdf",
+        all_df,
+        observed=observed,
+        years=years,
+        ensembles=["AS19", "Flow+Mass Calib."],
     )
 
     q_df = make_quantile_df(all_2100_df, quantiles)
