@@ -149,7 +149,7 @@ class ReferencePDDModel:
         stdv = self._interpolate(stdv)
 
         # compute accumulation and pdd
-        accu_rate = self.accu_rate(temp, prec)
+        accumulation_rate = self.accumulation_rate(temp, prec)
         inst_pdd = self.inst_pdd(temp, stdv)
 
         # initialize snow depth and melt rates
@@ -161,7 +161,7 @@ class ReferencePDDModel:
         for i in range(len(temp)):
             if i > 0:
                 snow_depth[i] = snow_depth[i - 1]
-            snow_depth[i] += accu_rate[i]
+            snow_depth[i] += accumulation_rate[i]
             snow_melt_rate[i], ice_melt_rate[i] = self.melt_rates(
                 snow_depth[i], inst_pdd[i]
             )
@@ -172,7 +172,7 @@ class ReferencePDDModel:
             - self.refreeze_snow * snow_melt_rate
             - self.refreeze_ice * ice_melt_rate
         )
-        inst_smb = accu_rate - runoff_rate
+        inst_smb = accumulation_rate - runoff_rate
 
         if return_xarray:
             # make a dataset
@@ -183,7 +183,7 @@ class ReferencePDDModel:
                     "prec": (["time", "x", "y"], prec),
                     "stdv": (["time", "x", "y"], stdv),
                     "inst_pdd": (["time", "x", "y"], inst_pdd),
-                    "accu_rate": (["time", "x", "y"], accu_rate),
+                    "accumulation_rate": (["time", "x", "y"], accumulation_rate),
                     "snow_melt_rate": (["time", "x", "y"], snow_melt_rate),
                     "ice_melt_rate": (["time", "x", "y"], ice_melt_rate),
                     "melt_rate": (["time", "x", "y"], melt_rate),
@@ -191,7 +191,7 @@ class ReferencePDDModel:
                     "inst_smb": (["time", "x", "y"], inst_smb),
                     "snow_depth": (["time", "x", "y"], snow_depth),
                     "pdd": (["x", "y"], self._integrate(inst_pdd)),
-                    "accu": (["x", "y"], self._integrate(accu_rate)),
+                    "accumulation": (["x", "y"], self._integrate(accumulation_rate)),
                     "snow_melt": (["x", "y"], self._integrate(snow_melt_rate)),
                     "ice_melt": (["x", "y"], self._integrate(ice_melt_rate)),
                     "melt": (["x", "y"], self._integrate(melt_rate)),
@@ -205,7 +205,7 @@ class ReferencePDDModel:
                 "prec": prec,
                 "stdv": stdv,
                 "inst_pdd": inst_pdd,
-                "accu_rate": accu_rate,
+                "accumulation_rate": accumulation_rate,
                 "snow_melt_rate": snow_melt_rate,
                 "ice_melt_rate": ice_melt_rate,
                 "melt_rate": melt_rate,
@@ -213,7 +213,7 @@ class ReferencePDDModel:
                 "inst_smb": inst_smb,
                 "snow_depth": snow_depth,
                 "pdd": self._integrate(inst_pdd),
-                "accu": self._integrate(accu_rate),
+                "accumulation": self._integrate(accumulation_rate),
                 "snow_melt": self._integrate(snow_melt_rate),
                 "ice_melt": self._integrate(ice_melt_rate),
                 "melt": self._integrate(melt_rate),
@@ -285,7 +285,7 @@ class ReferencePDDModel:
         # convert to degree-days
         return teff * 365.242198781
 
-    def accu_rate(self, temp, prec):
+    def accumulation_rate(self, temp, prec):
         """Compute accumulation rate from temperature and precipitation.
 
         The fraction of precipitation that falls as snow decreases linearly
@@ -477,12 +477,13 @@ class PDDModel:
 
         # interpolate time-series
         # FIXME propagate data arrays, coordinates
-        temp = self._interpolate(temp)
-        prec = self._interpolate(prec)
-        stdv = self._interpolate(stdv)
+        if (self.interpolate_n > 1) and (self.interpolate_n != temp.shape[0]):
+            temp = self._interpolate(temp)
+            prec = self._interpolate(prec)
+            stdv = self._interpolate(stdv)
 
         # compute accumulation and pdd
-        accu_rate = self.accu_rate(temp, prec)
+        accumulation_rate = self.accumulation_rate(temp, prec)
         inst_pdd = self.inst_pdd(temp, stdv)
 
         # initialize snow depth and melt rates
@@ -494,7 +495,7 @@ class PDDModel:
         for i in range(len(temp)):
             if i > 0:
                 snow_depth[i] = snow_depth[i - 1]
-            snow_depth[i] += accu_rate[i]
+            snow_depth[i] += accumulation_rate[i]
             snow_melt_rate[i], ice_melt_rate[i] = self.melt_rates(
                 snow_depth[i], inst_pdd[i]
             )
@@ -504,7 +505,7 @@ class PDDModel:
         ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
         refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
         runoff_rate = melt_rate - refreeze_rate
-        inst_smb = accu_rate - runoff_rate
+        inst_smb = accumulation_rate - runoff_rate
 
         if return_xarray:
             # make a dataset
@@ -515,7 +516,7 @@ class PDDModel:
                     "prec": (["time", "x", "y"], prec),
                     "stdv": (["time", "x", "y"], stdv),
                     "inst_pdd": (["time", "x", "y"], inst_pdd),
-                    "accu_rate": (["time", "x", "y"], accu_rate),
+                    "accumulation_rate": (["time", "x", "y"], accumulation_rate),
                     "snow_melt_rate": (["time", "x", "y"], snow_melt_rate),
                     "ice_melt_rate": (["time", "x", "y"], ice_melt_rate),
                     "melt_rate": (["time", "x", "y"], melt_rate),
@@ -523,7 +524,7 @@ class PDDModel:
                     "inst_smb": (["time", "x", "y"], inst_smb),
                     "snow_depth": (["time", "x", "y"], snow_depth),
                     "pdd": (["x", "y"], self._integrate(inst_pdd)),
-                    "accu": (["x", "y"], self._integrate(accu_rate)),
+                    "accumulation": (["x", "y"], self._integrate(accumulation_rate)),
                     "snow_melt": (["x", "y"], self._integrate(snow_melt_rate)),
                     "ice_melt": (["x", "y"], self._integrate(ice_melt_rate)),
                     "melt": (["x", "y"], self._integrate(melt_rate)),
@@ -540,7 +541,7 @@ class PDDModel:
                 "prec": prec,
                 "stdv": stdv,
                 "inst_pdd": inst_pdd,
-                "accu_rate": accu_rate,
+                "accumulation_rate": accumulation_rate,
                 "snow_melt_rate": snow_melt_rate,
                 "ice_melt_rate": ice_melt_rate,
                 "melt_rate": melt_rate,
@@ -551,7 +552,7 @@ class PDDModel:
                 "inst_smb": inst_smb,
                 "snow_depth": snow_depth,
                 "pdd": self._integrate(inst_pdd),
-                "accu": self._integrate(accu_rate),
+                "accumulation": self._integrate(accumulation_rate),
                 "snow_melt": self._integrate(snow_melt_rate),
                 "ice_melt": self._integrate(ice_melt_rate),
                 "melt": self._integrate(melt_rate),
@@ -622,7 +623,7 @@ class PDDModel:
         # convert to degree-days
         return teff * 365.242198781
 
-    def accu_rate(self, temp, prec):
+    def accumulation_rate(self, temp, prec):
         """Compute accumulation rate from temperature and precipitation.
         The fraction of precipitation that falls as snow decreases linearly
         from one to zero between temperature thresholds defined by the
@@ -799,11 +800,9 @@ class TorchPDDModel(torch.nn.modules.Module):
         ('smb'), and many other output variables in a dictionary.
         """
 
-        device = self.device
-        # ensure numpy arrays
-        temp = torch.asarray(temp, device=device)
-        prec = torch.asarray(prec, device=device)
-        stdv = torch.asarray(stdv, device=device)
+        temp = torch.asarray(temp, device=self.device)
+        prec = torch.asarray(prec, device=self.device)
+        stdv = torch.asarray(stdv, device=self.device)
 
         # expand arrays to the largest shape
         maxshape = max(temp.shape, prec.shape, stdv.shape)
@@ -817,8 +816,8 @@ class TorchPDDModel(torch.nn.modules.Module):
             prec = self._interpolate(prec)
             stdv = self._interpolate(stdv)
 
-        # compute accumulation and pdd
-        accu_rate = self.accu_rate(temp, prec)
+        # compute accumulationmulation and pdd
+        accumulation_rate = self.accumulation_rate(temp, prec)
         inst_pdd = self.inst_pdd(temp, stdv)
 
         # initialize snow depth, melt and refreeze rates
@@ -834,9 +833,9 @@ class TorchPDDModel(torch.nn.modules.Module):
 
         for i in range(len(temp)):
             if i == 0:
-                intermediate_snow_depth = accu_rate[i]
+                intermediate_snow_depth = accumulation_rate[i]
             else:
-                intermediate_snow_depth = snow_depth[i - 1] + accu_rate[i]
+                intermediate_snow_depth = snow_depth[i - 1] + accumulation_rate[i]
 
             potential_snow_melt = ddf_snow * inst_pdd[i]
 
@@ -854,7 +853,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
         refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
         runoff_rate = melt_rate - refreeze_rate
-        inst_smb = accu_rate - runoff_rate
+        inst_smb = accumulation_rate - runoff_rate
 
         # output
         return {
@@ -862,7 +861,7 @@ class TorchPDDModel(torch.nn.modules.Module):
             "prec": prec,
             "stdv": stdv,
             "inst_pdd": inst_pdd,
-            "accu_rate": accu_rate,
+            "accumulation_rate": accumulation_rate,
             "snow_melt_rate": snow_melt_rate,
             "ice_melt_rate": ice_melt_rate,
             "melt_rate": melt_rate,
@@ -873,7 +872,7 @@ class TorchPDDModel(torch.nn.modules.Module):
             "inst_smb": inst_smb,
             "snow_depth": snow_depth,
             "pdd": self._integrate(inst_pdd),
-            "accu": self._integrate(accu_rate),
+            "accumulation": self._integrate(accumulation_rate),
             "snow_melt": self._integrate(snow_melt_rate),
             "ice_melt": self._integrate(ice_melt_rate),
             "melt": self._integrate(melt_rate),
@@ -889,9 +888,9 @@ class TorchPDDModel(torch.nn.modules.Module):
         if array.shape == shape:
             res = array
         elif array.shape == (1, shape[1], shape[2]):
-            res = np.asarray([array[0]] * shape[0])
+            res = [array[0]] * shape[0]
         elif array.shape == shape[1:]:
-            res = np.asarray([array] * shape[0])
+            res = [array] * shape[0]
         elif array.shape == ():
             res = array * torch.ones(shape)
         else:
@@ -902,7 +901,8 @@ class TorchPDDModel(torch.nn.modules.Module):
 
     def _integrate(self, array):
         """Integrate an array over one year"""
-        return torch.sum(array, axis=0) / (self.interpolate_n - 1)
+        dx = torch.sum(array, axis=0) / (self.interpolate_n - 1)
+        return dx.to(self.device)
 
     def _interpolate(self, array):
         """Interpolate an array through one year."""
@@ -913,8 +913,9 @@ class TorchPDDModel(torch.nn.modules.Module):
         oldy = torch.vstack((array[-1], array, array[0]))
         newx = (torch.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
         newy = interp1d(oldx.cpu(), oldy.cpu(), kind=rule, axis=0)(newx)
+        interp = torch.from_numpy(newy)
 
-        return torch.from_numpy(newy).to(self.device)
+        return interp.to(self.device)
 
     def inst_pdd(self, temp, stdv):
         """Compute instantaneous positive degree days from temperature.
@@ -936,7 +937,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         normtemp = temp / (torch.sqrt(torch.tensor(2)) * stdv)
         calovgreve = stdv / torch.sqrt(torch.tensor(2) * torch.pi) * torch.exp(
             -(normtemp**2)
-        ) + temp / 2 * torch.erfc(-normtemp)
+        ) + temp / 2 * (1.0 - torch.erf(-normtemp))
 
         # use positive part where sigma is zero and Calov and Greve elsewhere
         teff = torch.where(stdv == 0.0, positivepart, calovgreve)
@@ -945,8 +946,8 @@ class TorchPDDModel(torch.nn.modules.Module):
         # convert to degree-days
         return snowfrac * 365.242198781
 
-    def accu_rate(self, temp, prec):
-        """Compute accumulation rate from temperature and precipitation.
+    def accumulation_rate(self, temp, prec):
+        """Compute accumulationmulation rate from temperature and precipitation.
 
         The fraction of precipitation that falls as snow decreases linearly
         from one to zero between temperature thresholds defined by the
@@ -962,7 +963,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         reduced_temp = (self.temp_rain - temp) / (self.temp_rain - self.temp_snow)
         snowfrac = torch.clip(reduced_temp, 0, 1)
 
-        # return accumulation rate
+        # return accumulationmulation rate
         return snowfrac * prec
 
 
@@ -1455,7 +1456,7 @@ class TorchDEBMModel(torch.nn.modules.Module):
         Z = temperature / (np.sqrt(2.0) * sigma)
         b = (sigma / np.sqrt(2.0 * torch.pi)) * torch.exp(-Z * Z) + (
             temperature / 2.0
-        ) * torch.erfc(-Z)
+        ) * (1.0 - torch.erf(-Z))
 
         return torch.where(sigma == 0, a, b)
 

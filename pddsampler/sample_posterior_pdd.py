@@ -18,6 +18,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import arviz as az
 import contextlib
 import os
 import time
@@ -29,12 +30,13 @@ import joblib
 import lightning as pl
 import numpy as np
 import pandas as pd
+import pylab as plt
 import torch
 from joblib import Parallel, delayed
 from pyDOE import lhs
 from scipy.stats import beta
 from scipy.stats.distributions import uniform
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from pismemulator.models import TorchPDDModel as PDDModel
 from pismemulator.utils import load_hirham_climate_w_std_dev
@@ -108,6 +110,13 @@ class MALASampler(object):
         nu: Union[float, torch.tensor] = 1.0,
         output_dir="./output",
         device="cpu",
+        predictor_vars: list[str] = [
+            "accumulation",
+            "melt",
+            "runoff",
+            "refreeze",
+            "smb",
+        ],
     ):
         super().__init__()
         self.model = model
@@ -167,6 +176,7 @@ class MALASampler(object):
             else nu.to(device)
         )
         self.output_dir = output_dir
+        self.predictor_vars = predictor_vars
         self.hessian_counter = 0
 
     def find_MAP(
@@ -174,7 +184,6 @@ class MALASampler(object):
         X,
         n_iters: int = 26,
         verbose: bool = False,
-        print_interval: int = 10,
     ):
         print("***********************************************")
         print("Finding Maximum A-Posterior (MAP) point")
@@ -182,7 +191,7 @@ class MALASampler(object):
         # Line search distances
         alphas = torch.logspace(-4, 0, 11)
         # Find MAP point
-        for i in tqdm(range(n_iters)):
+        for i in tqdm(range(n_iters), total=n_iters):
             log_pi, g, _, Hinv, log_det_Hinv = self.get_log_like_gradient_and_hessian(
                 X, compute_hessian=True
             )
@@ -193,7 +202,8 @@ class MALASampler(object):
             alpha_index = np.nanargmin(
                 [
                     self.get_log_like_gradient_and_hessian(
-                        X + alpha * p, compute_hessian=False
+                        X + alpha * p,
+                        compute_hessian=False,
                     )
                     .detach()
                     .cpu()
@@ -204,20 +214,6 @@ class MALASampler(object):
             gamma = alphas[alpha_index]
             mu = X + gamma * p
             X.data = mu.data
-            if verbose & (i % print_interval == 0):
-                print("===============================================")
-                print(f"iter: {i:d}, log(P): {log_pi:.1f}\n")
-                print(
-                    "".join(
-                        [
-                            f"{key}: {val:.3f}\n"
-                            for key, val in zip(
-                                X_keys,
-                                X.data.cpu().numpy(),
-                            )
-                        ]
-                    )
-                )
         print(f"\nFinal iter: {i:d}, log(P): {log_pi:.1f}\n")
         print(
             "".join(
@@ -232,29 +228,22 @@ class MALASampler(object):
         )
         return X
 
-    def neg_log_prob(
-        self,
-        X,
-    ):
+    def neg_log_prob(self, X):
         self.model.pdd_factor_snow = X[0]
         self.model.pdd_factor_ice = X[1]
         self.model.refreeze_snow = X[2]
         self.model.refreeze_ice = X[3]
         self.model.temp_snow = X[4]
         self.model.temp_rain = X[5]
+
         result = self.model.forward(
             self.temp_obs,
             self.precip_obs,
             self.std_dev_obs,
         )
 
-        A = result["accu"]
-        M = result["melt"]
-        R = result["runoff"]
-        F = result["refreeze"]
-        B = result["smb"]
-
-        Y_pred = torch.vstack((A, M, R, F, B)).T.type(torch.FloatTensor).to(device)
+        predictions = [result[k] for k in self.predictor_vars if k in result]
+        Y_pred = torch.vstack((predictions)).T.type(torch.FloatTensor).to(device)
 
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
@@ -282,13 +271,17 @@ class MALASampler(object):
         )
         return -(self.alpha * log_likelihood + log_prior)
 
-    def get_log_like_gradient_and_hessian(self, X, eps=1e-6, compute_hessian=False):
+    def get_log_like_gradient_and_hessian(self, X, eps=1e-4, compute_hessian=False):
         log_pi = self.neg_log_prob(X)
         if compute_hessian:
             self.hessian_counter += 1
             g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=True)[0]
             H = torch.autograd.functional.hessian(
-                self.neg_log_prob, X, create_graph=True
+                self.neg_log_prob,
+                X,
+                create_graph=False,
+                vectorize=True,
+                outer_jacobian_strategy="forward-mode",
             )
             lamda, Q = torch.linalg.eig(H)
             lamda, Q = torch.real(lamda), torch.real(Q)
@@ -364,7 +357,6 @@ class MALASampler(object):
         k: float = 0.01,
         beta: float = 0.99,
         save_interval: int = 1000,
-        print_interval: int = 50,
         validate: bool = False,
     ):
         if validate:
@@ -377,27 +369,40 @@ class MALASampler(object):
         local_data = None
         m_vars = []
         acc = acc_target
-        progress = tqdm(range(samples + burn), position=chain, leave=False)
-        for i in progress:
-            X, local_data, s = self.MALA_step(X, h, local_data=local_data)
-            m_vars.append(X.detach())
-            acc = beta * acc + (1 - beta) * s
-            h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
-            log_p = local_data[0].item()
-            desc = f"chain {chain}:  accept rate: {acc:.2f}, step size: {h:.2f}, log(P): {log_p:.1f}"
-            progress.set_description(desc=desc)
-            if ((i + burn) % save_interval == 0) & (i >= burn):
-                X_posterior = torch.stack(m_vars).cpu().numpy()[burn::]
-                df = pd.DataFrame(
-                    data=X_posterior.astype("float32"),
-                    columns=X_keys,
-                )
-                df.to_parquet(
-                    join(
-                        posterior_dir,
-                        f"X_posterior_chain_{chain}.parquet",
+
+        with tqdm_joblib(
+            tqdm(
+                range(samples + burn),
+                total=samples + burn,
+            )
+        ) as progress:
+            for i in progress:
+                X, local_data, s = self.MALA_step(X, h, local_data=local_data)
+                m_vars.append(X.detach())
+                acc = beta * acc + (1 - beta) * s
+                h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
+                log_p = local_data[0].item()
+                desc = f"chain {chain}:  accept: {acc:.2f}, step: {h:.2f}, log(P): {log_p:.1f}"
+                progress.set_description(desc=desc)
+                if ((i + burn) % save_interval == 0) & (i >= burn):
+                    X_posterior = torch.stack(m_vars).cpu().numpy()[burn::]
+                    d = {}
+                    for k, key in enumerate(X_keys):
+                        d[key] = X_posterior[:, k]
+
+                    trace = az.convert_to_inference_data(d)
+                    trace.to_zarr(store=f"X_posterior_chain_{chain}.zarr")
+
+                    df = pd.DataFrame(
+                        data=X_posterior.astype("float32"),
+                        columns=X_keys,
                     )
-                )
+                    df.to_parquet(
+                        join(
+                            posterior_dir,
+                            f"X_posterior_chain_{chain}.parquet",
+                        )
+                    )
 
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
@@ -409,11 +414,21 @@ def draw_samples(n_samples=1_0000, random_seed=2):
     distributions = {
         "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
-        "refreeze_ice": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
-        "temp_snow": uniform(loc=-1.0, scale=2.0),  # uniform between 0 and 1
+        "refreeze_snow": uniform(loc=0.0, scale=0.6),  # uniform between 0 and 1
+        "refreeze_ice": uniform(loc=0.0, scale=0.01),  # uniform between 0 and 1
+        "temp_snow": uniform(loc=-2.0, scale=2.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=2.0),  # uniform between 0 and 1
     }
+
+    # distributions = {
+    #     "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
+    #     "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
+    #     "refreeze_snow": uniform(loc=0.25, scale=0.5),  # uniform between 0 and 1
+    #     "refreeze_ice": uniform(loc=0.0, scale=0.25),  # uniform between 0 and 1
+    #     "temp_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
+    #     "temp_rain": uniform(loc=1.0, scale=1.0),  # uniform between 0 and 1
+    # }
+
     # Names of all the variables
     keys = [x for x in distributions.keys()]
 
@@ -446,11 +461,12 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output_dir", default="sampler")
-    parser.add_argument("--n_interpolate", type=int, default=52)
+    parser.add_argument("--n_interpolate", type=int, default=12)
     parser.add_argument("--chains", type=int, default=5)
     parser.add_argument("--samples", type=int, default=10_000)
-    parser.add_argument("--burn", type=int, default=500)
+    parser.add_argument("--sigma", type=float, default=0.1)
     parser.add_argument("--thinning_factor", type=int, default=100)
+    parser.add_argument("--burn", type=int, default=500)
     parser.add_argument("--validate", action="store_true", default=False)
     parser.add_argument(
         "--training_file", type=str, default="DMI-HIRHAM5_1980_2020_MMS.nc"
@@ -467,6 +483,7 @@ if __name__ == "__main__":
     n_interpolate = args.n_interpolate
     n_chains = args.chains
     samples = args.samples
+    sigma = args.sigma
     thinning_factor = args.thinning_factor
     training_file = args.training_file
     use_observed_std_dev = args.use_obs_sd
@@ -484,19 +501,15 @@ if __name__ == "__main__":
 
     prior_df = draw_samples(n_samples=20_000)
 
-    (
-        temp,
-        precip,
-        std_dev,
-        snow_depth,
-        accumulation,
-        melt,
-        runoff,
-        refreeze,
-        smb,
-    ) = load_hirham_climate_w_std_dev(training_file, thinning_factor=thinning_factor)
+    temp, precip, std_dev, obs = load_hirham_climate_w_std_dev(
+        training_file, thinning_factor=thinning_factor
+    )
     if not use_observed_std_dev:
         std_dev = np.zeros_like(temp)
+
+    predictor_vars = ["accumulation", "melt", "runoff", "refreeze", "smb"]
+
+    obs_pred = [torch.from_numpy(obs[k]) for k in predictor_vars if k in obs]
 
     if validate:
         f_snow_val = 3.2
@@ -521,41 +534,25 @@ if __name__ == "__main__":
             refreeze_ice=refreeze_ice_val,
             temp_snow=temp_snow_val,
             temp_rain=temp_rain_val,
-            n_interpolate=n_interpolate,
+            interpolate_n=n_interpolate,
         )
         result = pdd(temp, precip, std_dev)
 
-        A = result["accu"]
-        M = result["melt"]
-        R = result["runoff"]
-        F = result["refreeze"]
-        B = result["smb"]
+        pdd_pred = [torch.from_numpy(obs[k]) for k in predictor_vars if k in result]
 
-        Y_obs = torch.vstack((A, M, R, F, B)).T.type(torch.FloatTensor).to(device)
+        Y_obs = torch.vstack((ppd_pred)).T.type(torch.FloatTensor).to(device)
     else:
-        Y_obs = (
-            torch.vstack(
-                (
-                    torch.from_numpy(accumulation),
-                    torch.from_numpy(melt),
-                    torch.from_numpy(runoff),
-                    torch.from_numpy(refreeze),
-                    torch.from_numpy(smb),
-                )
-            )
-            .T.type(torch.FloatTensor)
-            .to(device)
-        )
+        Y_obs = torch.vstack((obs_pred)).T.type(torch.FloatTensor).to(device)
 
     X_prior = torch.from_numpy(prior_df.values).type(torch.FloatTensor)
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
     sh = torch.ones_like(Y_obs)
-    sigma_hat = sh * torch.tensor([0.0001]).to(device)
+    sigma_hat = sh * torch.tensor([sigma]).to(device)
     X_keys = [
-        "f_snow",
-        "f_ice",
+        "pdd_factor_snow",
+        "pdd_factor_ice",
         "refreeze_snow",
         "refreeze_ice",
         "temp_snow",
@@ -591,17 +588,20 @@ if __name__ == "__main__":
         output_dir=output_dir,
         device=device,
         alpha=alpha,
+        predictor_vars=predictor_vars,
     )
     X_map = sampler.find_MAP(X_0, verbose=False)
 
+    # with tqdm_joblib(
+    #     tqdm(desc="Sampling chains", total=n_chains, position=0, leave=True)
+    # ) as progress_bar:
     result = Parallel(n_jobs=n_chains)(
         delayed(sampler.sample)(
-            X_map,
+            X_map.clone(),
             samples=samples,
             burn=burn,
             chain=c,
             save_interval=1000,
-            print_interval=100,
             validate=validate,
         )
         for c in range(n_chains)
@@ -609,3 +609,22 @@ if __name__ == "__main__":
 
     elapsed_time = time.process_time() - start
     print(f"Sampling took {elapsed_time:.0f}s")
+
+    traces = []
+    for X_posterior in result:
+        d = {}
+        for k, key in enumerate(X_keys):
+            d[key] = X_posterior[:, k]
+
+        traces.append(az.convert_to_inference_data(d))
+
+    traces = az.concat(traces, dim="chain")
+
+    all_traces = az.extract(traces)
+
+    plt.rcParams["figure.constrained_layout.use"] = True
+    axs = az.plot_trace(all_traces)
+    for k, ax in enumerate(axs):
+        axs[k, 0].set_xlim(X_min[k], X_max[k])
+    traces.to_zarr(store=f"X_posterior.zarr")
+    az.plot_trace(all_traces)

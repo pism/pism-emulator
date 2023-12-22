@@ -102,11 +102,17 @@ class PISMDataModule(pl.LightningDataModule):
         print("Generating eigenglaciers")
         defaultKwargs = {
             "cutoff": 1.0,
-            "q": 100,
+            "q": 10,
             "svd_lowrank": True,
             "eigenvalues": False,
         }
-        kwargs = {**defaultKwargs, **kwargs}
+        if len(kwargs) > 0:
+            kwargs = {**defaultKwargs, **kwargs}
+        else:
+            kwargs = defaultKwargs
+
+        q = kwargs["q"]
+
         F = self.F
         omegas = self.omegas
         n_grid_points = F.shape[1]
@@ -114,21 +120,18 @@ class PISMDataModule(pl.LightningDataModule):
         F_bar = F - F_mean  # Eq. 28
         if kwargs["svd_lowrank"]:
             Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-            U, S, V = torch.svd_lowrank(Z @ F_bar, q=kwargs["q"])
+            U, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
             lamda = S**2 / (n_grid_points)
         else:
             S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
-            lamda, V = torch.eig(S, eigenvectors=True)  # Eq. 26
+            lamda, V = torch.linalg.eig(S)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        cutoff_index = torch.sum(
-            torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"]
-        )
-        print(f"...using the first {cutoff_index} eigen values")
-        lamda_truncated = lamda.detach()[:cutoff_index]
-        V = V.detach()[:, :cutoff_index]
-        V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))
+        print(f"...using the first {q} eigen values")
+        lamda_truncated = lamda.detach()
+        V = V.detach()
+        V_hat = V @ torch.diag(torch.sqrt(lamda))
 
         if kwargs["eigenvalues"]:
             return V_hat, F_bar, F_mean, lamda

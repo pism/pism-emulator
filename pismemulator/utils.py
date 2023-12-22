@@ -56,11 +56,14 @@ param_keys_dict = {
     "PHIMAX": "$\phi_{\mathrm{max}}$ ($^{\circ}$)",
     "ZMIN": "$z_{\mathrm{min}}$ (m)",
     "ZMAX": "$z_{\mathrm{max}}$ (m)",
+    "a_glen": "A (Pa^{-n} s^{-1})",
     "sia_e": "$E_{\mathrm{SIA}}$ (1)",
     "ssa_e": "$E_{\mathrm{SSA}}$ (1)",
     "ssa_n": "$n_{\mathrm{SSA}}$ (1)",
     "ppq": "$q$ (1)",
     "tefo": "$\delta$ (1)",
+    "till_effective_fraction_overburden": "$\delta$ (1)",
+    "pseudo_plastic_uthershold": "u_{\mathrm{thr} (m yr^{-1})}",
     "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
     "z_min": "$z_{\mathrm{min}}$ (m)",
     "z_max": "$z_{\mathrm{max}}$ (m)",
@@ -201,16 +204,21 @@ def load_hirham_climate_w_std_dev(
         )
         precip = rainfall + snowfall
 
+        obs = {
+            "snow_depth": snowdepth[..., ::thinning_factor]
+            - snowdepth[0, ::thinning_factor],
+            "accumulation": snowfall.sum(axis=0)[::thinning_factor],
+            "melt": snowmelt.sum(axis=0)[::thinning_factor],
+            "runoff": runoff.sum(axis=0)[::thinning_factor],
+            "refreeze": refreeze.sum(axis=0)[::thinning_factor],
+            "smb": smb.sum(axis=0)[::thinning_factor],
+        }
+
     return (
         temp[..., ::thinning_factor],
         precip[..., ::thinning_factor],
         temp_std_dev[..., ::thinning_factor],
-        snowdepth[..., ::thinning_factor] - snowdepth[0, ::thinning_factor],
-        snowfall.sum(axis=0)[::thinning_factor],
-        snowmelt.sum(axis=0)[::thinning_factor],
-        runoff.sum(axis=0)[::thinning_factor],
-        refreeze.sum(axis=0)[::thinning_factor],
-        smb.sum(axis=0)[::thinning_factor],
+        obs,
     )
 
 
@@ -452,8 +460,9 @@ def plot_eigenglaciers(
     nrows=2,
     ncols=3,
     figsize=(3.2, 3.6),
+    q: int = 6,
 ):
-    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
+    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True, q=q)
 
     lamda_scaled = lamda / lamda.sum() * 100
     fig, axs = plt.subplots(
