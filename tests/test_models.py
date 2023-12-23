@@ -21,7 +21,7 @@ import numpy as np
 import torch
 from numpy.testing import assert_array_almost_equal
 
-from pismemulator.models import ReferencePDDModel, TorchDEBMModel, TorchPDDModel
+from pism_emulator.models import ReferencePDDModel, TorchDEBMModel, TorchPDDModel
 
 
 def make_fake_climate() -> tuple[np.ndarray, np.ndarray, np.ndarray]:

@@ -29,7 +29,7 @@ import pandas as pd
 import pylab as plt
 import xarray as xr
 from matplotlib.colors import LogNorm
-from pyDOE import lhs
+from pyDOE2 import lhs
 from SALib.sample import saltelli
 from scipy.stats.distributions import gamma, randint, truncnorm, uniform
 from sklearn.linear_model import LinearRegression

@@ -58,7 +58,7 @@ class PISMDataset(torch.utils.data.Dataset):
         return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         print(f"Loading target {self.target_file}")
-        ds = xr.open_dataset(self.target_file)
+        ds = xr.open_dataset(self.target_file, decode_times=False)
         data = ds.variables[self.target_var].squeeze()
         mask = data.isnull()
         mask = mask[::thinning_factor, ::thinning_factor]
@@ -161,7 +161,7 @@ class PISMDataset(torch.utils.data.Dataset):
         m_samples, n_parameters = samples.shape
         self.X_keys = samples.keys()
 
-        ds0 = xr.open_dataset(training_files[0])
+        ds0 = xr.open_dataset(training_files[0], decode_times=False)
         _, ny, nx = (
             ds0.variables["velsurf_mag"]
             .values[:, ::thinning_factor, ::thinning_factor]
@@ -177,7 +177,7 @@ class PISMDataset(torch.utils.data.Dataset):
         training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
 
         for idx, m_file in tqdm(enumerate(training_files), total=len(training_files)):
-            ds = xr.open_dataset(m_file)
+            ds = xr.open_dataset(m_file, decode_times=False)
             data = np.squeeze(
                 np.nan_to_num(
                     ds.variables[training_var].values[

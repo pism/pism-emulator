@@ -30,10 +30,10 @@ from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-from pismemulator.datamodules import PISMDataModule
-from pismemulator.datasets import PISMDataset
-from pismemulator.nnemulator import NNEmulator
-from pismemulator.utils import plot_eigenglaciers
+from pism_emulator.datamodules import PISMDataModule
+from pism_emulator.datasets import PISMDataset
+from pism_emulator.nnemulator import NNEmulator
+from pism_emulator.utils import plot_eigenglaciers
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -51,13 +51,13 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--accelerator", type=str, default=None)
+    parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument(
         "--data_dir", default=abspath(join(script_directory, "../tests/training_data"))
     )
-    parser.add_argument("--devices", default=None)
+    parser.add_argument("--devices", default="auto")
     parser.add_argument(
         "--emulator", choices=["NNEmulator", "DNNEmulator"], default="NNEmulator"
     )
@@ -188,8 +188,8 @@ if __name__ == "__main__":
         area,
         hparams,
     )
-    trainer = pl.Trainer.from_argparse_args(
-        args,
+    print(accelerator)
+    trainer = pl.Trainer(
         callbacks=callbacks,
         logger=logger,
         deterministic=True,

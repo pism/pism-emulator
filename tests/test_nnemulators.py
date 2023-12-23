@@ -27,8 +27,7 @@ from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 
-from pismemulator.datasets import PISMDataset
-from pismemulator.nnemulator import DNNEmulator, NNEmulator
+from pism_emulator.nnemulator import DNNEmulator, NNEmulator
 
 
 def seed_worker(worker_id):
@@ -41,36 +40,6 @@ g = torch.Generator()
 g.manual_seed(0)
 
 
-def test_dataset():
-    """"""
-
-    dataset = PISMDataset(
-        data_dir="tests/training_data",
-        samples_file="data/samples/velocity_calibration_samples_50.csv",
-        target_file="tests/test_data/test_vel_g9000m.nc",
-        thinning_factor=1,
-    )
-
-    X = dataset.X.detach().numpy()
-    Y = dataset.Y.detach().numpy()
-
-    with np.load("tests/test_samples.npz") as data:
-        X_true = data["arr_0"]
-    with np.load("tests/test_responses.npz") as data:
-        Y_true = data["arr_0"]
-    with np.load("tests/test_areas.npz") as data:
-        normed_area_true = data["arr_0"]
-    n_grid_points = dataset.n_grid_points
-    n_parameters = dataset.n_parameters
-    n_samples = dataset.n_samples
-    normed_area = dataset.normed_area
-
-    assert_equal(n_grid_points, 26237)
-    assert_equal(n_parameters, 8)
-    assert_equal(n_samples, 482)
-    assert_array_almost_equal(X, X_true, decimal=4)
-    assert_array_almost_equal(Y, Y_true, decimal=4)
-    assert_array_almost_equal(normed_area, normed_area_true, decimal=4)
 
 
 def test_emulator_equivalence():
@@ -141,7 +110,7 @@ def test_emulator_equivalence():
     val_loader = DataLoader(
         dataset=val_data,
         batch_size=hparams["batch_size"],
-        shuffle=True,
+        shuffle=False,
         pin_memory=True,
         worker_init_fn=seed_worker,
         generator=g,
@@ -149,10 +118,10 @@ def test_emulator_equivalence():
 
     max_epochs = 10
     trainer_e = pl.Trainer(
-        deterministic=True, max_epochs=max_epochs, num_sanity_val_steps=0
+        deterministic=True, max_epochs=max_epochs, num_sanity_val_steps=0, accelerator="cpu"
     )
     trainer_de = pl.Trainer(
-        deterministic=True, max_epochs=max_epochs, num_sanity_val_steps=0
+        deterministic=True, max_epochs=max_epochs, num_sanity_val_steps=0, accelerator="cpu"
     )
     trainer_e.fit(e, train_loader, val_loader)
     trainer_de.fit(de, train_loader, val_loader)

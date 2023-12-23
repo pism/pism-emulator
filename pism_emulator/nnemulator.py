@@ -33,136 +33,6 @@ from pismemulator.metrics import (
 )
 
 
-class PDDEmulator(pl.LightningModule):
-    """
-    The Neural Network emulator is adapted from Aschwanden & Brinkerhoff (2022),
-    sans Principal Component Analysis.
-    but maps (T, P, beta) -> A, M, R where
-    T: temperature (monthly or daily)
-    P: precipitation (monthly or daily)
-    S: standard deviation (monthly or daily)
-    beta: f_snow, f_ice, refreeze_snow, refreeze_ice, temp_snow, temp_rain
-
-    A: Accumulation (annual)
-    M: Melt (annual)
-    R: Runoff (annual)
-    F: Refreeze (annual)
-    B: SMB (annual)
-    """
-
-    def __init__(
-        self,
-        n_parameters: int,
-        n_outputs: int,
-        hparams,
-        *args,
-        **kwargs,
-    ):
-        super().__init__()
-        hparams["n_paramters"] = n_parameters
-        hparams["n_outputs"] = n_outputs
-        n_hidden = hparams["n_hidden"]
-        n_layers = hparams["n_layers"]
-        self.save_hyperparameters(hparams)
-
-        if isinstance(n_hidden, int):
-            n_hidden = [n_hidden] * (n_layers - 1)
-        p = [0] + [0.5] * (n_layers - 2) + [0.3]
-
-        # Inputs to hidden layer linear transformation
-        self.l_first = nn.Linear(n_parameters, n_hidden[0])
-        self.norm_first = nn.LayerNorm(n_hidden[0])
-        self.dropout_first = nn.Dropout(p=p[0])
-
-        models = []
-        for n in range(n_layers - 2):
-            models.append(
-                nn.Sequential(
-                    OrderedDict(
-                        [
-                            ("Linear", nn.Linear(n_hidden[n], n_hidden[n + 1])),
-                            ("LayerNorm", nn.LayerNorm(n_hidden[n + 1])),
-                            ("Dropout", nn.Dropout(p=p[n + 1])),
-                        ]
-                    )
-                )
-            )
-        self.dnn = nn.ModuleList(models)
-        self.l_last = nn.Linear(n_hidden[-1], n_outputs, bias=False)
-
-        self.train_ae = AbsoluteError()
-        self.test_ae = AbsoluteError()
-
-    def forward(self, x, add_mean=False):
-        # Pass the input tensor through each of our operations
-
-        a = self.l_first(x)
-        a = self.norm_first(a)
-        a = self.dropout_first(a)
-        z = torch.relu(a)
-
-        for dnn in self.dnn:
-            a = dnn(z)
-            z = torch.relu(a) + z
-
-        return self.l_last(z)
-
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parser = parent_parser.add_argument_group("PDDEmulator")
-        parser.add_argument("--batch_size", type=int, default=128)
-        parser.add_argument("--n_hidden", type=int, default=128)
-        parser.add_argument("--n_layers", type=int, default=5)
-        parser.add_argument("--learning_rate", type=float, default=0.001)
-
-        return parent_parser
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
-        )
-        # This is an approximation to Doug's version:
-        scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.99, verbose=False),
-        }
-
-        return [optimizer], [scheduler]
-
-    def training_step(self, batch, batch_idx):
-        x, f, o, _ = batch
-        f_pred = self.forward(x)
-        loss = absolute_error(f_pred, f, o)
-
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, f, o, o_0 = batch
-        f_pred = self.forward(x)
-
-        self.log("train_loss", self.train_ae(f_pred, f, o), sync_dist=True)
-        self.log("test_loss", self.test_ae(f_pred, f, o_0), sync_dist=True)
-
-        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
-
-    def validation_epoch_end(self, outputs):
-        self.log(
-            "train_loss",
-            self.train_ae,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-        self.log(
-            "test_loss",
-            self.test_ae,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-
-
 class DNNEmulator(pl.LightningModule):
     def __init__(
         self,
@@ -271,7 +141,7 @@ class DNNEmulator(pl.LightningModule):
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         self.log(
             "train_loss",
             self.train_ae,
@@ -399,7 +269,7 @@ class NNEmulator(pl.LightningModule):
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         self.log(
             "train_loss",
             self.train_ae,

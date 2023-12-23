@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 from numpy.testing import assert_array_almost_equal
 
-from pismemulator.utils import (
+from pism_emulator.utils import (
     calc_bic,
     gelman_rubin,
     kl_divergence,

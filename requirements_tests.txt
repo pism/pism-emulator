@@ -1,6 +1,0 @@
-sklearn
-pandas
-GPy
-SAlib
-pyDOE
-pytest
