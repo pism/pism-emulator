@@ -1,4 +1,4 @@
-# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-23 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -22,15 +22,9 @@ import lightning as pl
 import numpy as np
 import torch
 import torch.nn as nn
+from pismemulator.metrics import AreaAbsoluteError, area_absolute_error
 from torch import Tensor
 from torch.optim.lr_scheduler import ExponentialLR
-
-from pismemulator.metrics import (
-    AbsoluteError,
-    AreaAbsoluteError,
-    absolute_error,
-    area_absolute_error,
-)
 
 
 class DNNEmulator(pl.LightningModule):

@@ -8,12 +8,11 @@ import numpy as np
 import pylab as plt
 import seaborn as sns
 import torch
-from scipy.stats import beta
-
 from pismemulator.models import StudentT
 from pismemulator.nnemulator import NNEmulator, PISMDataset
 from pismemulator.sampler import mMALA_Sampler
 from pismemulator.utils import param_keys_dict as keys_dict
+from scipy.stats import beta
 
 if __name__ == "__main__":
     __spec__ = None

@@ -1,5 +1,5 @@
 #!/bin/env python3
-# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-23 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -26,17 +26,14 @@ from typing import Union
 import arviz as az
 import numpy as np
 import pandas as pd
-import pylab as plt
-import seaborn as sns
 import torch
+from joblib import Parallel, delayed
 from lightning import LightningModule
 from scipy.stats import beta
-from tqdm import tqdm
-from joblib import Parallel, delayed
+from tqdm.auto import tqdm
 
-from pismemulator.datasets import PISMDataset
-from pismemulator.nnemulator import NNEmulator
-from pismemulator.utils import param_keys_dict as keys_dict
+from pism_emulator.datasets import PISMDataset
+from pism_emulator.nnemulator import NNEmulator
 
 
 class MALASampler(object):

@@ -1,5 +1,23 @@
 #!/bin/env python3
 
+# Copyright (C) 2023 Andy Aschwanden
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
@@ -40,7 +58,7 @@ if __name__ == "__main__":
     __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--data_dir", default="data_dir")
+    parser.add_argument("--data_dir", default="sampler")
     parser.add_argument("--fraction", type=float, default=1.0)
     parser.add_argument("--validate", default=False, action="store_true")
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")

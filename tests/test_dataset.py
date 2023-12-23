@@ -17,17 +17,11 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 
-import random
-
-import lightning as pl
 import numpy as np
-import torch
 from numpy.testing import assert_array_almost_equal, assert_equal
-from scipy.stats import dirichlet
-from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, TensorDataset
 
 from pism_emulator.datasets import PISMDataset
+
 
 def test_dataset():
     """"""

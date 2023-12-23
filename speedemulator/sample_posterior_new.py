@@ -13,12 +13,11 @@ import pylab as plt
 import seaborn as sns
 import torch
 from lightning import LightningModule
-from scipy.stats import beta
-from tqdm import tqdm
-
 from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import NNEmulator
 from pismemulator.utils import param_keys_dict as keys_dict
+from scipy.stats import beta
+from tqdm import tqdm
 
 
 class MALASampler(object):

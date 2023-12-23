@@ -13,12 +13,11 @@ import seaborn as sns
 from matplotlib import colors
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from pismemulator.utils import load_imbie, load_imbie_csv
+from pismemulator.utils import param_keys_dict as keys_dict
 from scipy.interpolate import interp1d
 from scipy.stats import beta
 from scipy.stats.distributions import randint, truncnorm, uniform
-
-from pismemulator.utils import load_imbie, load_imbie_csv
-from pismemulator.utils import param_keys_dict as keys_dict
 
 
 def add_inner_title(ax, title, loc="upper left", size=7, **kwargs):

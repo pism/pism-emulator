@@ -18,7 +18,6 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import arviz as az
 import contextlib
 import os
 import time
@@ -26,6 +25,7 @@ from argparse import ArgumentParser
 from os.path import join
 from typing import Union
 
+import arviz as az
 import joblib
 import lightning as pl
 import numpy as np
@@ -33,13 +33,13 @@ import pandas as pd
 import pylab as plt
 import torch
 from joblib import Parallel, delayed
-from pyDOE import lhs
+from pyDOE2 import lhs
 from scipy.stats import beta
 from scipy.stats.distributions import uniform
 from tqdm.auto import tqdm
 
-from pismemulator.models import TorchPDDModel as PDDModel
-from pismemulator.utils import load_hirham_climate_w_std_dev
+from pism_emulator.models import TorchPDDModel as PDDModel
+from pism_emulator.utils import load_hirham_climate_w_std_dev
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -271,7 +271,7 @@ class MALASampler(object):
         )
         return -(self.alpha * log_likelihood + log_prior)
 
-    def get_log_like_gradient_and_hessian(self, X, eps=1e-4, compute_hessian=False):
+    def get_log_like_gradient_and_hessian(self, X, eps=1e-2, compute_hessian=False):
         log_pi = self.neg_log_prob(X)
         if compute_hessian:
             self.hessian_counter += 1
@@ -371,10 +371,7 @@ class MALASampler(object):
         acc = acc_target
 
         with tqdm_joblib(
-            tqdm(
-                range(samples + burn),
-                total=samples + burn,
-            )
+            tqdm(range(samples + burn), total=samples + burn, position=chain)
         ) as progress:
             for i in progress:
                 X, local_data, s = self.MALA_step(X, h, local_data=local_data)
@@ -540,7 +537,7 @@ if __name__ == "__main__":
 
         pdd_pred = [torch.from_numpy(obs[k]) for k in predictor_vars if k in result]
 
-        Y_obs = torch.vstack((ppd_pred)).T.type(torch.FloatTensor).to(device)
+        Y_obs = torch.vstack((pdd_pred)).T.type(torch.FloatTensor).to(device)
     else:
         Y_obs = torch.vstack((obs_pred)).T.type(torch.FloatTensor).to(device)
 
@@ -592,20 +589,20 @@ if __name__ == "__main__":
     )
     X_map = sampler.find_MAP(X_0, verbose=False)
 
-    # with tqdm_joblib(
-    #     tqdm(desc="Sampling chains", total=n_chains, position=0, leave=True)
-    # ) as progress_bar:
-    result = Parallel(n_jobs=n_chains)(
-        delayed(sampler.sample)(
-            X_map.clone(),
-            samples=samples,
-            burn=burn,
-            chain=c,
-            save_interval=1000,
-            validate=validate,
+    with tqdm_joblib(
+        tqdm(desc="Sampling chains", total=n_chains, position=0, leave=True)
+    ) as progress_bar:
+        result = Parallel(n_jobs=n_chains)(
+            delayed(sampler.sample)(
+                X_map.clone(),
+                samples=samples,
+                burn=burn,
+                chain=c,
+                save_interval=1000,
+                validate=validate,
+            )
+            for c in range(n_chains)
         )
-        for c in range(n_chains)
-    )
 
     elapsed_time = time.process_time() - start
     print(f"Sampling took {elapsed_time:.0f}s")
@@ -626,5 +623,5 @@ if __name__ == "__main__":
     axs = az.plot_trace(all_traces)
     for k, ax in enumerate(axs):
         axs[k, 0].set_xlim(X_min[k], X_max[k])
-    traces.to_zarr(store=f"X_posterior.zarr")
+    traces.to_zarr(store="X_posterior.zarr")
     az.plot_trace(all_traces)

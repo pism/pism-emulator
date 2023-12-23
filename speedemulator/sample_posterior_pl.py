@@ -14,12 +14,11 @@ import pylab as plt
 import seaborn as sns
 import torch
 from lightning.pytorch.callbacks import Timer
-from scipy.stats import beta
-from torch.utils.data import DataLoader, TensorDataset
-
 from pismemulator.datasets import PISMDataset
 from pismemulator.nnemulator import NNEmulator
 from pismemulator.utils import param_keys_dict as keys_dict
+from scipy.stats import beta
+from torch.utils.data import DataLoader, TensorDataset
 
 
 class mMALA(pl.LightningModule):  # type: ignore

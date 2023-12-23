@@ -27,9 +27,8 @@ import pylab as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
-from scipy.stats import beta, gaussian_kde
-
 from pismemulator.utils import param_keys_dict as keys_dict
+from scipy.stats import beta, gaussian_kde
 
 fontsize = 6
 lw = 1.0

@@ -22,7 +22,7 @@ import random
 import lightning as pl
 import numpy as np
 import torch
-from numpy.testing import assert_array_almost_equal, assert_equal
+from numpy.testing import assert_array_almost_equal
 from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
@@ -38,8 +38,6 @@ def seed_worker(worker_id):
 
 g = torch.Generator()
 g.manual_seed(0)
-
-
 
 
 def test_emulator_equivalence():
@@ -118,10 +116,16 @@ def test_emulator_equivalence():
 
     max_epochs = 10
     trainer_e = pl.Trainer(
-        deterministic=True, max_epochs=max_epochs, num_sanity_val_steps=0, accelerator="cpu"
+        deterministic=True,
+        max_epochs=max_epochs,
+        num_sanity_val_steps=0,
+        accelerator="cpu",
     )
     trainer_de = pl.Trainer(
-        deterministic=True, max_epochs=max_epochs, num_sanity_val_steps=0, accelerator="cpu"
+        deterministic=True,
+        max_epochs=max_epochs,
+        num_sanity_val_steps=0,
+        accelerator="cpu",
     )
     trainer_e.fit(e, train_loader, val_loader)
     trainer_de.fit(de, train_loader, val_loader)
