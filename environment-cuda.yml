@@ -1,6 +1,8 @@
 name: pism-emulator
 channels:
   - conda-forge
+  - pytorch
+  - nvidia
 dependencies:
   - pip
   - numpy
@@ -8,6 +10,7 @@ dependencies:
   - matplotlib
   - pandas
   - torch
+  - pytorch-cuda=12.1
   - torchvision
   - torchaudio
   - lightning

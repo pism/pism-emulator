@@ -21,7 +21,7 @@ Optionally create Conda environment named *pism-emulator*:
     $ conda env create -f environment.yml
     $ conda activate pism-emulator
 
-Install pyesgf-cmip6:
+Install pism-emulator:
 
     $ pip install -e .
 
