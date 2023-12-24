@@ -1,6 +1,7 @@
 name: pism-emulator
 channels:
   - conda-forge
+  - scikit-learn
 dependencies:
   - pip
   - numpy
@@ -16,7 +17,7 @@ dependencies:
   - pyDOE2
   - pytest
   - SALib
-  - scikit_learn
+  - scikit-learn
   - scipy
   - seaborn
   - tqdm
