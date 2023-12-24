@@ -1,0 +1,17 @@
+arviz
+joblib
+matplotlib
+pandas
+pyDOE2
+pytest
+SALib
+scikit_learn
+scipy
+seaborn
+tqdm
+xarray
+torch
+torchvision
+torchaudio
+lightning
+tensorboard
