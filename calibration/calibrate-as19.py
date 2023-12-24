@@ -5,6 +5,7 @@
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from functools import reduce
 from itertools import cycle
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -368,7 +369,7 @@ def plot_projection(
                         Patch(
                             facecolor=None,
                             edgecolor="k",
-                            fill=None,
+                            fill=False,
                             lw=0.25,
                             hatch=hatch,
                             label=ens,
@@ -1120,16 +1121,8 @@ def plot_histograms(
                 )
         else:
             pass
-        # if (X_prior_b is not None) and (key in m_star_keys):
-        #     axs[m_axs[0], m_axs[1]].plot(
-        #         [0, 1],
-        #         [0.5, 0.5],
-        #         color="k",
-        #         lw=lw,
-        #         transform=axs[m_axs[0], m_axs[1]].transAxes,
-        #     )
 
-    handles = [
+    handles: list[Any] = [
         Patch(
             facecolor=cmap[k],
             edgecolor="0.0",

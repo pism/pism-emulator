@@ -491,7 +491,6 @@ if __name__ == "__main__":
 
     n_parameters = 12 * 3 + 6
     n_outputs = 5
-    posteriors = []
 
     torch.manual_seed(0)
     pl.seed_everything(0)

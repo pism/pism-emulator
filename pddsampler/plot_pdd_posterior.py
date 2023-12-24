@@ -101,7 +101,7 @@ if __name__ == "__main__":
         "temp_snow": [-1, 1],  # uniform between 0 and 1
         "temp_rain": [0, 2],  # uniform between 0 and 1
     }
-    X_bounds = {
+    X_bounds: dict[str, list] = {
         "f_snow": [0, 8],  # uniform between 1 and 6
         "f_ice": [2, 16],  # uniform between 3 and 15
         "refreeze_snow": [-0.1, 1.1],  # uniform between 0 and 1

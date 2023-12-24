@@ -9,6 +9,23 @@
 
 pism-emulator is the codebase for the two-step Bayesian calibration process proposed by Aschwanden and Brinkerhoff [1]. The goal is to condition ensemble predictions of Greenland's contribution to future sea-level on contemporary [surface speeds](https://nsidc.org/data/NSIDC-0670/versions/1) and [cumulative mass loss](http://imbie.org). However, the method is model-agnostic and instead of surface speeds and mass loss, one can use other calibration targets.
 
+## Installation
+
+Get pism-emulator source from GitHub:
+
+    $ git clone git@github.com:pism/pism-emulator.git
+    $ cd pyesfg-cmip6
+
+Optionally create Conda environment named *pism-emulator*:
+
+    $ conda env create -f environment.yml
+    $ conda activate pism-emulator
+
+Install pyesgf-cmip6:
+
+    $ pip install -e .
+
+
 ## Methods
 
 1. We first calibrate ice dynamics parameters using artificial neural network to act as a surrogate for the ice flow model, which provides a mapping from ice flow parameters to surface speeds at a fraction of PISM's computational cost. This method also provides us the means to employ efficient statistical methods that rely on the gradients of model outputs with respect to its input. We then find the joint marginal distributions given surface speed observations using the [Metropolis-adjusted Langevin algorithm](https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm) (MALA), a Markov-chain Monte Carlo Method. Both the surrogate model and the MALA sampler are implemented in [PyTorch](https://pytorch.org) and [PyTorch-Lightning](https://www.pytorchlightning.ai) and can be run on GPUs.
