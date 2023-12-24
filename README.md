@@ -91,6 +91,5 @@ number = {19},
 pages = {e2022GL099058},
 keywords = {ice sheet modeling, Bayesian calibration, data assimilation, sea level rise, Greenland, uncertainty quantification},
 doi = {https://doi.org/10.1029/2022GL099058},
-abstract = {Abstract The potential contribution of ice sheets remains the largest source of uncertainty in predicting sea-level due to the limited predictive skill of numerical ice sheet models, yet effective planning necessitates that these predictions are credible and accompanied by a defensible assessment of uncertainty. While the use of large ensembles of simulations allows probabilistic assessments, there is no guarantee that these simulations are aligned with observations. Here, we present a probabilistic prediction of 21st century mass loss from the Greenland Ice Sheet calibrated with observations of surface speeds and mass change using a novel two-stage surrogate-based approach. Our results suggest a sea-level contribution ranging from 4 to 30 cm at the year 2100, proviso the assumption that our chosen ice sheet model’s physics represent reality.},
 year = {2022}
 }
