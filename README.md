@@ -14,7 +14,7 @@ pism-emulator is the codebase for the two-step Bayesian calibration process prop
 Get pism-emulator source from GitHub:
 
     $ git clone git@github.com:pism/pism-emulator.git
-    $ cd pyesfg-cmip6
+    $ cd pism-emulator
 
 Optionally create Conda environment named *pism-emulator*:
 
