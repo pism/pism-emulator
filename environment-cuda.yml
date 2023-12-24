@@ -9,7 +9,7 @@ dependencies:
   - xarray
   - matplotlib
   - pandas
-  - torch
+  - pytorch
   - pytorch-cuda=12.1
   - torchvision
   - torchaudio

@@ -7,7 +7,7 @@ dependencies:
   - xarray
   - matplotlib
   - pandas
-  - torch
+  - pytorch
   - torchvision
   - torchaudio
   - lightning
