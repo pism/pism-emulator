@@ -16,3 +16,4 @@ torchaudio
 lightning
 tensorboard
 arviz
+ipywidgets

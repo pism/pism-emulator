@@ -8,6 +8,18 @@ import pandas as pd
 import torch
 import xarray as xr
 from tqdm.autonotebook import tqdm
+from time import time
+
+def preprocess(ds, thinning_factor: int = 1, mapplane_vars: list[str]= ["x", "y"]):
+    """
+    Select slices from dataset
+    """
+    slices = {key: slice(0, value, thinning_factor) for key, value in ds.sizes.items()}
+    drop_dims = [key for (key, val) in slices.items() if key not in mapplane_vars]
+    for d in drop_dims:
+        del slices[d]
+    return ds.isel(slices)
+
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -52,18 +64,18 @@ class PISMDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return min(len(d) for d in [self.X, self.Y])
-
+    
     def load_target(self):
         epsilon = self.epsilon
         return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         print(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file, decode_times=False)
+        ds = preprocess(ds, thinning_factor=thinning_factor)
         data = ds.variables[self.target_var].squeeze()
         mask = data.isnull()
-        mask = mask[::thinning_factor, ::thinning_factor]
         data = np.nan_to_num(
-            data.values[::thinning_factor, ::thinning_factor],
+            data.values,
             nan=epsilon,
         )
         ny, nx = data.shape
@@ -71,7 +83,7 @@ class PISMDataset(torch.utils.data.Dataset):
         if self.target_error_var in ds.variables:
             data_error = ds.variables[self.target_error_var].squeeze()
             data_error = np.nan_to_num(
-                data_error.values[::thinning_factor, ::thinning_factor],
+                data_error.values,
                 nan=epsilon,
             )
             self.target_has_error = True
@@ -80,7 +92,7 @@ class PISMDataset(torch.utils.data.Dataset):
         if self.target_corr_var in ds.variables:
             data_corr = ds.variables[self.target_corr_var].squeeze()
             data_corr = np.nan_to_num(
-                data_corr.values[::thinning_factor, ::thinning_factor],
+                data_corr.values,
                 nan=epsilon,
             )
             self.target_has_corr = True
@@ -162,9 +174,10 @@ class PISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0], decode_times=False)
+        ds0 = preprocess(ds0, thinning_factor=thinning_factor)
         _, ny, nx = (
-            ds0.variables["velsurf_mag"]
-            .values[:, ::thinning_factor, ::thinning_factor]
+            ds0.variables[self.target_var]
+            .values
             .shape
         )
 
@@ -175,20 +188,22 @@ class PISMDataset(torch.utils.data.Dataset):
 
         print("  Loading data sets...")
         training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
-
+        start_time = time()
         for idx, m_file in tqdm(enumerate(training_files), total=len(training_files)):
             ds = xr.open_dataset(m_file, decode_times=False)
+            ds = preprocess(ds, thinning_factor=thinning_factor)
             data = np.squeeze(
                 np.nan_to_num(
-                    ds.variables[training_var].values[
-                        :, ::thinning_factor, ::thinning_factor
-                    ],
+                    ds.variables[training_var].values,
                     nan=epsilon,
                 )
             )
             response[idx, :] = data[self.sparse_idx_2d].flatten()
             ds.close()
-
+        end_time = time()
+        self.training_files = training_files
+        print(f"Reading training data took {(end_time-start_time):.0f}s")
+        
         p = response.max(axis=1) < self.threshold
         if self.log_y:
             response = np.log10(response)

@@ -111,7 +111,7 @@ def test_torch_model():
     for m_var in [
         "temp",
         "prec",
-        "accu_rate",
+        "accumulation_rate",
         "inst_pdd",
         "snow_depth",
         "snow_melt_rate",
@@ -119,24 +119,9 @@ def test_torch_model():
         "melt_rate",
         "smb",
     ]:
-        print(f"Comparing {m_var}")
+        print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
 
-
-# def test_pdd_accu_rate():
-#     temp, precip, sd = make_fake_climate()
-#     pdd = PDDModel()
-#     accu_rate = pdd.accu_rate(temp, precip, sd)
-#     test_ds = xr.open_dataset("tests/test_data/test_pdd_accu_rate.nc")
-#     xr.testing.assert_allclose(test_ds.__xarray_dataarray_variable__, accu_rate)
-
-
-# def test_instd_pdd():
-#     ds = make_fake_climate()
-#     pdd = PDDModel()
-#     inst_pdd = pdd.inst_pdd(ds.temp, ds.stdv)
-#     test_ds = xr.open_dataset("tests/test_data/test_pdd_inst_pdd.nc")
-#     xr.testing.assert_allclose(test_ds.__xarray_dataarray_variable__, inst_pdd)
 
 
 def test_TorchPDDModel():

@@ -23,6 +23,8 @@ import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
 
+from pathlib import Path
+
 import lightning as pl
 import numpy as np
 import torch
@@ -42,6 +44,7 @@ def current_script_directory():
     import inspect
 
     filename = inspect.stack(0)[0][1]
+    print(dirname(filename))
     return realpath(dirname(filename))
 
 
@@ -65,8 +68,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--n_layers", type=int, default=5)
-    parser.add_argument("--q", type=int, default=100)
+    parser.add_argument("--n_layers", type=int, default=4)
+    parser.add_argument("-q", type=int, default=100)
     parser.add_argument(
         "--samples_file",
         default=abspath(
@@ -188,7 +191,7 @@ if __name__ == "__main__":
         area,
         hparams,
     )
-    print(accelerator)
+
     trainer = pl.Trainer(
         callbacks=callbacks,
         logger=logger,
