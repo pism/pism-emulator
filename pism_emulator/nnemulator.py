@@ -22,9 +22,10 @@ import lightning as pl
 import numpy as np
 import torch
 import torch.nn as nn
-from pism_emulator.metrics import AreaAbsoluteError, area_absolute_error
 from torch import Tensor
 from torch.optim.lr_scheduler import ExponentialLR
+
+from pism_emulator.metrics import AreaAbsoluteError, area_absolute_error
 
 
 class DNNEmulator(pl.LightningModule):

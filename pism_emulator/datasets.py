@@ -2,15 +2,16 @@ import re
 from collections import OrderedDict
 from glob import glob
 from os.path import join
+from time import time
 
 import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
 from tqdm.autonotebook import tqdm
-from time import time
 
-def preprocess(ds, thinning_factor: int = 1, mapplane_vars: list[str]= ["x", "y"]):
+
+def preprocess(ds, thinning_factor: int = 1, mapplane_vars: list[str] = ["x", "y"]):
     """
     Select slices from dataset
     """
@@ -19,7 +20,6 @@ def preprocess(ds, thinning_factor: int = 1, mapplane_vars: list[str]= ["x", "y"
     for d in drop_dims:
         del slices[d]
     return ds.isel(slices)
-
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -64,7 +64,7 @@ class PISMDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return min(len(d) for d in [self.X, self.Y])
-    
+
     def load_target(self):
         epsilon = self.epsilon
         return_numpy = self.return_numpy
@@ -175,11 +175,7 @@ class PISMDataset(torch.utils.data.Dataset):
 
         ds0 = xr.open_dataset(training_files[0], decode_times=False)
         ds0 = preprocess(ds0, thinning_factor=thinning_factor)
-        _, ny, nx = (
-            ds0.variables[self.target_var]
-            .values
-            .shape
-        )
+        _, ny, nx = ds0.variables[self.target_var].values.shape
 
         ds0.close()
         self.nx = nx
@@ -203,7 +199,7 @@ class PISMDataset(torch.utils.data.Dataset):
         end_time = time()
         self.training_files = training_files
         print(f"Reading training data took {(end_time-start_time):.0f}s")
-        
+
         p = response.max(axis=1) < self.threshold
         if self.log_y:
             response = np.log10(response)

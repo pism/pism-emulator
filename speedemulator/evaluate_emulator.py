@@ -26,12 +26,13 @@ import numpy as np
 import pylab as plt
 import torch
 from matplotlib.colors import LogNorm
-from pism_emulator.datasets import PISMDataset
-from pism_emulator.nnemulator import NNEmulator
-from pism_emulator.utils import param_keys_dict as keys_dict
 from scipy.stats import pearsonr
 from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
+
+from pism_emulator.datasets import PISMDataset
+from pism_emulator.nnemulator import NNEmulator
+from pism_emulator.utils import param_keys_dict as keys_dict
 
 
 def current_script_directory():

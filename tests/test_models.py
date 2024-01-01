@@ -123,7 +123,6 @@ def test_torch_model():
         assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
 
 
-
 def test_TorchPDDModel():
     ds = make_fake_climate()
     pdd = TorchPDDModel()
