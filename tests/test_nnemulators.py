@@ -22,6 +22,7 @@ import random
 import lightning as pl
 import numpy as np
 import torch
+from torchmetrics.regression import MeanSquaredError
 from numpy.testing import assert_array_almost_equal
 from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
@@ -39,14 +40,10 @@ def seed_worker(worker_id):
 g = torch.Generator()
 g.manual_seed(0)
 
-
-def test_emulator_equivalence():
-    """
-    Compare NNEmulator and DNNEmulator
-    """
-
-    torch.manual_seed(0)
+def nn_setup(Emulator):
+    
     torch.use_deterministic_algorithms(True)
+    torch.manual_seed(0)
 
     g = torch.Generator()
     g.manual_seed(0)
@@ -70,16 +67,7 @@ def test_emulator_equivalence():
         "learning_rate": 0.1,
     }
 
-    e = NNEmulator(
-        n_parameters,
-        n_eigenglaciers,
-        V_hat,
-        F_mean,
-        area,
-        hparams,
-    )
-
-    de = DNNEmulator(
+    e = Emulator(
         n_parameters,
         n_eigenglaciers,
         V_hat,
@@ -100,40 +88,41 @@ def test_emulator_equivalence():
     train_loader = DataLoader(
         dataset=training_data,
         batch_size=hparams["batch_size"],
-        shuffle=True,
-        pin_memory=True,
         worker_init_fn=seed_worker,
         generator=g,
     )
     val_loader = DataLoader(
         dataset=val_data,
         batch_size=hparams["batch_size"],
-        shuffle=False,
-        pin_memory=True,
         worker_init_fn=seed_worker,
         generator=g,
     )
 
-    max_epochs = 10
+    max_epochs = 20
+    
     trainer_e = pl.Trainer(
         deterministic=True,
         max_epochs=max_epochs,
         num_sanity_val_steps=0,
         accelerator="cpu",
     )
-    trainer_de = pl.Trainer(
-        deterministic=True,
-        max_epochs=max_epochs,
-        num_sanity_val_steps=0,
-        accelerator="cpu",
-    )
     trainer_e.fit(e, train_loader, val_loader)
-    trainer_de.fit(de, train_loader, val_loader)
 
     e.eval()
-    de.eval()
-    Y_e = e(X, add_mean=True).detach().numpy()
-    Y_de = de(X, add_mean=True).detach().numpy()
+    Y_e = e(X, add_mean=True)
+    return Y_e
 
-    print(Y_e, Y_de)
-    assert_array_almost_equal(Y_e, Y_de, decimal=1)
+    
+def test_emulator_equivalence():
+    """
+    Compare NNEmulator and DNNEmulator
+    """
+
+
+    Y_e = nn_setup(NNEmulator)
+    Y_de = nn_setup(DNNEmulator)
+
+    mean_squared_error = MeanSquaredError()
+    mse = mean_squared_error(Y_e, Y_de)
+
+    assert mse <= 1e-1

@@ -47,7 +47,7 @@ class DNNEmulator(pl.LightningModule):
 
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden] * n_layers
-        p = [0] + [0.5] * (n_layers - 2) + [0.3]
+        p = [0.0] + [0.5] * (n_layers - 2) + [0.3]
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden[0])
