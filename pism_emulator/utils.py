@@ -537,7 +537,7 @@ def calc_bic(
 
 
 def stepwise_bic(
-    X: np.array, Y: np.array, varnames: list = [], interactions: bool = True, **kwargs
+    X: np.array, Y: np.array, varnames: Union[None, list] = None, interactions: bool = True, **kwargs
 ):
     """
     Stepwise model selection using the Bayesian Information Criterion (BIC)
@@ -568,13 +568,13 @@ def stepwise_bic(
     """
 
     n = X.shape[1]
-    names = ["X{}".format(x) for x in range(n)]
-    if varnames is not []:
+    if varnames is None:
+        names = [f"X{x}" for x in range(n)]
+    else:
         names = varnames
+        
 
     assert n == len(names)
-    # Need assertion error here
-
     params_dict = {k: v for v, k in enumerate(names)}
     params_to_check = list(names)
     # Variables in model, initially start with model Y = X1 + X2 + X3 + ... + Xn (no interactions)
