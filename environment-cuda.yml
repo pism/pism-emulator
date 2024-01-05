@@ -5,6 +5,7 @@ channels:
   - nvidia
   - scikit-learn
 dependencies:
+  - python>=3.12
   - pip
   - numpy
   - xarray

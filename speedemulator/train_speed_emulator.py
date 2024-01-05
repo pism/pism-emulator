@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--accelerator", type=str, default="auto")
-    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument(
         "--data_dir", default=abspath(join(script_directory, "../tests/training_data"))
