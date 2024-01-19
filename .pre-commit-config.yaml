@@ -38,10 +38,12 @@ repos:
 
   # Can run individually with `pre-commit run mypy --all-files`
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.3.0
+    rev: v1.7.0
     hooks:
       - id: mypy
         args: [--config-file=pyproject.toml]
+        language: system
+        pass_filenames: false
   # - repo: local
   #   hooks:
   #    - id: pytest # pytest is a pre-commit hook

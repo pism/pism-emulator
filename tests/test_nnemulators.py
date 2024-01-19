@@ -41,7 +41,7 @@ g = torch.Generator()
 g.manual_seed(0)
 
 def nn_setup(Emulator):
-    
+
     torch.use_deterministic_algorithms(True)
     torch.manual_seed(0)
 
@@ -99,7 +99,7 @@ def nn_setup(Emulator):
     )
 
     max_epochs = 20
-    
+
     trainer_e = pl.Trainer(
         deterministic=True,
         max_epochs=max_epochs,
@@ -112,7 +112,7 @@ def nn_setup(Emulator):
     Y_e = e(X, add_mean=True)
     return Y_e
 
-    
+
 def test_emulator_equivalence():
     """
     Compare NNEmulator and DNNEmulator

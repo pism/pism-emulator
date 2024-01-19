@@ -1,4 +1,4 @@
-# Copyright (C) 2023 Andy Aschwanden, Maria Zeitz
+# Copyright (C) 2023-24 Andy Aschwanden, Maria Zeitz
 #
 # This file is part of pism-emulator.
 #
@@ -1550,4 +1550,21 @@ class TorchDEBMModel(torch.nn.modules.Module):
             + b1 * torch.sin(t)
             + a2 * torch.cos(2.0 * t)
             + b2 * torch.sin(torch.tensor(2.0) * t)
+        )
+
+    def distance_factor_paleo(self, eccentricity, perhelion_longitude, solar_longitude):
+        """
+        Calculate paleo distance factor
+        """
+
+        E = eccentricity
+
+        assert E != 1.0, f"Division by zero, eccentricity is {E}"
+
+        return torch.pow(
+            1.0
+            + E
+            * torch.cos(torch.tensor(solar_longitude - perhelion_longitude))
+            / (1.0 - E**2),
+            2.0,
         )

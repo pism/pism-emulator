@@ -572,7 +572,7 @@ def stepwise_bic(
         names = [f"X{x}" for x in range(n)]
     else:
         names = varnames
-        
+
 
     assert n == len(names)
     params_dict = {k: v for v, k in enumerate(names)}

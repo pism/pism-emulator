@@ -1,4 +1,4 @@
-# Copyright (C) 2023 Andy Aschwanden
+# Copyright (C) 2023-24 Andy Aschwanden
 #
 # This file is part of pism-emulator.
 #
@@ -82,6 +82,9 @@ def make_fake_climate() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def test_torch_model():
+    """
+    Test the TorchPDDModel by comparing it to the ReferencePDDModel
+    """
     temp, precip, sd = make_fake_climate()
 
     pdd_ref = ReferencePDDModel(
@@ -123,12 +126,15 @@ def test_torch_model():
         assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
 
 
-def test_TorchPDDModel():
-    ds = make_fake_climate()
-    pdd = TorchPDDModel()
+# def test_TorchPDDModel():
+#     ds = make_fake_climate()
+#     pdd = TorchPDDModel()
 
 
 def test_CalovGreveIntegrand():
+    """
+    Test the CalovGreveIntegrand
+    """
     sigma = np.array([2.0, 0.0, 1.0])
     temperature = np.array([0.0, 2.0, -1.0])
 
@@ -144,6 +150,10 @@ def test_CalovGreveIntegrand():
 
 
 def test_hour_angle():
+    """
+    Test the calculation of the hour angle
+    """
+
     phi = np.array([0.0, np.pi / 4.0, np.pi / 2.0])
     latitude = np.array([-np.pi / 2.0, 0.0, np.pi / 4.0])
     declination = np.array([np.pi / 8.0, 0.0, 0.0])
@@ -158,6 +168,9 @@ def test_hour_angle():
 
 
 def test_solar_longitude():
+    """
+    Test solar longitude
+    """
     year_fraction = np.array([0.0, 1.0 / 12.0, 1.0])
     eccentricity = np.array([0.9, 1.0, 1.0])
     perhelion_longitude = np.array([np.pi / 8.0, -np.pi, 0.0])
@@ -175,7 +188,10 @@ def test_solar_longitude():
     )
 
 
-def test_distance_from_present_day():
+def test_distance_factor_present_day():
+    """
+    Test distance factor present day
+    """
     year_fraction = np.array([0.0, 1.0 / 12.0, 1.0])
 
     year_fraction = torch.from_numpy(year_fraction)
@@ -183,3 +199,15 @@ def test_distance_from_present_day():
     debm = TorchDEBMModel()
     d = debm.distance_factor_present_day(year_fraction)
     assert_array_almost_equal(np.array([1.0351, 1.0308, 1.0351]), d, decimal=4)
+
+
+def test_distance_factor_paleo():
+    """
+    Test distance factor paleo
+    """
+
+    eccentricity = 0.0167
+    obliquity = 23.44
+    perihelion_longitude = 102.94719
+    debm = TorchDEBMModel()
+    d = debm.distance_factor_paleo(eccentricity, perihelion_longitude, obliquity)

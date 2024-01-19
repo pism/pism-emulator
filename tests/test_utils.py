@@ -178,7 +178,7 @@ def fixture_dp16_df() -> pd.DataFrame:
 """
 )
     return pd.read_csv(dp16_data, skipinitialspace=True)
-    
+
 @pytest.fixture(name="saltsamples")
 def fixture_salt_samples_df() -> pd.DataFrame:
 
