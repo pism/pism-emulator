@@ -1555,6 +1555,10 @@ class TorchDEBMModel(torch.nn.modules.Module):
     def distance_factor_paleo(self, eccentricity, perhelion_longitude, solar_longitude):
         """
         Calculate paleo distance factor
+
+        * @param[in] eccentricity eccentricity of the earth’s orbit (no units)
+        * @param[in] perihelion_longitude perihelion longitude (radians)
+        * @param[in] solar_longitude solar longitude (radians)
         """
 
         E = eccentricity
@@ -1568,3 +1572,133 @@ class TorchDEBMModel(torch.nn.modules.Module):
             / (1.0 - E**2),
             2.0,
         )
+
+    def solar_declination_present_day(self, year_fraction):
+        """
+        * Solar declination (radian)
+        *
+        * Implements equation 2.2.10 from Liou (2002)
+        """
+
+        # These coefficients come from Table 2.2 in Liou 2002
+        a0 = (0.006918,)
+        a1 = (-0.399912,)
+        a2 = (-0.006758,)
+        a3 = (-0.002697,)
+        b0 = (0.0,)
+        b1 = (0.070257,)
+        b2 = (0.000907,)
+        b3 = 0.000148
+
+        t = 2.0 * torch.pi * year_fraction
+
+        return (
+            a0
+            + b0
+            + a1 * cos(t)
+            + b1 * sin(t)
+            + a2 * cos(2.0 * t)
+            + b2 * sin(2.0 * t)
+            + a3 * cos(3.0 * t)
+            + b3 * sin(3.0 * t)
+        )
+
+    def solar_declination_paleo(obliquity, solar_longitude):
+        """
+        * Solar declination (radians). This is the "paleo" version used when
+        * the trigonometric expansion (equation 2.2.10 in Liou 2002) is not valid.
+        *
+        * The return value is in the range [-pi/2, pi/2].
+        *
+        * Implements equation in the text just above equation A1 in Zeitz et al.
+        *
+        * See also equation 2.2.4 of Liou (2002).
+        """
+
+        return torch.asin(torch.sin(obliquity * torch.sin(solar_longitude)))
+
+    def insolation(
+        self, solar_constant, distance_factor, hour_angle, latitude, declination
+    ):
+        """
+
+        * Average top of atmosphere insolation (rate) during the daily melt period, in W/m^2.
+        *
+        * This should be equation 5 in Zeitz et al or equation 12 in Krebs-Kanzow et al, but both
+        * of these miss a factor of Delta_t (day length in seconds) in the numerator.
+        *
+        * To confirm this, see the derivation of equation 2.2.21 in Liou and note that
+        *
+        * omega = 2 * pi (radian/day)
+        *
+        * or
+        *
+        * omega = (2 * pi / 86400) (radian/second).
+        *
+        * The correct equation should say
+        *
+        * S_Phi = A * B^2 * (h_phi * sin(phi) * sin(delta) + cos(phi) * cos(delta) * sin(h_phi)),
+        *
+        * where
+        *
+        * A = (S0 * Delta_t) / (Delta_t_Phi * pi),
+        * B = d_bar / d.
+        *
+        * Note that we do not know Delta_t_phi but we can use equation 2 in Zeitz et al (or
+        * equation 11 in Krebs-Kanzow et al) to get
+        *
+        * Delta_t_phi = h_phi * Delta_t / pi.
+        *
+        * This gives
+        *
+        * S_Phi = C * B^2 * (h_phi * sin(phi) * sin(delta) + cos(phi) * cos(delta) * sin(h_phi))
+        *
+        * with
+        *
+        * C = (S0 * Delta_t * pi) / (h_phi * Delta_t * pi)
+        *
+        * or
+        *
+        * C = S0 / h_phi.
+        *
+        * @param[in] solar constant solar constant, W/m^2
+        * @param[in] distance_factor square of the ratio of the mean sun-earth distance to the current sun-earth distance (no units)
+        * @param[in] hour_angle hour angle (radians) when the sun reaches the critical angle Phi
+        * @param[in] latitude latitude (radians)
+        * @param[in] declination declination (radians)
+        *
+        """
+
+        if hour_angle == 0:
+            return 0.0
+
+        return (
+            (solar_constant / hour_angle)
+            * distance_factor
+            * (
+                hour_angle * torch.sin(latitude) * torch.sin(declination)
+                + torch.cos(latitude) * torch.cos(declination) * torch.sin(hour_angle)
+            )
+        )
+
+    def orbital_parameters(self, time):
+        """
+        Calculate orbital parameters (declination, distance_factor) given a given time
+        """
+
+        year_fraction = self.year_fraction(time)
+
+        if self.paleo_enabled:
+            eccentricity = self.eccentricity(time)
+            perhelion_longitude = self.perhelion_longitude(time)
+            solar_longitude = self.solar_longitude(
+                year_fraction, eccentricity, perhelion_longitude
+            )
+            distance_factor = self.distance_factor_paleo(
+                eccentricity, perhelion_longitude, solar_longitude
+            )
+        else:
+            declination = self.solar_declination_present_day(year_fraction)
+            distance_factor = self.distance_factor_present_day(year_fraction)
+
+        return declination, distance_factor
