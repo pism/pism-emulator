@@ -73,11 +73,10 @@ class DEBMModel:
         self,
         air_temp_all_precip_as_rain: float = 275.15,
         air_temp_all_precip_as_snow: float = 273.15,
-        albedo_ice: float = 0.47,
         albedo_input_periodic: bool = False,
-        albedo_ocean: float = 0.1,
+        albedo_min: float = 0.47,
+        albedo_max: float = 0.82,
         albedo_slope: float = -790,
-        albedo_snow: float = 0.82,
         c1: float = 29.0,
         c2: float = -93.0,
         interpret_precip_as_snow: bool = False,
@@ -107,11 +106,10 @@ class DEBMModel:
         super().__init__()
         self.air_temp_all_precip_as_rain = air_temp_all_precip_as_rain
         self.air_temp_all_precip_as_snow = air_temp_all_precip_as_snow
-        self.albedo_ice = albedo_ice
+        self.albedo_min = albedo_min
         self.albedo_input_periodic = albedo_input_periodic
-        self.albedo_ocean = albedo_ocean
         self.albedo_slope = albedo_slope
-        self.albedo_snow = albedo_snow
+        self.albedo_max = albedo_max
         self.c1 = c1
         self.c2 = c2
         self.interpret_precip_as_snow = interpret_precip_as_snow
@@ -153,12 +151,12 @@ class DEBMModel:
         self._air_temp_all_precip_as_snow = value
 
     @property
-    def albedo_ice(self):
-        return self._albedo_ice
+    def albedo_min(self):
+        return self._albedo_min
 
-    @albedo_ice.setter
-    def albedo_ice(self, value):
-        self._albedo_ice = value
+    @albedo_min.setter
+    def albedo_min(self, value):
+        self._albedo_min = value
 
     @property
     def albedo_input_periodic(self):
@@ -169,14 +167,6 @@ class DEBMModel:
         self._albedo_input_periodic = value
 
     @property
-    def albedo_ocean(self):
-        return self._albedo_ocean
-
-    @albedo_ocean.setter
-    def albedo_ocean(self, value):
-        self._albedo_ocean = value
-
-    @property
     def albedo_slope(self):
         return self._albedo_slope
 
@@ -185,12 +175,12 @@ class DEBMModel:
         self._albedo_slope = value
 
     @property
-    def albedo_snow(self):
-        return self._albedo_snow
+    def albedo_max(self):
+        return self._albedo_max
 
-    @albedo_snow.setter
-    def albedo_snow(self, value):
-        self._albedo_snow = value
+    @albedo_max.setter
+    def albedo_max(self, value):
+        self._albedo_max = value
 
     @property
     def c1(self):
@@ -455,6 +445,61 @@ class DEBMModel:
 
         return result
 
+    # DEBMSimplePointwise::Changes DEBMSimplePointwise::step(double ice_thickness,
+    #                                                        double max_melt,
+    #                                                        double old_snow_depth,
+    #                                                        double accumulation) const {
+    #   Changes result;
+
+    #   double
+    #     snow_depth      = old_snow_depth,
+    #     snow_melted     = 0.0,
+    #     ice_melted      = 0.0;
+
+    #   assert(ice_thickness >= 0);
+
+    #   // snow depth cannot exceed total ice_thickness
+    #   snow_depth = std::min(snow_depth, ice_thickness);
+
+    #   assert(snow_depth >= 0);
+
+    #   snow_depth += accumulation;
+
+    #   if (max_melt <= 0.0) { // The "no melt" case.
+    #     snow_melted = 0.0;
+    #     ice_melted  = 0.0;
+    #   } else if (max_melt <= snow_depth) {
+    #     // Some of the snow melted and some is left; in any case, all of the energy available
+    #     // for melt was used up in melting snow.
+    #     snow_melted = max_melt;
+    #     ice_melted  = 0.0;
+    #   } else {
+    #     // All (snow_depth meters) of snow melted. Excess melt is available to melt ice.
+    #     snow_melted = snow_depth;
+    #     ice_melted  = std::min(max_melt - snow_melted, ice_thickness);
+    #   }
+
+    #   double ice_created_by_refreeze = m_refreeze_fraction * snow_melted;
+    #   if (m_refreeze_ice_melt) {
+    #     ice_created_by_refreeze += m_refreeze_fraction * ice_melted;
+    #   }
+
+    #   snow_depth = std::max(snow_depth - snow_melted, 0.0);
+
+    #   double total_melt = (snow_melted + ice_melted);
+    #   double runoff     = total_melt - ice_created_by_refreeze;
+    #   double smb        = accumulation - runoff;
+
+    #   result.snow_depth = snow_depth - old_snow_depth;
+    #   result.melt       = total_melt;
+    #   result.runoff     = runoff;
+    #   result.smb        = ice_thickness + smb >= 0 ? smb : -ice_thickness;
+
+    #   assert(ice_thickness + result.smb >= 0);
+
+    #   return result;
+    # }
+
     def _expand(self, array, shape):
         """Expand an array to the given shape"""
         if array.shape == shape:
@@ -485,6 +530,90 @@ class DEBMModel:
         newx = (np.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
         newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
         return newy
+
+    def accumulation_rate(
+        self, temperature: np.ndarray, precipitation: np.ndarray
+    ) -> np.ndarray:
+        """Compute accumulation rate from temperature and precipitation.
+        The fraction of precipitation that falls as snow decreases linearly
+        from one to zero between temperature thresholds defined by the
+        `temp_snow` and `temp_rain` attributes.
+        *temp*: array_like
+            Near-surface air temperature in degrees Celcius.
+        *prec*: array_like
+            Precipitation rate in meter per year.
+        """
+
+        # compute snow fraction as a function of temperature
+        reduced_temp = (self.temp_rain - temp) / (self.temp_rain - self.temp_snow)
+        snowfrac = np.clip(reduced_temp, 0, 1)
+
+        # return accumulation rate
+        return snowfrac * prec
+
+    def melt(
+        self,
+        temperature: np.ndarray,
+        temperature_std_deviaton: np.ndarray,
+        surface_elevation: np.ndarray,
+        latitude: np.ndarray,
+        albedo: float,
+    ) -> dict:
+        """
+        Calculate melt
+        """
+        latitude_rad = np.deg2rad(latitude)
+        insolation = self.insolation(distance_factor, h_phi, latitude_rad, declination)
+
+    # DEBMSimpleMelt DEBMSimplePointwise::melt(double declination,
+    #                                          double distance_factor,
+    #                                          double dt,
+    #                                          double T_std_deviation,
+    #                                          double T,
+    #                                          double surface_elevation,
+    #                                          double latitude,
+    #                                          double albedo) const {
+    #   assert(dt > 0.0);
+
+    #   const double degrees_to_radians = M_PI / 180.0;
+    #   double latitude_rad = latitude * degrees_to_radians;
+
+    #   double transmissivity = atmosphere_transmissivity(surface_elevation);
+    #   double h_phi          = details::hour_angle(m_phi, latitude_rad, declination);
+    #   double insolation     = details::insolation(m_solar_constant,
+    #                                               distance_factor,
+    #                                               h_phi,
+    #                                               latitude_rad,
+    #                                               declination);
+
+    #   double Teff = details::CalovGreveIntegrand(T_std_deviation,
+    #                                              T - m_positive_threshold_temperature);
+    #   const double eps = 1.0e-4;
+    #   if (Teff < eps) {
+    #     Teff = 0;
+    #   }
+
+    #   // Note that in the line below we replace "Delta_t_Phi / Delta_t" with "h_Phi / pi". See
+    #   // equations 1 and 2 in Zeitz et al.
+    #   double A = dt * (h_phi / M_PI / (m_water_density * m_L));
+
+    #   DEBMSimpleMelt result;
+
+    #   result.insolation_melt  = A * (transmissivity * (1.0 - albedo) * insolation);
+    #   result.temperature_melt = A * m_melt_c1 * Teff;
+    #   result.offset_melt      = A * m_melt_c2;
+
+    #   double total_melt = (result.insolation_melt + result.temperature_melt +
+    #                        result.offset_melt);
+    #   // this model should not produce negative melt rates
+    #   result.total_melt = std::max(total_melt, 0.0);
+
+    #   if (T < m_melt_threshold_temp) {
+    #     result.total_melt = 0.0;
+    #   }
+
+    #   return result;
+    # }
 
     def year_fraction(self, time: np.ndarray) -> np.ndarray:
         """
@@ -528,15 +657,8 @@ class DEBMModel:
 
         >>>    debm = DEBMModel()
 
-        >>>    sigma = 4.2
-        >>>    temperature = 2.1
-
-        >>>    cgi = debm.CalovGreveIntegrand(sigma, temperature)
-        >>>    cgi
-        array(2.93074554)
-
-        >>>    sigma = [4.2, 2.0]
-        >>>    temperature = [1.0, 2.1]
+        >>>    sigma = np.array([4.2, 2.0])
+        >>>    temperature = np.array([1.0, 2.1])
 
         >>>    cgi = debm.CalovGreveIntegrand(sigma, temperature)
         >>>    cgi
@@ -590,7 +712,7 @@ class DEBMModel:
         >>>    declination = np.array([np.pi / 8])
         >>>    hour_angle = debm.hour_angle(phi, latitude, declination)
         >>>    hour_angle
-        array(0.839038303283583)
+        array([0.839038303283583])
         """
 
         cos_h_phi = (np.sin(phi) - np.sin(latitude) * np.sin(declination)) / (
@@ -605,13 +727,38 @@ class DEBMModel:
         perihelion_longitude: np.ndarray,
     ) -> np.ndarray:
         """
-        * Solar longitude (radians) at current time in the year.
-        *
-        * @param[in] year_fraction year fraction (between 0 and 1)
-        * @param[in] eccentricity eccentricity of the earth’s orbit (no units)
-        * @param[in] perihelion_longitude perihelion longitude (radians)
-        *
-        * Implements equation A2 in Zeitz et al.
+        Solar longitude (radians) at current time in the year.
+
+        Implements equation A2 in Zeitz et al.
+
+        Parameters
+        ----------
+        year_fraction : numpy.ndarray
+            fraction (1)
+        eccentricity : numpy.ndarray
+            eccentricity of the earth's orbit (1)
+        perihelion_longigute : numpy.ndarray
+            perihelion longitude (radians)
+
+        Returns
+        ----------
+        solar_longitude: numpy.ndarray
+            solar longitude at current time in the year (radians)
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    year_fraction = np.array([0.5])
+        >>>    eccentricity = np.array([0.1])
+        >>>    perihelion_longitude = np.array([np.pi/4])
+        >>>    solar_longitude = debm.solar_longitude(year_fraction, eccentricity, perihelion_longitude)
+        array([2.08753274])
+
         """
 
         E = eccentricity
@@ -643,16 +790,39 @@ class DEBMModel:
 
     def distance_factor_present_day(self, year_fraction: np.ndarray) -> np.ndarray:
         """
-        * The unit-less factor scaling top of atmosphere insolation according to the Earth's
-        * distance from the Sun.
-        *
-        * The returned value is `(d_bar / d)^2`, where `d_bar` is the average distance from the
-        * Earth to the Sun and `d` is the *current* distance at a given time.
-        *
-        * Implements equation 2.2.9 from Liou (2002).
-        *
-        * Liou states: "Note that the factor (a/r)^2 never departs from the unity by more than
-        * 3.5%." (`a/r` in Liou is equivalent to `d_bar/d` here.)
+        The unit-less factor scaling top of atmosphere insolation according to the Earth's
+        distance from the Sun.
+
+        The returned value is `(d_bar / d)^2`, where `d_bar` is the average distance from the
+        Earth to the Sun and `d` is the *current* distance at a given time.
+
+        Implements equation 2.2.9 from Liou (2002).
+
+        Liou states: "Note that the factor (a/r)^2 never departs from the unity by more than
+        3.5%." (`a/r` in Liou is equivalent to `d_bar/d` here.)
+
+        Parameters
+        ----------
+        year_fraction : numpy.ndarray
+            fraction (1)
+
+        Returns
+        ----------
+        distance_factor_present_day: numpy.ndarray
+            distance factor present day ()
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    year_fraction = np.array([0.5])
+        >>>    distance_factor_present_day = debm.distance_factor_present_day(year_fraction)
+        array([0.966608])
+
         """
 
         # These coefficients come from Table 2.2 in Liou 2002
@@ -752,51 +922,51 @@ class DEBMModel:
     ) -> np.ndarray:
         """
 
-        * Average top of atmosphere insolation (rate) during the daily melt period, in W/m^2.
+        Average top of atmosphere insolation (rate) during the daily melt period, in W/m^2.
         *
-        * This should be equation 5 in Zeitz et al or equation 12 in Krebs-Kanzow et al, but both
-        * of these miss a factor of Delta_t (day length in seconds) in the numerator.
-        *
-        * To confirm this, see the derivation of equation 2.2.21 in Liou and note that
-        *
-        * omega = 2 * pi (radian/day)
-        *
-        * or
-        *
-        * omega = (2 * pi / 86400) (radian/second).
-        *
-        * The correct equation should say
-        *
-        * S_Phi = A * B^2 * (h_phi * sin(phi) * sin(delta) + cos(phi) * cos(delta) * sin(h_phi)),
-        *
-        * where
-        *
-        * A = (S0 * Delta_t) / (Delta_t_Phi * pi),
-        * B = d_bar / d.
-        *
-        * Note that we do not know Delta_t_phi but we can use equation 2 in Zeitz et al (or
-        * equation 11 in Krebs-Kanzow et al) to get
-        *
-        * Delta_t_phi = h_phi * Delta_t / pi.
-        *
-        * This gives
-        *
-        * S_Phi = C * B^2 * (h_phi * sin(phi) * sin(delta) + cos(phi) * cos(delta) * sin(h_phi))
-        *
-        * with
-        *
-        * C = (S0 * Delta_t * pi) / (h_phi * Delta_t * pi)
-        *
-        * or
-        *
-        * C = S0 / h_phi.
-        *
-        * @param[in] solar constant solar constant, W/m^2
-        * @param[in] distance_factor square of the ratio of the mean sun-earth distance to the current sun-earth distance (no units)
-        * @param[in] hour_angle hour angle (radians) when the sun reaches the critical angle Phi
-        * @param[in] latitude latitude (radians)
-        * @param[in] declination declination (radians)
-        *
+        This should be equation 5 in Zeitz et al or equation 12 in Krebs-Kanzow et al, but both
+        of these miss a factor of Delta_t (day length in seconds) in the numerator.
+
+        To confirm this, see the derivation of equation 2.2.21 in Liou and note that
+
+        omega = 2 pi (radian/day)
+
+        or
+
+        omega = (2 pi / 86400) (radian/second).
+
+        The correct equation should say
+
+        S_Phi = A * B^2 * (h_phi * sin(phi) * sin(delta) + cos(phi) * cos(delta) * sin(h_phi)),
+
+        where
+
+        A = (S0 * Delta_t) / (Delta_t_Phi * pi),
+        B = d_bar / d.
+
+        Note that we do not know Delta_t_phi but we can use equation 2 in Zeitz et al (or
+        equation 11 in Krebs-Kanzow et al) to get
+
+        Delta_t_phi = h_phi * Delta_t / pi.
+
+        This gives
+
+        S_Phi = C * B^2 * (h_phi * sin(phi) * sin(delta) + cos(phi) * cos(delta) * sin(h_phi))
+
+        with
+
+        C = (S0 * Delta_t * pi) / (h_phi * Delta_t * pi)
+
+        or
+
+        C = S0 / h_phi.
+
+        @param[in] solar constant solar constant, W/m^2
+        @param[in] distance_factor square of the ratio of the mean sun-earth distance to the current sun-earth distance (no units)
+        @param[in] hour_angle hour angle (radians) when the sun reaches the critical angle Phi
+        @param[in] latitude latitude (radians)
+        @param[in] declination declination (radians)
+
         """
 
         return (
@@ -827,4 +997,28 @@ class DEBMModel:
         else:
             declination = self.solar_declination_present_day(year_fraction)
             distance_factor = self.distance_factor_present_day(year_fraction)
+
         return declination, distance_factor
+
+    def albedo(self, melt_rate: np.ndarray) -> np.ndarray:
+        """
+        Albedo parameterized as a function of the melt rate
+
+        See equation 7 in Zeitz et al.
+
+        @param[in] melt_rate melt rate (meters (liquid water equivalent) per second)
+        """
+        return np.max(
+            self.albedo_max + self.albedo_slope * melt_rate * self.ice_density,
+            self.albedo_min,
+        )
+
+    def atmosphere_transmissivity(self, elevation: np.ndarray) -> np.ndarray:
+        """
+        Atmosphere transmissivity (no units; acts as a scaling factor)
+
+        See appendix A2 in Zeitz et al 2021.
+
+        @param[in] elevation elevation above the geoid (meters)
+        """
+        return self.tau_a_intercept + self.tau_a_slope * elevation
