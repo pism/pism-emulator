@@ -17,11 +17,11 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 from functools import wraps
+from typing import Union
 
 import numpy as np
 import scipy.special as sp
 import torch
-import xarray as xr
 from scipy.interpolate import interp1d
 
 
@@ -104,7 +104,7 @@ class ReferencePDDModel:
         self.interpolate_rule = interpolate_rule
         self.interpolate_n = interpolate_n
 
-    def __call__(self, temp, prec, stdv=0.0, return_xarray: bool = False):
+    def __call__(self, temp, prec, stdv=0.0):
         """Run the positive degree day model.
 
         Use temperature, precipitation, and standard deviation of temperature
@@ -174,52 +174,26 @@ class ReferencePDDModel:
         )
         inst_smb = accumulation_rate - runoff_rate
 
-        if return_xarray:
-            # make a dataset
-            # FIXME add coordinate variables
-            result = xr.Dataset(
-                data_vars={
-                    "temp": (["time", "x", "y"], temp),
-                    "prec": (["time", "x", "y"], prec),
-                    "stdv": (["time", "x", "y"], stdv),
-                    "inst_pdd": (["time", "x", "y"], inst_pdd),
-                    "accumulation_rate": (["time", "x", "y"], accumulation_rate),
-                    "snow_melt_rate": (["time", "x", "y"], snow_melt_rate),
-                    "ice_melt_rate": (["time", "x", "y"], ice_melt_rate),
-                    "melt_rate": (["time", "x", "y"], melt_rate),
-                    "runoff_rate": (["time", "x", "y"], runoff_rate),
-                    "inst_smb": (["time", "x", "y"], inst_smb),
-                    "snow_depth": (["time", "x", "y"], snow_depth),
-                    "pdd": (["x", "y"], self._integrate(inst_pdd)),
-                    "accumulation": (["x", "y"], self._integrate(accumulation_rate)),
-                    "snow_melt": (["x", "y"], self._integrate(snow_melt_rate)),
-                    "ice_melt": (["x", "y"], self._integrate(ice_melt_rate)),
-                    "melt": (["x", "y"], self._integrate(melt_rate)),
-                    "runoff": (["x", "y"], self._integrate(runoff_rate)),
-                    "smb": (["x", "y"], self._integrate(inst_smb)),
-                }
-            )
-        else:
-            result = {
-                "temp": temp,
-                "prec": prec,
-                "stdv": stdv,
-                "inst_pdd": inst_pdd,
-                "accumulation_rate": accumulation_rate,
-                "snow_melt_rate": snow_melt_rate,
-                "ice_melt_rate": ice_melt_rate,
-                "melt_rate": melt_rate,
-                "runoff_rate": runoff_rate,
-                "inst_smb": inst_smb,
-                "snow_depth": snow_depth,
-                "pdd": self._integrate(inst_pdd),
-                "accumulation": self._integrate(accumulation_rate),
-                "snow_melt": self._integrate(snow_melt_rate),
-                "ice_melt": self._integrate(ice_melt_rate),
-                "melt": self._integrate(melt_rate),
-                "runoff": self._integrate(runoff_rate),
-                "smb": self._integrate(inst_smb),
-            }
+        result = {
+            "temp": temp,
+            "prec": prec,
+            "stdv": stdv,
+            "inst_pdd": inst_pdd,
+            "accumulation_rate": accumulation_rate,
+            "snow_melt_rate": snow_melt_rate,
+            "ice_melt_rate": ice_melt_rate,
+            "melt_rate": melt_rate,
+            "runoff_rate": runoff_rate,
+            "inst_smb": inst_smb,
+            "snow_depth": snow_depth,
+            "pdd": self._integrate(inst_pdd),
+            "accumulation": self._integrate(accumulation_rate),
+            "snow_melt": self._integrate(snow_melt_rate),
+            "ice_melt": self._integrate(ice_melt_rate),
+            "melt": self._integrate(melt_rate),
+            "runoff": self._integrate(runoff_rate),
+            "smb": self._integrate(inst_smb),
+        }
 
         return result
 
@@ -441,7 +415,7 @@ class PDDModel:
     def refreeze_ice(self, value):
         self._refreeze_ice = value
 
-    def __call__(self, temp, prec, stdv=0.0, return_xarray: bool = False):
+    def __call__(self, temp, prec, stdv=0.0) -> dict:
         """Run the positive degree day model.
         Use temperature, precipitation, and standard deviation of temperature
         to compute the number of positive degree days, accumulation and melt
@@ -507,61 +481,32 @@ class PDDModel:
         runoff_rate = melt_rate - refreeze_rate
         inst_smb = accumulation_rate - runoff_rate
 
-        if return_xarray:
-            # make a dataset
-            # FIXME add coordinate variables
-            result = xr.Dataset(
-                data_vars={
-                    "temp": (["time", "x", "y"], temp),
-                    "prec": (["time", "x", "y"], prec),
-                    "stdv": (["time", "x", "y"], stdv),
-                    "inst_pdd": (["time", "x", "y"], inst_pdd),
-                    "accumulation_rate": (["time", "x", "y"], accumulation_rate),
-                    "snow_melt_rate": (["time", "x", "y"], snow_melt_rate),
-                    "ice_melt_rate": (["time", "x", "y"], ice_melt_rate),
-                    "melt_rate": (["time", "x", "y"], melt_rate),
-                    "runoff_rate": (["time", "x", "y"], runoff_rate),
-                    "inst_smb": (["time", "x", "y"], inst_smb),
-                    "snow_depth": (["time", "x", "y"], snow_depth),
-                    "pdd": (["x", "y"], self._integrate(inst_pdd)),
-                    "accumulation": (["x", "y"], self._integrate(accumulation_rate)),
-                    "snow_melt": (["x", "y"], self._integrate(snow_melt_rate)),
-                    "ice_melt": (["x", "y"], self._integrate(ice_melt_rate)),
-                    "melt": (["x", "y"], self._integrate(melt_rate)),
-                    "runoff": (["x", "y"], self._integrate(runoff_rate)),
-                    "refreeze": (["x", "y"], self._integrate(refreeze_rate)),
-                    "snow_refreeze": (["x", "y"], self._integrate(snow_refreeze_rate)),
-                    "ice_refreeze": (["x", "y"], self._integrate(ice_refreeze_rate)),
-                    "smb": (["x", "y"], self._integrate(inst_smb)),
-                }
-            )
-        else:
-            result = {
-                "temp": temp,
-                "prec": prec,
-                "stdv": stdv,
-                "inst_pdd": inst_pdd,
-                "accumulation_rate": accumulation_rate,
-                "snow_melt_rate": snow_melt_rate,
-                "ice_melt_rate": ice_melt_rate,
-                "melt_rate": melt_rate,
-                "snow_refreeze_rate": snow_refreeze_rate,
-                "ice_refreeze_rate": ice_refreeze_rate,
-                "refreeze_rate": refreeze_rate,
-                "runoff_rate": runoff_rate,
-                "inst_smb": inst_smb,
-                "snow_depth": snow_depth,
-                "pdd": self._integrate(inst_pdd),
-                "accumulation": self._integrate(accumulation_rate),
-                "snow_melt": self._integrate(snow_melt_rate),
-                "ice_melt": self._integrate(ice_melt_rate),
-                "melt": self._integrate(melt_rate),
-                "runoff": self._integrate(runoff_rate),
-                "refreeze": self._integrate(refreeze_rate),
-                "snow_refreeze": self._integrate(snow_refreeze_rate),
-                "ice_refreeze": self._integrate(ice_refreeze_rate),
-                "smb": self._integrate(inst_smb),
-            }
+        result = {
+            "temp": temp,
+            "prec": prec,
+            "stdv": stdv,
+            "inst_pdd": inst_pdd,
+            "accumulation_rate": accumulation_rate,
+            "snow_melt_rate": snow_melt_rate,
+            "ice_melt_rate": ice_melt_rate,
+            "melt_rate": melt_rate,
+            "snow_refreeze_rate": snow_refreeze_rate,
+            "ice_refreeze_rate": ice_refreeze_rate,
+            "refreeze_rate": refreeze_rate,
+            "runoff_rate": runoff_rate,
+            "inst_smb": inst_smb,
+            "snow_depth": snow_depth,
+            "pdd": self._integrate(inst_pdd),
+            "accumulation": self._integrate(accumulation_rate),
+            "snow_melt": self._integrate(snow_melt_rate),
+            "ice_melt": self._integrate(ice_melt_rate),
+            "melt": self._integrate(melt_rate),
+            "runoff": self._integrate(runoff_rate),
+            "refreeze": self._integrate(refreeze_rate),
+            "snow_refreeze": self._integrate(snow_refreeze_rate),
+            "ice_refreeze": self._integrate(ice_refreeze_rate),
+            "smb": self._integrate(inst_smb),
+        }
 
         return result
 
@@ -618,7 +563,7 @@ class PDDModel:
         ) + temp / 2 * sp.erfc(-normtemp)
 
         # use positive part where sigma is zero and Calov and Greve elsewhere
-        teff = xr.where(stdv == 0.0, positivepart, calovgreve)
+        teff = np.where(stdv == 0.0, positivepart, calovgreve)
 
         # convert to degree-days
         return teff * 365.242198781

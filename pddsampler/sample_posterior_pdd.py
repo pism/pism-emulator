@@ -38,7 +38,7 @@ from scipy.stats import beta
 from scipy.stats.distributions import uniform
 from tqdm.auto import tqdm
 
-from pism_emulator.models import TorchPDDModel as PDDModel
+from pism_emulator.models.pdd import TorchPDDModel as PDDModel
 from pism_emulator.utils import load_hirham_climate_w_std_dev
 
 torch.autograd.set_detect_anomaly(True)

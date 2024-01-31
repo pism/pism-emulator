@@ -16,11 +16,12 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+from io import StringIO
+
 import numpy as np
 import pandas as pd
-from numpy.testing import assert_array_almost_equal
-from io import StringIO
 import pytest
+from numpy.testing import assert_array_almost_equal
 
 from pism_emulator.utils import (
     calc_bic,
@@ -30,7 +31,6 @@ from pism_emulator.utils import (
     rmsd,
     stepwise_bic,
 )
-
 
 # Test data from DeConto and Pollard (2016):
 # Contribution of Antarctica to past and future sea-level rise
@@ -43,9 +43,8 @@ from pism_emulator.utils import (
 
 @pytest.fixture(name="dp16data")
 def fixture_dp16_df() -> pd.DataFrame:
-
     dp16_data = StringIO(
-    """
+        """
 , OCFAC, CREVLIQ, VCLIF, BIAS, LIG, PLIO, RCP45_pres, RCP26_2100, RCP45_2100, RCP85_2100
 1,0.1,0,0,0,-0.45,3.54,-0.047,-0.276,-0.253,-0.144
 2,0.1,0,1,0,-0.44,3.52,-0.047,-0.277,-0.255,-0.144
@@ -176,14 +175,14 @@ def fixture_dp16_df() -> pd.DataFrame:
 127,10,150,3,1,8.93,11.97,0.077,0.584,1.213,1.642
 128,10,150,5,1,9.04,12.41,0.096,1.171,1.863,2.458
 """
-)
+    )
     return pd.read_csv(dp16_data, skipinitialspace=True)
+
 
 @pytest.fixture(name="saltsamples")
 def fixture_salt_samples_df() -> pd.DataFrame:
-
     salt_samples = StringIO(
-    """
+        """
 id,VAR1,VAR2,VAR3
 0,0.0,4.973769398557651,6.037109375
 1,1.0,4.973769398557651,6.037109375
@@ -196,14 +195,14 @@ id,VAR1,VAR2,VAR3
 8,1.0,8.664820194499782,5.814453125
 9,0.0,9.99860571472394,5.814453125
 """
-)
-    return  pd.read_csv(salt_samples)
+    )
+    return pd.read_csv(salt_samples)
+
 
 @pytest.fixture(name="saltresponse")
 def fixture_salt_response_df() -> pd.DataFrame:
-
     salt_response = StringIO(
-    """
+        """
 id,response
 0,2
 1,0
@@ -216,17 +215,16 @@ id,response
 8,2
 9,3
 """
-)
+    )
 
     return pd.read_csv(salt_response)
-
 
 
 def test_calc_bic():
     X = np.array([[1.0, 4.0, 9.0], [2.0, 0.0, -1.0]])
     Y = X**2 - 1
     bic = calc_bic(X, Y)
-    assert_array_almost_equal(bic, -125.7078186828783, decimal=2), "foo"
+    assert_array_almost_equal(bic, -125.7078186828783, decimal=2)
 
 
 def test_kl_divergence(pq):

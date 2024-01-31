@@ -24,6 +24,20 @@ from numpy.testing import assert_almost_equal, assert_array_almost_equal
 from pism_emulator.models.debm import DEBMModel
 
 
+def test_year_fraction():
+    """
+    Test the year_fraction code.
+    """
+
+    time = np.array([-2000.12, 1981.21, 2024.01])
+
+    debm = DEBMModel()
+
+    year_fraction = debm.year_fraction(time)
+
+    assert_array_almost_equal(np.array([0.88, 0.21, 0.01]), year_fraction, decimal=4)
+
+
 def test_CalovGreveIntegrand():
     """
     Test the CalovGreveIntegrand
@@ -86,8 +100,8 @@ def test_distance_factor_paleo():
     Test distance factor paleo
     """
 
-    eccentricity = 0.0167
-    obliquity = 23.44
-    perihelion_longitude = 102.94719
+    eccentricity = np.array([0.0167, 0.03])
+    obliquity = np.deg2rad(np.array([23.14, 22.10]))
+    perihelion_longitude = np.deg2rad(np.array([102.94719, -44.3]))
     debm = DEBMModel()
     d = debm.distance_factor_paleo(eccentricity, perihelion_longitude, obliquity)

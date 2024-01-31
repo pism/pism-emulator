@@ -22,11 +22,11 @@ import random
 import lightning as pl
 import numpy as np
 import torch
-from torchmetrics.regression import MeanSquaredError
 from numpy.testing import assert_array_almost_equal
 from scipy.stats import dirichlet
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
+from torchmetrics.regression import MeanSquaredError
 
 from pism_emulator.nnemulator import DNNEmulator, NNEmulator
 
@@ -40,8 +40,8 @@ def seed_worker(worker_id):
 g = torch.Generator()
 g.manual_seed(0)
 
-def nn_setup(Emulator):
 
+def nn_setup(Emulator):
     torch.use_deterministic_algorithms(True)
     torch.manual_seed(0)
 
@@ -117,7 +117,6 @@ def test_emulator_equivalence():
     """
     Compare NNEmulator and DNNEmulator
     """
-
 
     Y_e = nn_setup(NNEmulator)
     Y_de = nn_setup(DNNEmulator)

@@ -537,7 +537,11 @@ def calc_bic(
 
 
 def stepwise_bic(
-    X: np.array, Y: np.array, varnames: Union[None, list] = None, interactions: bool = True, **kwargs
+    X: np.ndarray,
+    Y: np.ndarray,
+    varnames: Union[None, list] = None,
+    interactions: bool = True,
+    **kwargs,
 ):
     """
     Stepwise model selection using the Bayesian Information Criterion (BIC)
@@ -572,7 +576,6 @@ def stepwise_bic(
         names = [f"X{x}" for x in range(n)]
     else:
         names = varnames
-
 
     assert n == len(names)
     params_dict = {k: v for v, k in enumerate(names)}
@@ -611,7 +614,7 @@ def stepwise_bic(
                 lm_bic = calc_bic(tempX, Y)
             else:
                 # Temporary X that drops main effect
-                tempX = np.delete(X, params_dict[m_str], axis=1)  # type: ignore
+                tempX = np.delete(X, params_dict[m_str], axis=1)
                 # BIC for baseline model without main effect
                 lm_bic = calc_bic(tempX, Y)
             # Number of entries in bic_dict should equal the number of variables left to test

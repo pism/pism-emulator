@@ -26,16 +26,6 @@ repos:
           - --profile
           - black
 
-  # Can run individually with `pre-commit run flake8 --all-files`
-  # Need to use flake8 GitHub mirror due to CentOS git issue with GitLab
-  # https://github.com/pre-commit/pre-commit/issues/1206
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.0.0
-    hooks:
-      - id: flake8
-        entry: pflake8
-        additional_dependencies: [flake8-isort, pyproject-flake8]
-
   # Can run individually with `pre-commit run mypy --all-files`
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0
@@ -43,7 +33,7 @@ repos:
       - id: mypy
         args: [--config-file=pyproject.toml]
         language: system
-        pass_filenames: false
+
   # - repo: local
   #   hooks:
   #    - id: pytest # pytest is a pre-commit hook

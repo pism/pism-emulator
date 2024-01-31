@@ -38,7 +38,6 @@ class PISMDataset(torch.utils.data.Dataset):
         log_y=True,
         threshold=100e3,
         epsilon=0,
-        return_numpy=False,
         verbose=False,
     ):
         self.data_dir = data_dir
@@ -54,7 +53,6 @@ class PISMDataset(torch.utils.data.Dataset):
         self.epsilon = epsilon
         self.log_y = log_y
         self.normalize_x = normalize_x
-        self.return_numpy = return_numpy
         self.verbose = verbose
         self.load_target()
         self.load_data()
@@ -67,7 +65,6 @@ class PISMDataset(torch.utils.data.Dataset):
 
     def load_target(self):
         epsilon = self.epsilon
-        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         print(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file, decode_times=False)
@@ -106,25 +103,23 @@ class PISMDataset(torch.utils.data.Dataset):
         idx = (mask == 0).nonzero()
 
         data = data[idx]
-        Y_target = np.array(data.flatten(), dtype=np.float32)
-        if return_numpy is False:
-            Y_target = torch.from_numpy(Y_target)
+        Y_target = torch.from_numpy(np.array(data.flatten(), dtype=np.float32))
         self.Y_target = Y_target
         if self.target_has_error:
             data_error = data_error[idx]
             Y_target_error_2d = data_error
-            Y_target_error = np.array(data_error.flatten(), dtype=np.float32)
-            if not return_numpy:
-                Y_target_error = torch.from_numpy(Y_target_error)
+            Y_target_error = torch.from_numpy(
+                np.array(data_error.flatten(), dtype=np.float32)
+            )
 
             self.Y_target_error = Y_target_error
             self.Y_target_error_2d = Y_target_error_2d
         if self.target_has_corr:
             data_corr = data_corr[idx]
             Y_target_corr_2d = data_corr
-            Y_target_corr = np.array(data_corr.flatten(), dtype=np.float32)
-            if not return_numpy:
-                Y_target_corr = torch.from_numpy(Y_target_corr)
+            Y_target_corr = torch.from_numpy(
+                np.array(data_corr.flatten(), dtype=np.float32)
+            )
 
             self.Y_target_corr = Y_target_corr
             self.Y_target_corr_2d = Y_target_corr_2d
@@ -138,7 +133,6 @@ class PISMDataset(torch.utils.data.Dataset):
 
     def load_data(self):
         epsilon = self.epsilon
-        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
 
         identifier_name = "id"
@@ -205,11 +199,8 @@ class PISMDataset(torch.utils.data.Dataset):
             response = np.log10(response)
             response[np.isneginf(response)] = 0
 
-        X = np.array(samples[p], dtype=np.float32)
-        Y = np.array(response[p], dtype=np.float32)
-        if not return_numpy:
-            X = torch.from_numpy(X)
-            Y = torch.from_numpy(Y)
+        X = torch.from_numpy(np.array(samples[p], dtype=np.float32))
+        Y = torch.from_numpy(np.array(response[p], dtype=np.float32))
         Y[Y < 0] = 0
 
         X_mean = X.mean(axis=0)
@@ -230,8 +221,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.n_grid_points = n_grid_points
 
         normed_area = np.ones(n_grid_points, dtype=np.float32)
-        if not return_numpy:
-            normed_area = torch.tensor(normed_area)
+        normed_area = torch.tensor(normed_area)
         normed_area /= normed_area.sum()
         self.normed_area = normed_area
 

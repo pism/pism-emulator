@@ -20,7 +20,6 @@ from functools import wraps
 
 import numpy as np
 import scipy.special as sp
-from typing import Union
 
 
 def freeze_it(cls):
@@ -369,21 +368,179 @@ class DEBMModel:
     def tau_a_slope(self, value):
         self._tau_a_slope = value
 
+    def __call__(self, temp, prec) -> dict:
+        """Run the DEBM model.
+        Use temperature, precipitation to compute accumulation and melt
+        surface mass fluxes, and the resulting surface mass balance.
+        *temp*: array_like
+            Input near-surface air temperature in degrees Celcius.
+        *prec*: array_like
+            Input precipitation rate in meter per year.
+        By default, inputs are N-dimensional arrays whose first dimension is
+        interpreted as time and as periodic. Arrays of dimensions
+        N-1 are interpreted as constant in time and expanded to N dimensions.
+        Arrays of dimension 0 and numbers are interpreted as constant in time
+        and space and will be expanded too. The largest input array determines
+        the number of dimensions N.
+        Return surface mass balance
+        ('smb'), and many other output variables in a dictionary.
+        """
+
+        # ensure numpy arrays
+        # FIXME use data arrays instead
+        temp = np.asarray(temp)
+        prec = np.asarray(prec)
+
+        # expand arrays to the largest shape
+        # FIXME use xarray auto-broadcasting instead
+        maxshape = max(temp.shape, prec.shape, stdv.shape)
+        temp = self._expand(temp, maxshape)
+        prec = self._expand(prec, maxshape)
+
+        # interpolate time-series
+        # FIXME propagate data arrays, coordinates
+        if (self.interpolate_n > 1) and (self.interpolate_n != temp.shape[0]):
+            temp = self._interpolate(temp)
+            prec = self._interpolate(prec)
+
+        # compute accumulation and pdd
+        accumulation_rate = self.accumulation_rate(temp, prec)
+
+        # initialize snow depth and melt rates
+        snow_depth = np.zeros_like(temp)
+        snow_melt_rate = np.zeros_like(temp)
+        ice_melt_rate = np.zeros_like(temp)
+
+        # compute snow depth and melt rates
+        for i in range(len(temp)):
+            if i > 0:
+                snow_depth[i] = snow_depth[i - 1]
+            snow_depth[i] += accumulation_rate[i]
+            snow_melt_rate[i], ice_melt_rate[i] = self.melt_rates(
+                snow_depth[i], inst_pdd[i]
+            )
+            snow_depth[i] -= snow_melt_rate[i]
+        melt_rate = snow_melt_rate + ice_melt_rate
+        snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
+        ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
+        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
+        runoff_rate = melt_rate - refreeze_rate
+        inst_smb = accumulation_rate - runoff_rate
+
+        result = {
+            "temp": temp,
+            "prec": prec,
+            "stdv": stdv,
+            "inst_pdd": inst_pdd,
+            "accumulation_rate": accumulation_rate,
+            "snow_melt_rate": snow_melt_rate,
+            "ice_melt_rate": ice_melt_rate,
+            "melt_rate": melt_rate,
+            "snow_refreeze_rate": snow_refreeze_rate,
+            "ice_refreeze_rate": ice_refreeze_rate,
+            "refreeze_rate": refreeze_rate,
+            "runoff_rate": runoff_rate,
+            "inst_smb": inst_smb,
+            "snow_depth": snow_depth,
+            "accumulation": self._integrate(accumulation_rate),
+            "snow_melt": self._integrate(snow_melt_rate),
+            "ice_melt": self._integrate(ice_melt_rate),
+            "melt": self._integrate(melt_rate),
+            "runoff": self._integrate(runoff_rate),
+            "refreeze": self._integrate(refreeze_rate),
+            "snow_refreeze": self._integrate(snow_refreeze_rate),
+            "ice_refreeze": self._integrate(ice_refreeze_rate),
+            "smb": self._integrate(inst_smb),
+        }
+
+        return result
+
+    def _expand(self, array, shape):
+        """Expand an array to the given shape"""
+        if array.shape == shape:
+            res = array
+        elif array.shape == (1, shape[1], shape[2]):
+            res = np.asarray([array[0]] * shape[0])
+        elif array.shape == shape[1:]:
+            res = np.asarray([array] * shape[0])
+        elif array.shape == ():
+            res = array * np.ones(shape)
+        else:
+            raise ValueError(
+                "could not expand array of shape %s to %s" % (array.shape, shape)
+            )
+        return res
+
+    def _integrate(self, array):
+        """Integrate an array over one year"""
+        return np.sum(array, axis=0) / (self.interpolate_n - 1)
+
+    def _interpolate(self, array):
+        """Interpolate an array through one year."""
+
+        rule = self.interpolate_rule
+        npts = self.interpolate_n
+        oldx = (np.arange(len(array) + 2) - 0.5) / len(array)
+        oldy = np.vstack(([array[-1]], array, [array[0]]))
+        newx = (np.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
+        newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
+        return newy
+
+    def year_fraction(self, time: np.ndarray) -> np.ndarray:
+        """
+        Fractional part of a year
+
+        Parameters
+        ----------
+        time : float, list of floats or numpy.ndarray
+            Decimal time
+        """
+        return time - np.floor(time)
+
     def CalovGreveIntegrand(
         self,
         sigma: np.ndarray,
         temperature: np.ndarray,
     ) -> np.ndarray:
         """
-        * The integrand in equation 6 of
-        *
-        * R. Calov and R. Greve, “A semi-analytical solution for the positive degree-day model
-        * with stochastic temperature variations,” Journal of Glaciology, vol. 51, Art. no. 172,
-        * 2005.
-        *
-        * @param[in] sigma standard deviation of daily variation of near-surface air temperature (Kelvin)
-        * @param[in] temperature near-surface air temperature in "degrees Kelvin above the melting point"
-        */
+        The integrand in equation 6 of
+        R. Calov and R. Greve, “A semi-analytical solution for the positive degree-day model
+        with stochastic temperature variations,” Journal of Glaciology, vol. 51, Art. no. 172,
+        2005.
+
+        Parameters
+        ----------
+        sigma : numpy.ndarray
+            sigma standard deviation of daily variation of near-surface air temperature (Kelvin)
+        temperature : numpy.ndarray
+            temperature near-surface air temperature in "degrees Kelvin above the melting point"
+
+        Returns
+        ----------
+        int: numpy.ndarray
+            Integrand of Eq 6.
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    sigma = 4.2
+        >>>    temperature = 2.1
+
+        >>>    cgi = debm.CalovGreveIntegrand(sigma, temperature)
+        >>>    cgi
+        array(2.93074554)
+
+        >>>    sigma = [4.2, 2.0]
+        >>>    temperature = [1.0, 2.1]
+
+        >>>    cgi = debm.CalovGreveIntegrand(sigma, temperature)
+        >>>    cgi
+        array([2.22282761, 2.25136026])
         """
 
         a = np.maximum(temperature, np.zeros_like(temperature))
@@ -398,18 +555,42 @@ class DEBMModel:
         self, phi: np.ndarray, latitude: np.ndarray, declination: np.ndarray
     ) -> np.ndarray:
         """
-        * The hour angle (radians) at which the sun reaches the solar angle `phi`
-        *
-        * Implements equation 11 in Krebs-Kanzow et al solved for h_phi.
-        *
-        * Equation 2 in Zeitz et al should be equivalent but misses "acos(...)".
-        *
-        * The return value is in the range [0, pi].
-        *
-        * @param[in] phi angle (radians)
-        * @param[in] latitude latitude (radians)
-        * @param[in] declination solar declination angle (radians)
-        */
+        The hour angle (radians) at which the sun reaches the solar angle `phi`
+
+        Implements equation 11 in Krebs-Kanzow et al solved for h_phi.
+
+        Equation 2 in Zeitz et al should be equivalent but misses "acos(...)".
+
+        The return value is in the range [0, pi].
+
+        Parameters
+        ----------
+        phi : float, list of floats or numpy.ndarray
+            angle (radians)
+        latitude : float, list of floats or numpy.ndarray
+            latitude (radians)
+        declination : float, list of floats or numpy.ndarray
+            solar declination angle (radians)
+
+        Returns
+        ----------
+        angle: numpy.ndarray
+            hour angle (radians)
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    phi = np.array([np.pi / 4])
+        >>>    latitude = np.array([np.pi / 4])
+        >>>    declination = np.array([np.pi / 8])
+        >>>    hour_angle = debm.hour_angle(phi, latitude, declination)
+        >>>    hour_angle
+        array(0.839038303283583)
         """
 
         cos_h_phi = (np.sin(phi) - np.sin(latitude) * np.sin(declination)) / (
@@ -509,7 +690,7 @@ class DEBMModel:
 
         E = eccentricity
 
-        assert E != 1.0, f"Division by zero, eccentricity is {E}"
+        assert np.isin(E, 1).any() == False, f"Division by zero, eccentricity is {E}"
 
         return (
             1.0 + E * np.cos(solar_longitude - perhelion_longitude) / (1.0 - E**2)
@@ -537,12 +718,12 @@ class DEBMModel:
         return (
             a0
             + b0
-            + a1 * cos(t)
-            + b1 * sin(t)
-            + a2 * cos(2.0 * t)
-            + b2 * sin(2.0 * t)
-            + a3 * cos(3.0 * t)
-            + b3 * sin(3.0 * t)
+            + a1 * np.cos(t)
+            + b1 * np.sin(t)
+            + a2 * np.cos(2.0 * t)
+            + b2 * np.sin(2.0 * t)
+            + a3 * np.cos(3.0 * t)
+            + b3 * np.sin(3.0 * t)
         )
 
     def solar_declination_paleo(
@@ -618,11 +799,8 @@ class DEBMModel:
         *
         """
 
-        if hour_angle == 0:
-            return 0.0
-
         return (
-            (solar_constant / hour_angle)
+            np.divide(solar_constant, hour_angle, where=hour_angle != 0)
             * distance_factor
             * (
                 hour_angle * np.sin(latitude) * np.sin(declination)
@@ -630,7 +808,7 @@ class DEBMModel:
             )
         )
 
-    def orbital_parameters(self, time: np.ndarray) -> np.ndarray:
+    def orbital_parameters(self, time: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
         Calculate orbital parameters (declination, distance_factor) given a given time
         """
@@ -638,13 +816,13 @@ class DEBMModel:
         year_fraction = self.year_fraction(time)
 
         if self.paleo_enabled:
-            eccentricity = self.eccentricity(time)
-            perhelion_longitude = self.perhelion_longitude(time)
+            eccentricity = self.paleo_eccentricity
+            perihelion_longitude = np.deg2rad(self.paleo_perihelion_longitude)
             solar_longitude = self.solar_longitude(
-                year_fraction, eccentricity, perhelion_longitude
+                year_fraction, eccentricity, perihelion_longitude
             )
             distance_factor = self.distance_factor_paleo(
-                eccentricity, perhelion_longitude, solar_longitude
+                eccentricity, perihelion_longitude, solar_longitude
             )
         else:
             declination = self.solar_declination_present_day(year_fraction)

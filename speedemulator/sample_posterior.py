@@ -550,6 +550,8 @@ if __name__ == "__main__":
 
         traces.append(az.convert_to_inference_data(d))
 
-    traces = az.concat(traces, dim="chain")
-    traces.to_zarr(store=join(posterior_dir, f"X_posterior_model_{model_index}.zarr"))
-    az.plot_trace(traces)
+    all_traces = az.concat(traces, dim="chain")
+    all_traces.to_zarr(
+        store=join(posterior_dir, f"X_posterior_model_{model_index}.zarr")
+    )
+    az.plot_trace(all_traces)
