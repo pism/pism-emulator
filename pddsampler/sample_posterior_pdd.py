@@ -294,7 +294,7 @@ class MALASampler(object):
         else:
             return log_pi
 
-    def draw_sample(self, mu, cov, eps=1e-10):
+    def draw_sample(self, mu, cov, eps=1e-8):
         L = torch.linalg.cholesky(cov + eps * torch.eye(cov.shape[0], device=device))
         return mu + L @ torch.randn(L.shape[0], device=device)
 
@@ -390,17 +390,6 @@ class MALASampler(object):
                     trace = az.convert_to_inference_data(d)
                     trace.to_zarr(store=f"X_posterior_chain_{chain}.zarr")
 
-                    df = pd.DataFrame(
-                        data=X_posterior.astype("float32"),
-                        columns=X_keys,
-                    )
-                    df.to_parquet(
-                        join(
-                            posterior_dir,
-                            f"X_posterior_chain_{chain}.parquet",
-                        )
-                    )
-
         X_posterior = torch.stack(m_vars).cpu().numpy()
         return X_posterior
 
@@ -459,7 +448,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output_dir", default="sampler")
     parser.add_argument("--n_interpolate", type=int, default=12)
-    parser.add_argument("--chains", type=int, default=5)
+    parser.add_argument("--chains", type=int, default=1)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--sigma", type=float, default=0.1)
     parser.add_argument("--thinning_factor", type=int, default=100)
@@ -569,7 +558,7 @@ if __name__ == "__main__":
         device=device,
     )
 
-    pdd = PDDModel()
+    pdd = PDDModel(device=device)
 
     start = time.process_time()
     sampler = MALASampler(
@@ -588,20 +577,30 @@ if __name__ == "__main__":
     )
     X_map = sampler.find_MAP(X_0, verbose=False)
 
-    with tqdm_joblib(
-        tqdm(desc="Sampling chains", total=n_chains, position=0, leave=True)
-    ) as progress_bar:
-        result = Parallel(n_jobs=n_chains)(
-            delayed(sampler.sample)(
-                X_map.clone(),
+    if n_chains == 1:
+        sampler.sample(
+                X_map,
                 samples=samples,
                 burn=burn,
-                chain=c,
+                chain=0,
                 save_interval=1000,
-                validate=validate,
+                validate=validate)
+    else:
+        
+        with tqdm_joblib(
+            tqdm(desc="Sampling chains", total=n_chains, position=0, leave=True)
+        ) as progress_bar:
+            result = Parallel(n_jobs=n_chains)(
+                delayed(sampler.sample)(
+                    X_map.clone(),
+                    samples=samples,
+                    burn=burn,
+                    chain=c,
+                    save_interval=1000,
+                    validate=validate,
+                )
+                for c in range(n_chains)
             )
-            for c in range(n_chains)
-        )
 
     elapsed_time = time.process_time() - start
     print(f"Sampling took {elapsed_time:.0f}s")

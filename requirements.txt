@@ -17,3 +17,5 @@ lightning
 tensorboard
 arviz
 ipywidgets
+zarr
+notebook

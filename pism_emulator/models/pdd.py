@@ -748,7 +748,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         temp = torch.asarray(temp, device=self.device)
         prec = torch.asarray(prec, device=self.device)
         stdv = torch.asarray(stdv, device=self.device)
-
+        
         # expand arrays to the largest shape
         maxshape = max(temp.shape, prec.shape, stdv.shape)
         temp = self._expand(temp, maxshape)
