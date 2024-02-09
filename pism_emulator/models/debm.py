@@ -99,6 +99,7 @@ class DEBMModel:
         std_dev_periodic: bool = False,
         tau_a_intercept: float = 0.65,
         tau_a_slope: float = 0.000032,
+        water_density: float = 1000.0,
         device="cpu",
         *args,
         **kwargs,
@@ -132,6 +133,7 @@ class DEBMModel:
         self.std_dev_periodic = std_dev_periodic
         self.tau_a_intercept = tau_a_intercept
         self.tau_a_slope = tau_a_slope
+        self.water_density = water_density
         self.device = device
 
     @property
@@ -358,6 +360,14 @@ class DEBMModel:
     def tau_a_slope(self, value):
         self._tau_a_slope = value
 
+    @property
+    def water_density(self):
+        return self._water_density
+
+    @water_density.setter
+    def water_density(self, value):
+        self._water_density = value
+
     def __call__(self, temp, prec) -> dict:
         """Run the DEBM model.
         Use temperature, precipitation to compute accumulation and melt
@@ -383,7 +393,7 @@ class DEBMModel:
 
         # expand arrays to the largest shape
         # FIXME use xarray auto-broadcasting instead
-        maxshape = max(temp.shape, prec.shape, stdv.shape)
+        maxshape = max(temp.shape, prec.shape)
         temp = self._expand(temp, maxshape)
         prec = self._expand(prec, maxshape)
 
@@ -557,7 +567,7 @@ class DEBMModel:
         temperature_std_deviaton: np.ndarray,
         surface_elevation: np.ndarray,
         latitude: np.ndarray,
-        albedo: float,
+        albedo: np.ndarray,
     ) -> dict:
         """
         Calculate melt
@@ -565,6 +575,36 @@ class DEBMModel:
         latitude_rad = np.deg2rad(latitude)
         insolation = self.insolation(distance_factor, h_phi, latitude_rad, declination)
 
+        transmissivity = self.atmosphere_transmissivity(surface_elevation)
+        h_phi = self.hour_angle(phi, latitude_rad, declination)
+        insolation = self.insolation(
+            solar_constant, distance_factor, h_phi, latitude_rad, declination
+        )
+        T_eff = self.CalovGreveIntegrand(
+            temperature_std_deviaton - self.positive_threshold_temp
+        )
+        eps = 1.0e-4
+        T_eff = np.where(T_eff < eps, 0, T_eff)
+
+        #  Note that in the line below we replace "Delta_t_Phi / Delta_t" with "h_Phi / pi". See
+        #  equations 1 and 2 in Zeitz et al.
+        A = dt * (h_phi / np.pi / (self.water_density * self.latent_heat_of_fusion))
+
+        insolation_melt = A * (transmissivity * (1.0 - albedo) * insolation)
+        temperature_melt = A * self.c1 * T_eff
+        offset_melt = A * self.c2
+
+        total_melt = insolation_melt + temperature_melt + offset_melt
+        total_melt = np.maximum(total_melt, 0.0)
+
+        return {
+            "insolation_melt": insolation_melt,
+            "temperature_melt": temperature_melt,
+            "offset_melt": offset_melt,
+            "total_melt": total_melt,
+        }
+
+    #   double A = dt * (h_phi / M_PI / (m_water_density * m_L));
     # DEBMSimpleMelt DEBMSimplePointwise::melt(double declination,
     #                                          double distance_factor,
     #                                          double dt,
