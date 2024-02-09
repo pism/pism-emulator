@@ -352,6 +352,7 @@ class MALASampler(object):
         chain: int = 0,
         samples: int = 10001,
         h: float = 0.1,
+        h_min: float = 0.01,
         h_max: float = 1.0,
         acc_target: float = 0.25,
         k: float = 0.01,
@@ -377,7 +378,7 @@ class MALASampler(object):
                 X, local_data, s = self.MALA_step(X, h, local_data=local_data)
                 m_vars.append(X.detach())
                 acc = beta * acc + (1 - beta) * s
-                h = min(h * (1 + k * np.sign(acc - acc_target)), h_max)
+                h = max(min(h * (1 + k * np.sign(acc - acc_target)), h_max), h_min)
                 log_p = local_data[0].item()
                 desc = f"chain {chain}:  accept: {acc:.2f}, step: {h:.2f}, log(P): {log_p:.1f}"
                 progress.set_description(desc=desc)
@@ -578,15 +579,15 @@ if __name__ == "__main__":
     X_map = sampler.find_MAP(X_0, verbose=False)
 
     if n_chains == 1:
-        sampler.sample(
-                X_map,
-                samples=samples,
-                burn=burn,
-                chain=0,
-                save_interval=1000,
-                validate=validate)
+        result = sampler.sample(
+            X_map,
+            samples=samples,
+            burn=burn,
+            chain=0,
+            save_interval=1000,
+            validate=validate,
+        )
     else:
-        
         with tqdm_joblib(
             tqdm(desc="Sampling chains", total=n_chains, position=0, leave=True)
         ) as progress_bar:

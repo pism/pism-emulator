@@ -621,8 +621,22 @@ class DEBMModel:
 
         Parameters
         ----------
-        time : float, list of floats or numpy.ndarray
+        time : numpy.ndarray
             Decimal time
+
+        Returns
+        ----------
+        year_fraction : numpy.ndarray
+            Year fraction
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    time = np.array([1980.5])
+        >>>    year_fraction = debm.year_fraction(time)
+        array([0.5])
         """
         return time - np.floor(time)
 
@@ -757,6 +771,7 @@ class DEBMModel:
         >>>    eccentricity = np.array([0.1])
         >>>    perihelion_longitude = np.array([np.pi/4])
         >>>    solar_longitude = debm.solar_longitude(year_fraction, eccentricity, perihelion_longitude)
+        >>>    solar_longitude
         array([2.08753274])
 
         """
@@ -821,8 +836,8 @@ class DEBMModel:
 
         >>>    year_fraction = np.array([0.5])
         >>>    distance_factor_present_day = debm.distance_factor_present_day(year_fraction)
+        >>>    distance_factor_present_day
         array([0.966608])
-
         """
 
         # These coefficients come from Table 2.2 in Liou 2002
@@ -853,9 +868,34 @@ class DEBMModel:
         """
         Calculate paleo distance factor
 
-        * @param[in] eccentricity eccentricity of the earth’s orbit (no units)
-        * @param[in] perihelion_longitude perihelion longitude (radians)
-        * @param[in] solar_longitude solar longitude (radians)
+        Parameters
+        ----------
+        eccentricity : numpy.ndarray
+            eccentricity of the earth’s orbit (no units)
+        perhelion_longitude : numpy.ndarray
+            perihelion longitude (radians)
+        solar_longitude : numpy.ndarray
+            solar longitude (radians)
+
+        Returns
+        ----------
+        distance_factor_present_day: numpy.ndarray
+            distance factor present day ()
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    year_fraction = np.array([0.5])
+        >>>    eccentricity = np.array([0.1])
+        >>>    perihelion_longitude = np.array([np.pi/4])
+        >>>    distance_factor_paleo = debm.distance_factor_paleo(year_fraction, eccentricity, perihelion_longitude)
+        >>>    distance_factor_paleo
+        array([2.29859373])
         """
 
         E = eccentricity
@@ -868,19 +908,41 @@ class DEBMModel:
 
     def solar_declination_present_day(self, year_fraction: np.ndarray) -> np.ndarray:
         """
-        * Solar declination (radian)
-        *
-        * Implements equation 2.2.10 from Liou (2002)
+        Solar declination (radians)
+
+        Implements equation 2.2.10 from Liou (2002)
+
+        Parameters
+        ----------
+        year_fraction : numpy.ndarray
+            fraction (1)
+
+        Returns
+        ----------
+        solar_declination: numpy.ndarray
+            Solar declination present day ()
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    year_fraction = np.array([0.5])
+        >>>    solar_declination = debm.solar_declination_present_day(year_fraction)
+        array([0.402769])
         """
 
         # These coefficients come from Table 2.2 in Liou 2002
-        a0 = (0.006918,)
-        a1 = (-0.399912,)
-        a2 = (-0.006758,)
-        a3 = (-0.002697,)
-        b0 = (0.0,)
-        b1 = (0.070257,)
-        b2 = (0.000907,)
+        a0 = 0.006918
+        a1 = -0.399912
+        a2 = -0.006758
+        a3 = -0.002697
+        b0 = 0.0
+        b1 = 0.070257
+        b2 = 0.000907
         b3 = 0.000148
 
         t = 2.0 * np.pi * year_fraction
@@ -900,17 +962,47 @@ class DEBMModel:
         self, obliquity: np.ndarray, solar_longitude: np.ndarray
     ) -> np.ndarray:
         """
-        * Solar declination (radians). This is the "paleo" version used when
-        * the trigonometric expansion (equation 2.2.10 in Liou 2002) is not valid.
-        *
-        * The return value is in the range [-pi/2, pi/2].
-        *
-        * Implements equation in the text just above equation A1 in Zeitz et al.
-        *
-        * See also equation 2.2.4 of Liou (2002).
+        Solar declination (radians). This is the "paleo" version used when
+        the trigonometric expansion (equation 2.2.10 in Liou 2002) is not valid.
+
+        The return value is in the range [-pi/2, pi/2].
+
+        Implements equation in the text just above equation A1 in Zeitz et al.
+
+        See also equation 2.2.4 of Liou (2002).
+
+        Parameters
+        ----------
+        obliquity : numpy.ndarray
+            fraction (radians)
+        solar_longitude : numpy.ndarray
+            Solar longitude (radians)
+
+        Returns
+        ----------
+        solar_declination: numpy.ndarray
+            Solar declination paleo (radians)
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    obliquity = np.array([np.pi / 4])
+        >>>    solar_longitude = np.array([np.pi * 3 / 4])
+        >>>    solar_declination = debm.solar_declination_paleo(obliquity, solar_longitude)
+        >>>   solar_declination
+        array([0.55536037])
         """
 
-        return np.arcsin(np.sin(obliquity * np.sin(solar_longitude)))
+        solar_declination = np.arcsin(np.sin(obliquity * np.sin(solar_longitude)))
+        assert np.all(
+            np.abs(solar_declination) <= np.pi / 4
+        ), f"{solar_declination} not within [-pi/4, pi/4] bounds"
+        return solar_declination
 
     def insolation(
         self,
@@ -923,7 +1015,7 @@ class DEBMModel:
         """
 
         Average top of atmosphere insolation (rate) during the daily melt period, in W/m^2.
-        *
+
         This should be equation 5 in Zeitz et al or equation 12 in Krebs-Kanzow et al, but both
         of these miss a factor of Delta_t (day length in seconds) in the numerator.
 
@@ -961,12 +1053,41 @@ class DEBMModel:
 
         C = S0 / h_phi.
 
-        @param[in] solar constant solar constant, W/m^2
-        @param[in] distance_factor square of the ratio of the mean sun-earth distance to the current sun-earth distance (no units)
-        @param[in] hour_angle hour angle (radians) when the sun reaches the critical angle Phi
-        @param[in] latitude latitude (radians)
-        @param[in] declination declination (radians)
 
+        Parameters
+        ----------
+        solar_constant : numpy.ndarray
+            solar constant (W/m^2)
+        distance_factor : numpy.ndarray
+            distance factor (no units)
+        hour_angle : numpy.ndarray
+            hour angle (radians)
+        latitude : numpy.ndarray
+            latitude (radians)
+        declination : numpy.ndarray
+            declination (radians)
+
+        Returns
+        ----------
+        insolation numpy.ndarray
+            Solar declination paleo (radians)
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    solar_constant = np.array([1361.0])
+        >>>    distance_factor = np.array([1.1])
+        >>>    hour_angle = np.array([0.8])
+        >>>    latitude = np.array([np.pi / 4])
+        >>>    declination = np.array([np.pi / 8])
+        >>>    insolation = debm.insolation(solar_constant, distance_factor, hour_angle, latitude, declination)
+        >>>    insolation
+        array([1282.10500694])
         """
 
         return (
@@ -1020,5 +1141,28 @@ class DEBMModel:
         See appendix A2 in Zeitz et al 2021.
 
         @param[in] elevation elevation above the geoid (meters)
+
+        Parameters
+        ----------
+        elevation : numpy.ndarray
+            elevation above the geoid (meters)
+
+        Returns
+        ----------
+        transmissivity numpy.ndarray
+            Transmissivity (1)
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    debm = DEBMModel()
+
+        >>>    solar_constant = np.array([1500.0])
+        >>>    transmissivity = debm.atmosphere_transmissivity(elevation)
+        >>>    transmissivity
+        array([0.698])
         """
         return self.tau_a_intercept + self.tau_a_slope * elevation
