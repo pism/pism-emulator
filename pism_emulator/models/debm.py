@@ -17,10 +17,10 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 from functools import wraps
+from typing import Literal, Union
 
 import numpy as np
 import scipy.special as sp
-from typing import Literal
 from scipy.interpolate import interp1d
 
 
@@ -591,7 +591,8 @@ class DEBMModel:
             solar_constant, distance_factor, h_phi, latitude_rad, declination
         )
         T_eff = self.CalovGreveIntegrand(
-            temperature_std_deviaton - self.positive_threshold_temp
+            temperature_std_deviaton,
+            temperature_std_deviaton - self.positive_threshold_temp,
         )
         eps = 1.0e-4
         T_eff = np.where(T_eff < eps, 0, T_eff)
