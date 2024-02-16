@@ -50,7 +50,7 @@ def test_CalovGreveIntegrand():
 
     cgi = debm.CalovGreveIntegrand(sigma, temperature)
 
-    assert_array_almost_equal(np.array([0.7979, 2.0000, 0.0833]), cgi, decimal=4)
+    assert_array_almost_equal(np.array([0.79788456, 2.0, 0.08331547]), cgi, decimal=4)
 
 
 def test_hour_angle():
@@ -64,7 +64,7 @@ def test_hour_angle():
 
     debm = DEBMModel()
     hour_angle = debm.hour_angle(phi, latitude, declination)
-    assert_array_almost_equal(np.array([0.0000, 0.7854, 0.0000]), hour_angle, decimal=4)
+    assert_array_almost_equal(np.array([0.0, 0.78539816, 0.0]), hour_angle, decimal=4)
 
 
 def test_solar_longitude():
@@ -92,7 +92,7 @@ def test_distance_factor_present_day():
 
     debm = DEBMModel()
     d = debm.distance_factor_present_day(year_fraction)
-    assert_array_almost_equal(np.array([1.0351, 1.0308, 1.0351]), d, decimal=4)
+    assert_array_almost_equal(np.array([1.03505, 1.03081244, 1.03505]), d, decimal=4)
 
 
 def test_distance_factor_paleo():

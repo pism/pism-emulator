@@ -405,6 +405,7 @@ class DEBMModel:
     def __call__(
         self,
         temperature: np.ndarray,
+        temperature_std_deviation: np.ndarray,
         precipitation: np.ndarray,
         surface_elevation: Union[None, np.ndarray] = None,
         latitude: Union[None, np.ndarray] = None,
@@ -447,18 +448,56 @@ class DEBMModel:
         snow_depth = np.zeros_like(temperature)
         snow_melted = np.zeros_like(temperature)
         ice_melted = np.zeros_like(temperature)
+        insolation_melt = np.zeros_like(temperature)
+        temperature_melt = np.zeros_like(temperature)
+        offset_melt = np.zeros_like(temperature)
+        total_melt = np.zeros_like(temperature)
+        runoff = np.zeros_like(temperature)
+        smb = np.zeros_like(temperature)
 
-        for i in range(len(temperature)):
-            if i > 0:
-                snow_depth[i] = snow_depth[i - 1]
-            albedo = self.albedo(total_melt_rate[i])
-            snow_depth[i] += accumulation_rate[i]
-            melt_rates = self.melt(temperature[i], albedo[i], snow_depth[i])
-            snow_depth[i] -= total_melt_rate[i]
+        nt = temperature.shape[0]
+        dt = 1.0 / nt
+        for i in range(nt):
+            if i == 0:
+                intermediate_snow_depth = accumulation_rate[i]
+            else:
+                intermediate_snow_depth = snow_depth[i - 1] + accumulation_rate[i]
+            time = dt * i
+            year_fraction = self.year_fraction(time)
+            albedo = self.albedo(total_melt[i])
+            melt_rates = self.melt(
+                temperature[i],
+                temperature_std_deviation[i],
+                albedo[i],
+                surface_elevation[i],
+                latitude[i],
+                year_fraction,
+                dt,
+            )
+            insolation_melt[i] = melt_rates["insolation_melt"]
+            temperature_melt[i] = melt_rates["temperature_melt"]
+            offset_melt[i] = melt_rates["offset_melt"]
+            total_melt[i] = melt_rates["total_melt"]
+            snow_melted[i] = np.where(total_melt_rate[i] < 0, 0.0, total_melt_rate[i])
+            snow_melted[i] = np.where(
+                total_melt_rate[i] <= snow_depth[i], total_melt_rate[i], snow_depth[i]
+            )
+            ice_melted[i] = np.minimum(
+                total_melt_rate[i] - snow_melted[i], snow_depth[i]
+            )
+            snow_depth[i] = intermediate_snow_depth - snow_melt_rate[i]
+            ice_melted[i] = total_melt_rate[i] - snow_melted[i]
+            total_melt[i] = snow_melted[i] + ice_melted[i]
+            ice_created_by_refreeze = self.refreeze * snow_melted[i]
+            runoff[i] = total_melt[i] - ice_created_by_refreeze
+            smb[i] = accumulation_rate[i] - runoff[i]
 
         result = {
             "temperature": temperature,
             "precipitation": precipitation,
+            "smb": smb,
+            "snow_depth": snow_depth,
+            "runoff": runoff,
         }
 
         return result
@@ -578,17 +617,20 @@ class DEBMModel:
         albedo: np.ndarray,
         surface_elevation: np.ndarray,
         latitude: np.ndarray,
+        year_fraction: np.ndarray,
+        dt: float,
     ) -> dict:
         """
         Calculate melt
         """
         latitude_rad = np.deg2rad(latitude)
-        insolation = self.insolation(distance_factor, h_phi, latitude_rad, declination)
+        declination, distance_factor = self.orbital_parameters(year_fraction)
 
         transmissivity = self.atmosphere_transmissivity(surface_elevation)
-        h_phi = self.hour_angle(phi, latitude_rad, declination)
+        phi_rad = np.deg2rad(self.phi)
+        h_phi = self.hour_angle(phi_rad, latitude_rad, declination)
         insolation = self.insolation(
-            solar_constant, distance_factor, h_phi, latitude_rad, declination
+            self.solar_constant, distance_factor, h_phi, latitude_rad, declination
         )
         T_eff = self.CalovGreveIntegrand(
             temperature_std_deviaton,
