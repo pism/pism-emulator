@@ -20,6 +20,8 @@ from functools import wraps
 
 import numpy as np
 import scipy.special as sp
+from typing import Literal
+from scipy.interpolate import interp1d
 
 
 def freeze_it(cls):
@@ -79,6 +81,11 @@ class DEBMModel:
         albedo_slope: float = -790,
         c1: float = 29.0,
         c2: float = -93.0,
+        ice_density: float = 917.0,
+        interpolate_n: int = 52,
+        interpolate_rule: Literal[
+            "linear", "nearest", "zero", "slinear", "quadratic", "cubic"
+        ] = "linear",
         interpret_precip_as_snow: bool = False,
         latent_heat_of_fusion: float = 3.34e5,
         max_evals_per_year: int = 52,
@@ -113,7 +120,9 @@ class DEBMModel:
         self.albedo_max = albedo_max
         self.c1 = c1
         self.c2 = c2
+        self.ice_density = ice_density
         self.interpret_precip_as_snow = interpret_precip_as_snow
+        self.interpolate_rule = interpolate_rule
         self.latent_heat_of_fusion = latent_heat_of_fusion
         self.max_evals_per_year = max_evals_per_year
         self.melting_threshold_temp = melting_threshold_temp
@@ -135,6 +144,7 @@ class DEBMModel:
         self.tau_a_slope = tau_a_slope
         self.water_density = water_density
         self.device = device
+        self.interpolate_n = interpolate_n
 
     @property
     def air_temp_all_precip_as_rain(self):
@@ -199,6 +209,30 @@ class DEBMModel:
     @c2.setter
     def c2(self, value):
         self._c2 = value
+
+    @property
+    def ice_density(self):
+        return self._ice_density
+
+    @ice_density.setter
+    def ice_density(self, value):
+        self._ice_density = value
+
+    @property
+    def interpolate_n(self):
+        return self._interpolate_n
+
+    @interpolate_n.setter
+    def interpolate_n(self, value):
+        self._interpolate_n = value
+
+    @property
+    def interpolate_rule(self):
+        return self._interpolate_rule
+
+    @interpolate_rule.setter
+    def interpolate_rule(self, value):
+        self._interpolate_rule = value
 
     @property
     def interpret_precip_as_snow(self):
@@ -368,13 +402,19 @@ class DEBMModel:
     def water_density(self, value):
         self._water_density = value
 
-    def __call__(self, temp, prec) -> dict:
+    def __call__(
+        self,
+        temperature: np.ndarray,
+        precipitation: np.ndarray,
+        surface_elevation: Union[None, np.ndarray] = None,
+        latitude: Union[None, np.ndarray] = None,
+    ) -> dict:
         """Run the DEBM model.
         Use temperature, precipitation to compute accumulation and melt
         surface mass fluxes, and the resulting surface mass balance.
-        *temp*: array_like
+        *temperature*: array_like
             Input near-surface air temperature in degrees Celcius.
-        *prec*: array_like
+        *precipitation*: array_like
             Input precipitation rate in meter per year.
         By default, inputs are N-dimensional arrays whose first dimension is
         interpreted as time and as periodic. Arrays of dimensions
@@ -387,70 +427,38 @@ class DEBMModel:
         """
 
         # ensure numpy arrays
-        # FIXME use data arrays instead
-        temp = np.asarray(temp)
-        prec = np.asarray(prec)
+        temperature = np.asarray(temperature)
+        precipitation = np.asarray(precipitation)
 
         # expand arrays to the largest shape
-        # FIXME use xarray auto-broadcasting instead
-        maxshape = max(temp.shape, prec.shape)
-        temp = self._expand(temp, maxshape)
-        prec = self._expand(prec, maxshape)
+        maxshape = max(temperature.shape, precipitation.shape)
+        temperature = self._expand(temperature, maxshape)
+        precipitation = self._expand(precipitation, maxshape)
 
         # interpolate time-series
-        # FIXME propagate data arrays, coordinates
-        if (self.interpolate_n > 1) and (self.interpolate_n != temp.shape[0]):
-            temp = self._interpolate(temp)
-            prec = self._interpolate(prec)
+        if (self.interpolate_n > 1) and (self.interpolate_n != temperature.shape[0]):
+            temperature = self._interpolate(temperature)
+            precipitation = self._interpolate(precipitation)
 
-        # compute accumulation and pdd
-        accumulation_rate = self.accumulation_rate(temp, prec)
+        # compute accumulation
+        accumulation_rate = self.accumulation_rate(temperature, precipitation)
 
         # initialize snow depth and melt rates
-        snow_depth = np.zeros_like(temp)
-        snow_melt_rate = np.zeros_like(temp)
-        ice_melt_rate = np.zeros_like(temp)
+        snow_depth = np.zeros_like(temperature)
+        snow_melted = np.zeros_like(temperature)
+        ice_melted = np.zeros_like(temperature)
 
-        # compute snow depth and melt rates
-        for i in range(len(temp)):
+        for i in range(len(temperature)):
             if i > 0:
                 snow_depth[i] = snow_depth[i - 1]
+            albedo = self.albedo(total_melt_rate[i])
             snow_depth[i] += accumulation_rate[i]
-            snow_melt_rate[i], ice_melt_rate[i] = self.melt_rates(
-                snow_depth[i], inst_pdd[i]
-            )
-            snow_depth[i] -= snow_melt_rate[i]
-        melt_rate = snow_melt_rate + ice_melt_rate
-        snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
-        ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
-        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
-        runoff_rate = melt_rate - refreeze_rate
-        inst_smb = accumulation_rate - runoff_rate
+            melt_rates = self.melt(temperature[i], albedo[i], snow_depth[i])
+            snow_depth[i] -= total_melt_rate[i]
 
         result = {
-            "temp": temp,
-            "prec": prec,
-            "stdv": stdv,
-            "inst_pdd": inst_pdd,
-            "accumulation_rate": accumulation_rate,
-            "snow_melt_rate": snow_melt_rate,
-            "ice_melt_rate": ice_melt_rate,
-            "melt_rate": melt_rate,
-            "snow_refreeze_rate": snow_refreeze_rate,
-            "ice_refreeze_rate": ice_refreeze_rate,
-            "refreeze_rate": refreeze_rate,
-            "runoff_rate": runoff_rate,
-            "inst_smb": inst_smb,
-            "snow_depth": snow_depth,
-            "accumulation": self._integrate(accumulation_rate),
-            "snow_melt": self._integrate(snow_melt_rate),
-            "ice_melt": self._integrate(ice_melt_rate),
-            "melt": self._integrate(melt_rate),
-            "runoff": self._integrate(runoff_rate),
-            "refreeze": self._integrate(refreeze_rate),
-            "snow_refreeze": self._integrate(snow_refreeze_rate),
-            "ice_refreeze": self._integrate(ice_refreeze_rate),
-            "smb": self._integrate(inst_smb),
+            "temperature": temperature,
+            "precipitation": precipitation,
         }
 
         return result
@@ -548,26 +556,28 @@ class DEBMModel:
         The fraction of precipitation that falls as snow decreases linearly
         from one to zero between temperature thresholds defined by the
         `temp_snow` and `temp_rain` attributes.
-        *temp*: array_like
+        *temperature*: array_like
             Near-surface air temperature in degrees Celcius.
-        *prec*: array_like
+        *precipitation*: array_like
             Precipitation rate in meter per year.
         """
 
         # compute snow fraction as a function of temperature
-        reduced_temp = (self.temp_rain - temp) / (self.temp_rain - self.temp_snow)
+        reduced_temp = (self.air_temp_all_precip_as_rain - temperature) / (
+            self.air_temp_all_precip_as_rain - self.air_temp_all_precip_as_snow
+        )
         snowfrac = np.clip(reduced_temp, 0, 1)
 
         # return accumulation rate
-        return snowfrac * prec
+        return snowfrac * precipitation
 
     def melt(
         self,
         temperature: np.ndarray,
         temperature_std_deviaton: np.ndarray,
+        albedo: np.ndarray,
         surface_elevation: np.ndarray,
         latitude: np.ndarray,
-        albedo: np.ndarray,
     ) -> dict:
         """
         Calculate melt
@@ -1169,9 +1179,9 @@ class DEBMModel:
 
         @param[in] melt_rate melt rate (meters (liquid water equivalent) per second)
         """
-        return np.max(
+        return np.maximum(
             self.albedo_max + self.albedo_slope * melt_rate * self.ice_density,
-            self.albedo_min,
+            np.zeros_like(melt_rate) + self.albedo_min,
         )
 
     def atmosphere_transmissivity(self, elevation: np.ndarray) -> np.ndarray:
