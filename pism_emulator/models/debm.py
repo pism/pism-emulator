@@ -434,15 +434,21 @@ class DEBMModel:
         # expand arrays to the largest shape
         maxshape = max(temperature.shape, precipitation.shape)
         temperature = self._expand(temperature, maxshape)
+        temperature_std_deviation = self._expand(temperature_std_deviation, maxshape)
         precipitation = self._expand(precipitation, maxshape)
+        surface_elevation = self._expand(surface_elevation, maxshape)
+        latitude = self._expand(latitude, maxshape)
 
         # interpolate time-series
         if (self.interpolate_n > 1) and (self.interpolate_n != temperature.shape[0]):
             temperature = self._interpolate(temperature)
+            temperature_std_deviation = self._interpolate(temperature_std_deviation)
             precipitation = self._interpolate(precipitation)
+            surface_elevation = self._interpolate(surface_elevation)
+            latitude = self._interpolate(latitude)
 
         # compute accumulation
-        accumulation_rate = self.accumulation_rate(temperature, precipitation)
+        accumulation = self.accumulation(temperature, precipitation)
 
         # initialize snow depth and melt rates
         snow_depth = np.zeros_like(temperature)
@@ -459,38 +465,38 @@ class DEBMModel:
         dt = 1.0 / nt
         for i in range(nt):
             if i == 0:
-                intermediate_snow_depth = accumulation_rate[i]
+                intermediate_snow_depth = accumulation[i]
             else:
-                intermediate_snow_depth = snow_depth[i - 1] + accumulation_rate[i]
+                intermediate_snow_depth = snow_depth[i - 1] + accumulation[i]
             time = dt * i
             year_fraction = self.year_fraction(time)
             albedo = self.albedo(total_melt[i])
-            melt_rates = self.melt(
+            melt = self.melt(
                 temperature[i],
                 temperature_std_deviation[i],
-                albedo[i],
+                albedo,
                 surface_elevation[i],
                 latitude[i],
                 year_fraction,
                 dt,
             )
-            insolation_melt[i] = melt_rates["insolation_melt"]
-            temperature_melt[i] = melt_rates["temperature_melt"]
-            offset_melt[i] = melt_rates["offset_melt"]
-            total_melt[i] = melt_rates["total_melt"]
-            snow_melted[i] = np.where(total_melt_rate[i] < 0, 0.0, total_melt_rate[i])
+
+            insolation_melt[i] = melt["insolation_melt"]
+            temperature_melt[i] = melt["temperature_melt"]
+            offset_melt[i] = melt["offset_melt"]
+            total_melt[i] = melt["total_melt"]
+
+            snow_melted[i] = np.where(total_melt[i] < 0, 0.0, total_melt[i])
             snow_melted[i] = np.where(
-                total_melt_rate[i] <= snow_depth[i], total_melt_rate[i], snow_depth[i]
+                total_melt[i] <= snow_depth[i], total_melt[i], snow_depth[i]
             )
-            ice_melted[i] = np.minimum(
-                total_melt_rate[i] - snow_melted[i], snow_depth[i]
-            )
-            snow_depth[i] = intermediate_snow_depth - snow_melt_rate[i]
-            ice_melted[i] = total_melt_rate[i] - snow_melted[i]
+            ice_melted[i] = np.minimum(total_melt[i] - snow_melted[i], snow_depth[i])
+            snow_depth[i] = intermediate_snow_depth - snow_melted[i]
+            ice_melted[i] = total_melt[i] - snow_melted[i]
             total_melt[i] = snow_melted[i] + ice_melted[i]
             ice_created_by_refreeze = self.refreeze * snow_melted[i]
             runoff[i] = total_melt[i] - ice_created_by_refreeze
-            smb[i] = accumulation_rate[i] - runoff[i]
+            smb[i] = accumulation[i] - runoff[i]
 
         result = {
             "temperature": temperature,
@@ -498,6 +504,7 @@ class DEBMModel:
             "smb": smb,
             "snow_depth": snow_depth,
             "runoff": runoff,
+            "melt": total_melt,
         }
 
         return result
@@ -588,7 +595,7 @@ class DEBMModel:
         newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
         return newy
 
-    def accumulation_rate(
+    def accumulation(
         self, temperature: np.ndarray, precipitation: np.ndarray
     ) -> np.ndarray:
         """Compute accumulation rate from temperature and precipitation.

@@ -856,7 +856,9 @@ class TorchPDDModel(torch.nn.modules.Module):
         npts = self.interpolate_n
         sizes = [s for s in array.size()[1::]]
         oldx = (torch.arange(len(array) + 2, device=self.device) - 0.5) / len(array)
-        oldy = torch.vstack((array[-1].view(1, *sizes), array, array[0].view(1, *sizes)))
+        oldy = torch.vstack(
+            (array[-1].view(1, *sizes), array, array[0].view(1, *sizes))
+        )
         newx = (torch.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
         newy = interp1d(oldx.cpu(), oldy.cpu(), kind=rule, axis=0)(newx)
         interp = torch.from_numpy(newy)
