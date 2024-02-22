@@ -448,7 +448,7 @@ class DEBMModel:
             latitude = self._interpolate(latitude)
 
         # compute accumulation
-        accumulation = self.accumulation(temperature, precipitation)
+        accumulation = self.snow_accumulation(temperature, precipitation)
 
         # initialize snow depth and melt rates
         snow_depth = np.zeros_like(temperature)
@@ -463,15 +463,11 @@ class DEBMModel:
 
         nt = temperature.shape[0]
         dt = 1.0 / nt
+        albedo = self.albedo(total_melt[0])
         for i in range(nt):
-            if i == 0:
-                intermediate_snow_depth = accumulation[i]
-            else:
-                intermediate_snow_depth = snow_depth[i - 1] + accumulation[i]
             time = dt * i
             year_fraction = self.year_fraction(time)
-            albedo = self.albedo(total_melt[i])
-            melt = self.melt(
+            melt_info = self.melt(
                 temperature[i],
                 temperature_std_deviation[i],
                 albedo,
@@ -480,89 +476,31 @@ class DEBMModel:
                 year_fraction,
                 dt,
             )
+            insolation_melt[i] = melt_info["insolation_melt"]
+            temperature_melt[i] = melt_info["temperature_melt"]
+            offset_melt[i] = melt_info["offset_melt"]
+            total_melt[i] = melt_info["total_melt"]
 
-            insolation_melt[i] = melt["insolation_melt"]
-            temperature_melt[i] = melt["temperature_melt"]
-            offset_melt[i] = melt["offset_melt"]
-            total_melt[i] = melt["total_melt"]
+            changes = self.step(total_melt[i], snow_depth[i], accumulation[i])
 
-            snow_melted[i] = np.where(total_melt[i] < 0, 0.0, total_melt[i])
-            snow_melted[i] = np.where(
-                total_melt[i] <= snow_depth[i], total_melt[i], snow_depth[i]
-            )
-            ice_melted[i] = np.minimum(total_melt[i] - snow_melted[i], snow_depth[i])
-            snow_depth[i] = intermediate_snow_depth - snow_melted[i]
-            ice_melted[i] = total_melt[i] - snow_melted[i]
-            total_melt[i] = snow_melted[i] + ice_melted[i]
-            ice_created_by_refreeze = self.refreeze * snow_melted[i]
-            runoff[i] = total_melt[i] - ice_created_by_refreeze
-            smb[i] = accumulation[i] - runoff[i]
+            snow_depth[i] += changes["snow_depth"]
+            total_melt[i] += changes["melt"]
+            runoff[i] += changes["runoff"]
+            smb[i] += changes["smb"]
+            albedo += self.albedo(total_melt[i] / dt)  ## ????
 
         result = {
             "temperature": temperature,
             "precipitation": precipitation,
-            "smb": smb,
+            "smb": self._integrate(smb),
             "snow_depth": snow_depth,
-            "runoff": runoff,
-            "melt": total_melt,
+            "runoff": self._integrate(runoff),
+            "melt": self._integrate(total_melt),
+            "melt_rate": total_melt,
+            "accumulation": self._integrate(accumulation),
         }
 
         return result
-
-    # DEBMSimplePointwise::Changes DEBMSimplePointwise::step(double ice_thickness,
-    #                                                        double max_melt,
-    #                                                        double old_snow_depth,
-    #                                                        double accumulation) const {
-    #   Changes result;
-
-    #   double
-    #     snow_depth      = old_snow_depth,
-    #     snow_melted     = 0.0,
-    #     ice_melted      = 0.0;
-
-    #   assert(ice_thickness >= 0);
-
-    #   // snow depth cannot exceed total ice_thickness
-    #   snow_depth = std::min(snow_depth, ice_thickness);
-
-    #   assert(snow_depth >= 0);
-
-    #   snow_depth += accumulation;
-
-    #   if (max_melt <= 0.0) { // The "no melt" case.
-    #     snow_melted = 0.0;
-    #     ice_melted  = 0.0;
-    #   } else if (max_melt <= snow_depth) {
-    #     // Some of the snow melted and some is left; in any case, all of the energy available
-    #     // for melt was used up in melting snow.
-    #     snow_melted = max_melt;
-    #     ice_melted  = 0.0;
-    #   } else {
-    #     // All (snow_depth meters) of snow melted. Excess melt is available to melt ice.
-    #     snow_melted = snow_depth;
-    #     ice_melted  = std::min(max_melt - snow_melted, ice_thickness);
-    #   }
-
-    #   double ice_created_by_refreeze = m_refreeze_fraction * snow_melted;
-    #   if (m_refreeze_ice_melt) {
-    #     ice_created_by_refreeze += m_refreeze_fraction * ice_melted;
-    #   }
-
-    #   snow_depth = std::max(snow_depth - snow_melted, 0.0);
-
-    #   double total_melt = (snow_melted + ice_melted);
-    #   double runoff     = total_melt - ice_created_by_refreeze;
-    #   double smb        = accumulation - runoff;
-
-    #   result.snow_depth = snow_depth - old_snow_depth;
-    #   result.melt       = total_melt;
-    #   result.runoff     = runoff;
-    #   result.smb        = ice_thickness + smb >= 0 ? smb : -ice_thickness;
-
-    #   assert(ice_thickness + result.smb >= 0);
-
-    #   return result;
-    # }
 
     def _expand(self, array, shape):
         """Expand an array to the given shape"""
@@ -595,7 +533,7 @@ class DEBMModel:
         newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
         return newy
 
-    def accumulation(
+    def snow_accumulation(
         self, temperature: np.ndarray, precipitation: np.ndarray
     ) -> np.ndarray:
         """Compute accumulation rate from temperature and precipitation.
@@ -624,7 +562,7 @@ class DEBMModel:
         albedo: np.ndarray,
         surface_elevation: np.ndarray,
         latitude: np.ndarray,
-        year_fraction: np.ndarray,
+        year_fraction: float,
         dt: float,
     ) -> dict:
         """
@@ -641,10 +579,10 @@ class DEBMModel:
         )
         T_eff = self.CalovGreveIntegrand(
             temperature_std_deviaton,
-            temperature_std_deviaton - self.positive_threshold_temp,
+            temperature - self.positive_threshold_temp,
         )
         eps = 1.0e-4
-        T_eff = np.where(T_eff < eps, 0, T_eff)
+        T_eff = np.where(T_eff < eps, 0.0, T_eff)
 
         #  Note that in the line below we replace "Delta_t_Phi / Delta_t" with "h_Phi / pi". See
         #  equations 1 and 2 in Zeitz et al.
@@ -655,7 +593,7 @@ class DEBMModel:
         offset_melt = A * self.c2
 
         total_melt = insolation_melt + temperature_melt + offset_melt
-        total_melt = np.maximum(total_melt, 0.0)
+        total_melt = np.maximum(total_melt, 0)
 
         return {
             "insolation_melt": insolation_melt,
@@ -664,58 +602,31 @@ class DEBMModel:
             "total_melt": total_melt,
         }
 
-    #   double A = dt * (h_phi / M_PI / (m_water_density * m_L));
-    # DEBMSimpleMelt DEBMSimplePointwise::melt(double declination,
-    #                                          double distance_factor,
-    #                                          double dt,
-    #                                          double T_std_deviation,
-    #                                          double T,
-    #                                          double surface_elevation,
-    #                                          double latitude,
-    #                                          double albedo) const {
-    #   assert(dt > 0.0);
+    def step(
+        self, max_melt: np.ndarray, old_snow_depth: np.ndarray, accumulation: np.ndarray
+    ) -> dict:
+        snow_depth = old_snow_depth
+        snow_depth += accumulation
 
-    #   const double degrees_to_radians = M_PI / 180.0;
-    #   double latitude_rad = latitude * degrees_to_radians;
+        snow_melted = np.where(max_melt < 0, 0.0, max_melt)
+        snow_melted = np.where(max_melt <= snow_depth, max_melt, snow_depth)
+        ice_melted = np.minimum(max_melt - snow_melted, snow_depth)
+        snow_depth = old_snow_depth - snow_melted
+        ice_melted = max_melt - snow_melted
+        total_melt = snow_melted + ice_melted
+        ice_created_by_refreeze = self.refreeze * snow_melted
+        runoff = total_melt - ice_created_by_refreeze
+        smb = accumulation - runoff
 
-    #   double transmissivity = atmosphere_transmissivity(surface_elevation);
-    #   double h_phi          = details::hour_angle(m_phi, latitude_rad, declination);
-    #   double insolation     = details::insolation(m_solar_constant,
-    #                                               distance_factor,
-    #                                               h_phi,
-    #                                               latitude_rad,
-    #                                               declination);
+        result = {
+            "snow_depth": snow_depth,
+            "melt": total_melt,
+            "runoff": runoff,
+            "smb": smb,
+        }
+        return result
 
-    #   double Teff = details::CalovGreveIntegrand(T_std_deviation,
-    #                                              T - m_positive_threshold_temperature);
-    #   const double eps = 1.0e-4;
-    #   if (Teff < eps) {
-    #     Teff = 0;
-    #   }
-
-    #   // Note that in the line below we replace "Delta_t_Phi / Delta_t" with "h_Phi / pi". See
-    #   // equations 1 and 2 in Zeitz et al.
-    #   double A = dt * (h_phi / M_PI / (m_water_density * m_L));
-
-    #   DEBMSimpleMelt result;
-
-    #   result.insolation_melt  = A * (transmissivity * (1.0 - albedo) * insolation);
-    #   result.temperature_melt = A * m_melt_c1 * Teff;
-    #   result.offset_melt      = A * m_melt_c2;
-
-    #   double total_melt = (result.insolation_melt + result.temperature_melt +
-    #                        result.offset_melt);
-    #   // this model should not produce negative melt rates
-    #   result.total_melt = std::max(total_melt, 0.0);
-
-    #   if (T < m_melt_threshold_temp) {
-    #     result.total_melt = 0.0;
-    #   }
-
-    #   return result;
-    # }
-
-    def year_fraction(self, time: np.ndarray) -> np.ndarray:
+    def year_fraction(self, time: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
         """
         Fractional part of a year
 
@@ -1201,7 +1112,35 @@ class DEBMModel:
 
     def orbital_parameters(self, time: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
-        Calculate orbital parameters (declination, distance_factor) given a given time
+        Calculate orbital parameters (declination, distance_factor) given a time
+
+        Parameters
+        ----------
+        time numpy.ndarray
+            Time
+
+        Returns
+        ----------
+        orbital_parameters tuple[numpy.ndarray, numpy.ndarray]
+            Orbital parameters declination, distance_factor
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    time = np.array([2022.25])
+        >>>    debm = DEBMModel()
+
+        >>>    debm.orbital_parameters(time)
+        (array([0.083785]), array([1.000671]))
+
+        >>>    debm = DEBMModel(paleo_enabled=True)
+
+        >>>    debm.orbital_parameters(time)
+        (array([0.07843061]), array([0.99889585]))
+
         """
 
         year_fraction = self.year_fraction(time)
@@ -1215,11 +1154,22 @@ class DEBMModel:
             distance_factor = self.distance_factor_paleo(
                 eccentricity, perihelion_longitude, solar_longitude
             )
+            declination = self.solar_declination_paleo(
+                np.deg2rad(self.paleo_obliquity), solar_longitude
+            )
+
         else:
             declination = self.solar_declination_present_day(year_fraction)
             distance_factor = self.distance_factor_present_day(year_fraction)
 
         return declination, distance_factor
+
+    def seconds_per_year(self) -> float:
+        """
+        Return the number of seconds in a year
+        """
+
+        return 3.15569259747e7
 
     def albedo(self, melt_rate: np.ndarray) -> np.ndarray:
         """
@@ -1227,8 +1177,33 @@ class DEBMModel:
 
         See equation 7 in Zeitz et al.
 
-        @param[in] melt_rate melt rate (meters (liquid water equivalent) per second)
+        This function converts meltrate from m/yr to m/s before using it in the albedo
+        so we can keep the same albedo parameters as in Zeitz et al.
+
+        Parameters
+        ----------
+        melt_rate numpy.ndarray
+            Melt rate (m/yr)
+
+        Returns
+        ----------
+        albedo numpy.ndarray
+            Albedo (1)
+
+        Examples
+        ----------
+
+        >>>    import numpy as np
+        >>>    from pism_emulator.models.debm import DEBMModel
+
+        >>>    melt_rate = np.array([1.0])
+
+        >>>    debm = DEBMModel()
+        >>>    albedo = debm.albedo(melt_rate)
+
+        array([0.79704371])
         """
+
         return np.maximum(
             self.albedo_max + self.albedo_slope * melt_rate * self.ice_density,
             np.zeros_like(melt_rate) + self.albedo_min,
@@ -1239,8 +1214,6 @@ class DEBMModel:
         Atmosphere transmissivity (no units; acts as a scaling factor)
 
         See appendix A2 in Zeitz et al 2021.
-
-        @param[in] elevation elevation above the geoid (meters)
 
         Parameters
         ----------
@@ -1260,9 +1233,9 @@ class DEBMModel:
 
         >>>    debm = DEBMModel()
 
-        >>>    solar_constant = np.array([1500.0])
+        >>>    elevation = np.array([0.0, 1000.0, 2000.0])
         >>>    transmissivity = debm.atmosphere_transmissivity(elevation)
         >>>    transmissivity
-        array([0.698])
+        array([0.65 , 0.682, 0.714])
         """
         return self.tau_a_intercept + self.tau_a_slope * elevation
