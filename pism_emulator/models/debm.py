@@ -480,10 +480,12 @@ class DEBMModel:
             temperature_melt[i] = melt_info["temperature_melt"]
             offset_melt[i] = melt_info["offset_melt"]
             total_melt[i] = melt_info["total_melt"]
-
-            changes = self.step(total_melt[i], snow_depth[i], accumulation[i])
-
-            snow_depth[i] += changes["snow_depth"]
+            if i == 0:
+                changes = self.step(total_melt[i], snow_depth[0], accumulation[i])
+                snow_depth[i] = changes["snow_depth"]
+            else:
+                changes = self.step(total_melt[i], snow_depth[i - 1], accumulation[i])
+                snow_depth[i] += changes["snow_depth"]
             total_melt[i] += changes["melt"]
             runoff[i] += changes["runoff"]
             smb[i] += changes["smb"]
@@ -498,6 +500,7 @@ class DEBMModel:
             "melt": self._integrate(total_melt),
             "melt_rate": total_melt,
             "accumulation": self._integrate(accumulation),
+            "accumulation_rate": accumulation,
         }
 
         return result

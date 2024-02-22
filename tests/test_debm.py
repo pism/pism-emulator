@@ -222,3 +222,17 @@ def test_melt():
     )
     assert_almost_equal(-9.003261572844215e-09, melt_info["offset_melt"], decimal=4)
     assert_almost_equal(1.6505499864374886e-07, melt_info["total_melt"], decimal=4)
+
+
+def test_snow_accumulation():
+    """
+    The snow accumulation function
+    """
+
+    T = np.array([-10, -5, 0, 1, 4, 8]) + 273.15
+    P = np.array([10, 0.2, 1.0, 0.2, 0.1, 0.4])
+    debm = DEBMModel()
+    accumulation_rate = debm.snow_accumulation(T, P)
+    assert_array_almost_equal(
+        np.array([10.0, 0.2, 1.0, 0.1, 0.0, 0.0]), accumulation_rate
+    )

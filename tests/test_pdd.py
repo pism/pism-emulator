@@ -324,3 +324,27 @@ def test_torch_model_2d():
     ]:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
+
+
+def test_snow_accumulation():
+    """
+    The snow accumulation function
+    """
+
+    T = np.array([-10, -5, 0, 1, 4, 8])
+    P = np.array([10, 0.2, 1.0, 0.2, 0.1, 0.4])
+    pdd = ReferencePDDModel(
+        pdd_factor_snow=0.003,
+        pdd_factor_ice=0.008,
+        refreeze_snow=0.6,
+        refreeze_ice=0.1,
+        temp_snow=0.0,
+        temp_rain=2.0,
+        interpolate_rule="linear",
+        interpolate_n=52,
+    )
+
+    accumulation_rate = pdd.accumulation_rate(T, P)
+    assert_array_almost_equal(
+        np.array([10.0, 0.2, 1.0, 0.1, 0.0, 0.0]), accumulation_rate
+    )
