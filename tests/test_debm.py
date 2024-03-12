@@ -236,3 +236,21 @@ def test_snow_accumulation():
     assert_array_almost_equal(
         np.array([10.0, 0.2, 1.0, 0.1, 0.0, 0.0]), accumulation_rate
     )
+
+def test_step():
+    """
+    Test step
+    """
+
+    max_melt = 2.0
+    old_snow_depth = 1.0
+    accumulation = 0.1
+    surface_elevation = 1000.0
+
+    debm = DEBMModel()
+    changes = debm.step(max_melt, old_snow_depth, accumulation)
+    
+    assert_almost_equal(-1.0, changes["snow_depth"], decimal=4)
+    assert_almost_equal(2.0, changes["melt"], decimal=4)
+    assert_almost_equal(1.34, changes["runoff"], decimal=4)
+    assert_almost_equal(-1.24, changes["smb"], decimal=4)

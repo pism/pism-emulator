@@ -458,6 +458,7 @@ class DEBMModel:
         temperature_melt = np.zeros_like(temperature)
         offset_melt = np.zeros_like(temperature)
         total_melt = np.zeros_like(temperature)
+        melt = np.zeros_like(temperature)
         runoff = np.zeros_like(temperature)
         smb = np.zeros_like(temperature)
 
@@ -481,14 +482,17 @@ class DEBMModel:
             offset_melt[i] = melt_info["offset_melt"]
             total_melt[i] = melt_info["total_melt"]
             if i == 0:
-                changes = self.step(total_melt[i], snow_depth[0], accumulation[i])
+                changes = self.step(total_melt[i], snow_depth[i], accumulation[i])
                 snow_depth[i] = changes["snow_depth"]
+                melt[i] = changes["melt"]
+                runoff[i] = changes["runoff"]
+                smb[i] = changes["smb"]
             else:
                 changes = self.step(total_melt[i], snow_depth[i - 1], accumulation[i])
-                snow_depth[i] += changes["snow_depth"]
-            total_melt[i] += changes["melt"]
-            runoff[i] += changes["runoff"]
-            smb[i] += changes["smb"]
+                snow_depth[i] = snow_depth[i-1] + changes["snow_depth"]
+                melt[i] = total_melt[i-1] + changes["melt"]
+                runoff[i] = runoff[i-1] + changes["runoff"]
+                smb[i] = smb[i-1] + changes["smb"]
             albedo += self.albedo(total_melt[i] / dt)  ## ????
 
         result = {
@@ -497,8 +501,11 @@ class DEBMModel:
             "smb": self._integrate(smb),
             "snow_depth": snow_depth,
             "runoff": self._integrate(runoff),
-            "melt": self._integrate(total_melt),
-            "melt_rate": total_melt,
+            "melt": self._integrate(melt),
+            "temperature_melt": self._integrate(temperature_melt),
+            "offset_melt": self._integrate(offset_melt),
+            "insolation_melt": self._integrate(insolation_melt),
+            "melt_rate": melt,
             "accumulation": self._integrate(accumulation),
             "accumulation_rate": accumulation,
         }
@@ -614,7 +621,8 @@ class DEBMModel:
         snow_melted = np.where(max_melt < 0, 0.0, max_melt)
         snow_melted = np.where(max_melt <= snow_depth, max_melt, snow_depth)
         ice_melted = np.minimum(max_melt - snow_melted, snow_depth)
-        snow_depth = old_snow_depth - snow_melted
+        snow_depth = np.maximum(snow_depth - snow_melted, 0.0)
+        snow_depth -= old_snow_depth
         ice_melted = max_melt - snow_melted
         total_melt = snow_melted + ice_melted
         ice_created_by_refreeze = self.refreeze * snow_melted
