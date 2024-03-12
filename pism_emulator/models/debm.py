@@ -431,6 +431,19 @@ class DEBMModel:
         temperature = np.asarray(temperature)
         precipitation = np.asarray(precipitation)
 
+        # initialize snow depth and melt rates
+        snow_depth = np.zeros_like(temperature)
+        snow_melted = np.zeros_like(temperature)
+        ice_melted = np.zeros_like(temperature)
+        insolation_melt = np.zeros_like(temperature)
+        temperature_melt = np.zeros_like(temperature)
+        offset_melt = np.zeros_like(temperature)
+        total_melt = np.zeros_like(temperature)
+        melt = np.zeros_like(temperature)
+        runoff = np.zeros_like(temperature)
+        smb = np.zeros_like(temperature)
+        albedo = np.zeros_like(temperature)
+
         # expand arrays to the largest shape
         maxshape = max(temperature.shape, precipitation.shape)
         temperature = self._expand(temperature, maxshape)
@@ -449,22 +462,9 @@ class DEBMModel:
 
         # compute accumulation
         accumulation = self.snow_accumulation(temperature, precipitation)
-
-        # initialize snow depth and melt rates
-        snow_depth = np.zeros_like(temperature)
-        snow_melted = np.zeros_like(temperature)
-        ice_melted = np.zeros_like(temperature)
-        insolation_melt = np.zeros_like(temperature)
-        temperature_melt = np.zeros_like(temperature)
-        offset_melt = np.zeros_like(temperature)
-        total_melt = np.zeros_like(temperature)
-        melt = np.zeros_like(temperature)
-        runoff = np.zeros_like(temperature)
-        smb = np.zeros_like(temperature)
-
+        
         nt = temperature.shape[0]
         dt = 1.0 / nt
-        albedo = self.albedo(total_melt[0])
         for i in range(nt):
             time = dt * i
             year_fraction = self.year_fraction(time)
@@ -477,38 +477,33 @@ class DEBMModel:
                 year_fraction,
                 dt,
             )
-            insolation_melt[i] = melt_info["insolation_melt"]
-            temperature_melt[i] = melt_info["temperature_melt"]
-            offset_melt[i] = melt_info["offset_melt"]
-            total_melt[i] = melt_info["total_melt"]
+            insolation_melt += melt_info["insolation_melt"] * self.seconds_per_year()
+            temperature_melt += melt_info["temperature_melt"]  * self.seconds_per_year()
+            offset_melt  += melt_info["offset_melt"]  * self.seconds_per_year()
+            total_melt += melt_info["total_melt"] * self.seconds_per_year()
+
             if i == 0:
                 changes = self.step(total_melt[i], snow_depth[i], accumulation[i])
-                snow_depth[i] = changes["snow_depth"]
-                melt[i] = changes["melt"]
-                runoff[i] = changes["runoff"]
-                smb[i] = changes["smb"]
+
             else:
-                changes = self.step(total_melt[i], snow_depth[i - 1], accumulation[i])
-                snow_depth[i] = snow_depth[i-1] + changes["snow_depth"]
-                melt[i] = total_melt[i-1] + changes["melt"]
-                runoff[i] = runoff[i-1] + changes["runoff"]
-                smb[i] = smb[i-1] + changes["smb"]
-            albedo += self.albedo(total_melt[i] / dt)  ## ????
+                changes = self.step(total_melt[i-1], snow_depth[i-1], accumulation[i-1])
+            snow_depth += changes["snow_depth"]
+            melt += changes["melt"]
+            runoff += changes["runoff"]
+            smb += changes["smb"]
+            albedo += self.albedo(melt[i] / dt)  ## ????
 
         result = {
             "temperature": temperature,
             "precipitation": precipitation,
-            "smb": self._integrate(smb),
+            "smb": self._integrate(smb * nt),
             "snow_depth": snow_depth,
-            "runoff": self._integrate(runoff),
-            "runoff_rate": runoff,
-            "melt": self._integrate(melt),
-            "melt_rate": melt,
-            "temperature_melt": self._integrate(temperature_melt),
-            "offset_melt": self._integrate(offset_melt),
-            "insolation_melt": self._integrate(insolation_melt),
+            "runoff": runoff,
+            "melt": melt,
+            "temperature_melt_rate": temperature_melt,
+            "offset_melt": offset_melt,
+            "insolation_melt": insolation_melt,
             "accumulation": self._integrate(accumulation),
-            "accumulation_rate": accumulation,
         }
 
         return result
@@ -580,8 +575,10 @@ class DEBMModel:
         Calculate melt
         """
         latitude_rad = np.deg2rad(latitude)
-        declination, distance_factor = self.orbital_parameters(year_fraction)
-
+        orbital_parameters = self.orbital_parameters(year_fraction)
+        distance_factor = orbital_parameters["distance_factor"]
+        declination = orbital_parameters["declination"]
+        
         transmissivity = self.atmosphere_transmissivity(surface_elevation)
         phi_rad = np.deg2rad(self.phi)
         h_phi = self.hour_angle(phi_rad, latitude_rad, declination)
@@ -620,7 +617,7 @@ class DEBMModel:
         snow_depth += accumulation
 
         snow_melted = np.where(max_melt < 0, 0.0, max_melt)
-        snow_melted = np.where(max_melt <= snow_depth, max_melt, snow_depth)
+        snow_melted = np.where(snow_melted <= snow_depth, snow_melted, snow_depth)
         ice_melted = np.minimum(max_melt - snow_melted, snow_depth)
         snow_depth = np.maximum(snow_depth - snow_melted, 0.0)
         snow_depth -= old_snow_depth
@@ -1122,7 +1119,7 @@ class DEBMModel:
             )
         )
 
-    def orbital_parameters(self, time: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def orbital_parameters(self, time: np.ndarray) -> dict[float]:
         """
         Calculate orbital parameters (declination, distance_factor) given a time
 
@@ -1133,7 +1130,7 @@ class DEBMModel:
 
         Returns
         ----------
-        orbital_parameters tuple[numpy.ndarray, numpy.ndarray]
+        orbital_parameters dict
             Orbital parameters declination, distance_factor
 
         Examples
@@ -1174,7 +1171,7 @@ class DEBMModel:
             declination = self.solar_declination_present_day(year_fraction)
             distance_factor = self.distance_factor_present_day(year_fraction)
 
-        return declination, distance_factor
+        return {"declination": declination, "distance_factor": distance_factor}
 
     def seconds_per_year(self) -> float:
         """

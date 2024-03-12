@@ -164,14 +164,14 @@ def test_orbital_parameters():
     debm = DEBMModel()
     orbital_parameters = debm.orbital_parameters(time)
 
-    assert_array_almost_equal(np.array([0.083785]), orbital_parameters[0], decimal=4)
-    assert_array_almost_equal(np.array([1.000671]), orbital_parameters[1], decimal=4)
+    assert_array_almost_equal(np.array([0.083785]), orbital_parameters["declination"], decimal=4)
+    assert_array_almost_equal(np.array([1.000671]), orbital_parameters["distance_factor"], decimal=4)
 
     debm = DEBMModel(paleo_enabled=True)
     orbital_parameters = debm.orbital_parameters(time)
 
-    assert_array_almost_equal(np.array([0.07843061]), orbital_parameters[0], decimal=4)
-    assert_array_almost_equal(np.array([0.99889585]), orbital_parameters[1], decimal=4)
+    assert_array_almost_equal(np.array([0.07843061]), orbital_parameters["declination"], decimal=4)
+    assert_array_almost_equal(np.array([0.99889585]), orbital_parameters["distance_factor"], decimal=4)
 
 
 def test_albedo():
