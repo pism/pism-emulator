@@ -1,3 +1,3 @@
-name = "pism_emulator"
+name = "models"
 
 __all__ = ["pdd", "debm"]

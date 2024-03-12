@@ -501,11 +501,12 @@ class DEBMModel:
             "smb": self._integrate(smb),
             "snow_depth": snow_depth,
             "runoff": self._integrate(runoff),
+            "runoff_rate": runoff,
             "melt": self._integrate(melt),
+            "melt_rate": melt,
             "temperature_melt": self._integrate(temperature_melt),
             "offset_melt": self._integrate(offset_melt),
             "insolation_melt": self._integrate(insolation_melt),
-            "melt_rate": melt,
             "accumulation": self._integrate(accumulation),
             "accumulation_rate": accumulation,
         }
