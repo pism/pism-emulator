@@ -69,7 +69,7 @@ class PISMDataset(torch.utils.data.Dataset):
         print(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file, decode_times=False)
         ds = preprocess(ds, thinning_factor=thinning_factor)
-        data = ds.variables[self.target_var].squeeze()
+        data = ds[self.target_var].squeeze()
         mask = data.isnull()
         data = np.nan_to_num(
             data.values,
@@ -78,7 +78,7 @@ class PISMDataset(torch.utils.data.Dataset):
         ny, nx = data.shape
         self.target_has_error = False
         if self.target_error_var in ds.variables:
-            data_error = ds.variables[self.target_error_var].squeeze()
+            data_error = ds[self.target_error_var].squeeze()
             data_error = np.nan_to_num(
                 data_error.values,
                 nan=epsilon,
@@ -87,7 +87,7 @@ class PISMDataset(torch.utils.data.Dataset):
 
         self.target_has_corr = False
         if self.target_corr_var in ds.variables:
-            data_corr = ds.variables[self.target_corr_var].squeeze()
+            data_corr = ds[self.target_corr_var].squeeze()
             data_corr = np.nan_to_num(
                 data_corr.values,
                 nan=epsilon,
@@ -96,7 +96,7 @@ class PISMDataset(torch.utils.data.Dataset):
             mask = mask.where(data_corr >= self.target_corr_threshold, True)
         mask = mask.values
 
-        grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
+        grid_resolution = np.abs(np.diff(ds["x"][0:2]))[0]
         self.grid_resolution = grid_resolution
         ds.close()
 

@@ -415,7 +415,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
-    parser.add_argument("--chains", type=int, default=5)
+    parser.add_argument("--chains", type=int, default=1)
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
@@ -462,8 +462,8 @@ if __name__ == "__main__":
         target_file=target_file,
         thinning_factor=thinning_factor,
         target_corr_threshold=0,
-        target_error_var="land_ice_surface_velocity_magnitude_stddev",
-        target_var="land_ice_surface_velocity_magnitude",
+        target_error_var="velsurf_mag_error",
+        target_var="velsurf_mag",
     )
 
     X = dataset.X
