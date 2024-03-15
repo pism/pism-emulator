@@ -53,7 +53,9 @@ def test_CalovGreveIntegrand():
     assert_array_almost_equal(np.array([0.79788456, 2.0, 0.08331547]), cgi, decimal=4)
 
     debm = TorchDEBMModel()
-    cgi = debm.CalovGreveIntegrand(torch.from_numpy(sigma), torch.from_numpy(temperature))
+    cgi = debm.CalovGreveIntegrand(
+        torch.from_numpy(sigma), torch.from_numpy(temperature)
+    )
     assert_array_almost_equal(np.array([0.79788456, 2.0, 0.08331547]), cgi, decimal=4)
 
 
@@ -71,7 +73,9 @@ def test_hour_angle():
     assert_array_almost_equal(np.array([0.0, 0.78539816, 0.0]), hour_angle, decimal=4)
 
     debm = TorchDEBMModel()
-    hour_angle = debm.hour_angle(torch.from_numpy(phi), torch.from_numpy(latitude), torch.from_numpy(declination))
+    hour_angle = debm.hour_angle(
+        torch.from_numpy(phi), torch.from_numpy(latitude), torch.from_numpy(declination)
+    )
     assert_array_almost_equal(np.array([0.0, 0.78539816, 0.0]), hour_angle, decimal=4)
 
 
@@ -118,6 +122,7 @@ def test_solar_declination_present_day():
         np.array([-0.402449, -0.30673297, -0.402449]), solar_declination, decimal=4
     )
 
+
 def test_solar_declination_paleo():
     """
     Test solar declination paleo
@@ -134,6 +139,7 @@ def test_solar_declination_paleo():
     solar_declination = debm.solar_declination_paleo(obliquity, solar_longitude)
     assert_array_almost_equal(np.array([0.55536037]), solar_declination, decimal=4)
 
+
 def test_distance_factor_present_day():
     """
     Test distance factor present day
@@ -147,6 +153,7 @@ def test_distance_factor_present_day():
     debm = TorchDEBMModel()
     d = debm.distance_factor_present_day(year_fraction)
     assert_array_almost_equal(np.array([1.03505, 1.03081244, 1.03505]), d, decimal=4)
+
 
 def test_distance_factor_paleo():
     """
@@ -164,6 +171,7 @@ def test_distance_factor_paleo():
     debm = TorchDEBMModel()
     d = debm.distance_factor_paleo(eccentricity, perihelion_longitude, obliquity)
     assert_array_almost_equal(np.array([1.00592089, 1.02418709]), d, decimal=4)
+
 
 def test_insolation():
     """
@@ -188,6 +196,7 @@ def test_insolation():
     )
     assert_array_almost_equal(np.array([1282.10500694]), insolation, decimal=4)
 
+
 def test_orbital_parameters():
     """
     Test orbital parameters
@@ -196,24 +205,40 @@ def test_orbital_parameters():
 
     debm = DEBMModel()
     orbital_parameters = debm.orbital_parameters(time)
-    assert_array_almost_equal(np.array([0.083785]), orbital_parameters["declination"], decimal=4)
-    assert_array_almost_equal(np.array([1.000671]), orbital_parameters["distance_factor"], decimal=4)
+    assert_array_almost_equal(
+        np.array([0.083785]), orbital_parameters["declination"], decimal=4
+    )
+    assert_array_almost_equal(
+        np.array([1.000671]), orbital_parameters["distance_factor"], decimal=4
+    )
 
     debm = DEBMModel(paleo_enabled=True)
     orbital_parameters = debm.orbital_parameters(time)
-    assert_array_almost_equal(np.array([0.07843061]), orbital_parameters["declination"], decimal=4)
-    assert_array_almost_equal(np.array([0.99889585]), orbital_parameters["distance_factor"], decimal=4)
-
+    assert_array_almost_equal(
+        np.array([0.07843061]), orbital_parameters["declination"], decimal=4
+    )
+    assert_array_almost_equal(
+        np.array([0.99889585]), orbital_parameters["distance_factor"], decimal=4
+    )
 
     debm = TorchDEBMModel()
     orbital_parameters = debm.orbital_parameters(time)
-    assert_array_almost_equal(np.array([0.083785]), orbital_parameters["declination"], decimal=4)
-    assert_array_almost_equal(np.array([1.000671]), orbital_parameters["distance_factor"], decimal=4)
+    assert_array_almost_equal(
+        np.array([0.083785]), orbital_parameters["declination"], decimal=4
+    )
+    assert_array_almost_equal(
+        np.array([1.000671]), orbital_parameters["distance_factor"], decimal=4
+    )
 
     debm = TorchDEBMModel(paleo_enabled=True)
     orbital_parameters = debm.orbital_parameters(time)
-    assert_array_almost_equal(np.array([0.07843061]), orbital_parameters["declination"], decimal=4)
-    assert_array_almost_equal(np.array([0.99889585]), orbital_parameters["distance_factor"], decimal=4)
+    assert_array_almost_equal(
+        np.array([0.07843061]), orbital_parameters["declination"], decimal=4
+    )
+    assert_array_almost_equal(
+        np.array([0.99889585]), orbital_parameters["distance_factor"], decimal=4
+    )
+
 
 def test_albedo():
     """
@@ -225,11 +250,11 @@ def test_albedo():
     albedo = debm.albedo(melt_rate)
     assert_array_almost_equal(np.array([0.79704371]), albedo, decimal=4)
 
-
     debm = TorchDEBMModel()
     melt_rate = np.array([1.0]) / debm.seconds_per_year()
     albedo = debm.albedo(torch.from_numpy(melt_rate))
     assert_array_almost_equal(np.array([0.79704371]), albedo, decimal=4)
+
 
 def test_atmospshere_transmissivity():
     """
@@ -251,15 +276,13 @@ def test_melt():
     year_fraction = 0
     dt = 1 / 12
     temp = np.array([323.0])
-    temp_sd =  np.array([12.0])
+    temp_sd = np.array([12.0])
     elevation = np.array([1000.0])
     latitude = np.array([np.pi / 4 * 3])
     albedo = np.array([0.47])
 
     debm = DEBMModel()
-    melt_info = debm.melt(
-        temp, temp_sd, albedo, elevation, latitude, year_fraction, dt
-    )
+    melt_info = debm.melt(temp, temp_sd, albedo, elevation, latitude, year_fraction, dt)
 
     assert_almost_equal(3.41058271637613e-08, melt_info["insolation_melt"], decimal=4)
     assert_almost_equal(
@@ -267,11 +290,16 @@ def test_melt():
     )
     assert_almost_equal(-9.003261572844215e-09, melt_info["offset_melt"], decimal=4)
     assert_almost_equal(1.6505499864374886e-07, melt_info["total_melt"], decimal=4)
-
 
     debm = TorchDEBMModel()
     melt_info = debm.melt(
-        torch.from_numpy(temp), torch.from_numpy(temp_sd), torch.from_numpy(albedo), torch.from_numpy(elevation), torch.from_numpy(latitude), year_fraction, dt
+        torch.from_numpy(temp),
+        torch.from_numpy(temp_sd),
+        torch.from_numpy(albedo),
+        torch.from_numpy(elevation),
+        torch.from_numpy(latitude),
+        year_fraction,
+        dt,
     )
 
     assert_almost_equal(3.41058271637613e-08, melt_info["insolation_melt"], decimal=4)
@@ -280,6 +308,7 @@ def test_melt():
     )
     assert_almost_equal(-9.003261572844215e-09, melt_info["offset_melt"], decimal=4)
     assert_almost_equal(1.6505499864374886e-07, melt_info["total_melt"], decimal=4)
+
 
 def test_snow_accumulation():
     """
@@ -288,7 +317,7 @@ def test_snow_accumulation():
 
     T = np.array([-10, -5, 0, 1, 4, 8]) + 273.15
     P = np.array([10, 0.2, 1.0, 0.2, 0.1, 0.4])
-    
+
     debm = DEBMModel()
     accumulation_rate = debm.snow_accumulation(T, P)
     assert_array_almost_equal(
@@ -301,32 +330,106 @@ def test_snow_accumulation():
         np.array([10.0, 0.2, 1.0, 0.1, 0.0, 0.0]), accumulation_rate
     )
 
+
 def test_step():
     """
     Test step
     """
 
-
-    max_melt = 2.0
-    old_snow_depth = 1.0
-    accumulation = 0.1
+    max_melt = np.array([2.0, 0.0, 12.0])
+    old_snow_depth = np.array([1.0, 4.0, 0.1])
+    accumulation = np.array([0.1, 0.8, 0.0])
+    ice_thickness = np.array([100.0, 1000.0, 0.0])
 
     debm = DEBMModel()
-    changes = debm.step(max_melt, old_snow_depth, accumulation)
-    
-    assert_almost_equal(np.array([-1.0]), changes["snow_depth"], decimal=4)
-    assert_almost_equal(np.array([2.0]), changes["melt"], decimal=4)
-    assert_almost_equal(np.array([1.34]), changes["runoff"], decimal=4)
-    assert_almost_equal(np.array([-1.24]), changes["smb"], decimal=4)
+    changes = debm.step(ice_thickness, max_melt, old_snow_depth, accumulation)
+    print(changes)
 
-    max_melt = np.array([2.0])
-    old_snow_depth = np.array([1.0])
-    accumulation = np.array([0.1])
+    assert_almost_equal(np.array([-1.0, 0.8, -0.1]), changes["snow_depth"], decimal=4)
+    assert_almost_equal(np.array([2.0, 0.0, 0.0]), changes["melt"], decimal=4)
+    assert_almost_equal(np.array([1.34, 0.0, 0.0]), changes["runoff"], decimal=4)
+    assert_almost_equal(np.array([-1.24, 0.8, 0.0]), changes["smb"], decimal=4)
 
     debm = TorchDEBMModel()
-    changes = debm.step(torch.from_numpy(max_melt), torch.from_numpy(old_snow_depth), torch.from_numpy(accumulation))
-    
-    assert_almost_equal(np.array([-1.0]), changes["snow_depth"], decimal=4)
-    assert_almost_equal(np.array([2.0]), changes["melt"], decimal=4)
-    assert_almost_equal(np.array([1.34]), changes["runoff"], decimal=4)
-    assert_almost_equal(np.array([-1.24]), changes["smb"], decimal=4)
+    changes = debm.step(
+        torch.from_numpy(ice_thickness),
+        torch.from_numpy(max_melt),
+        torch.from_numpy(old_snow_depth),
+        torch.from_numpy(accumulation),
+    )
+
+    assert_almost_equal(np.array([-1.0, 0.8, -0.1]), changes["snow_depth"], decimal=4)
+    assert_almost_equal(np.array([2.0, 0.0, 0.0]), changes["melt"], decimal=4)
+    assert_almost_equal(np.array([1.34, 0.0, 0.0]), changes["runoff"], decimal=4)
+    assert_almost_equal(np.array([-1.24, 0.8, 0.0]), changes["smb"], decimal=4)
+
+
+def test_debm():
+    """
+    The snow accumulation function
+    """
+
+    T = (
+        np.array(
+            [
+                [[1.0]],
+                [[-10.0]],
+                [[-8.0]],
+                [[-4]],
+                [[-2.0]],
+                [[0]],
+                [[1.0]],
+                [[2.0]],
+                [[3.0]],
+                [[1.0]],
+                [[-3.0]],
+                [[-8.0]],
+            ]
+        )
+        + 273.15
+    )
+
+    sd = np.array(
+        [
+            [[1.0]],
+            [[2.0]],
+            [[2.0]],
+            [[1]],
+            [[4.0]],
+            [[4]],
+            [[3.0]],
+            [[2.0]],
+            [[3.0]],
+            [[1.0]],
+            [[3.0]],
+            [[1.0]],
+        ]
+    )
+
+    P = np.array(
+        [
+            [[1.0]],
+            [[10.0]],
+            [[4.0]],
+            [[4]],
+            [[2.0]],
+            [[1]],
+            [[1.0]],
+            [[2.0]],
+            [[3.0]],
+            [[1.0]],
+            [[3.0]],
+            [[8.0]],
+        ]
+    )
+
+    elevation = np.zeros_like(T) + 1000
+    ice_thickness = np.zeros_like(T) + 1000
+    latitude = np.zeros_like(T) + 70
+
+    debm = DEBMModel()
+    result = debm(T, sd, P, elevation, ice_thickness, latitude)
+    print(result)
+    assert_array_almost_equal(
+        np.array([10.0, 0.2, 1.0, 0.1, 0.0, 0.0]), accumulation_rate
+    )

@@ -21,8 +21,9 @@ from typing import Literal, Union
 
 import numpy as np
 import scipy.special as sp
-from scipy.interpolate import interp1d
 import torch
+from scipy.interpolate import interp1d
+
 
 def freeze_it(cls):
     cls.__frozen = False
@@ -88,6 +89,7 @@ class DEBMModel:
         water_density: float = 1000.0,
         latent_heat_of_fusion: float = 3.34e5,
         refreeze: float = 0.6,
+        refreeze_ice_melt: bool = False,
         interpolate_n: int = 52,
         interpolate_rule: Literal[
             "linear", "nearest", "zero", "slinear", "quadratic", "cubic"
@@ -109,7 +111,6 @@ class DEBMModel:
         tau_a_slope: float = 0.000032,
         device="cpu",
     ):
-
         """
         Initialize the DEBMModel with the given parameters.
 
@@ -145,6 +146,8 @@ class DEBMModel:
             Latent heat of fusion, by default 3.34e5
         refreeze : float, optional
             Refreeze parameter, by default 0.6
+        refreeze_ice_melt : bool, optional
+            Refreeze ice melt, by default True
         interpolate_n : int, optional
             Number of points for interpolation, by default 52
         interpolate_rule : str, optional
@@ -160,7 +163,7 @@ class DEBMModel:
         paleo_perihelion_longitude : float, optional
             Paleo perihelion longitude, by default 102.947
         """
-        
+
         super().__init__()
         self.air_temp_all_precip_as_rain = air_temp_all_precip_as_rain
         self.air_temp_all_precip_as_snow = air_temp_all_precip_as_snow
@@ -184,6 +187,7 @@ class DEBMModel:
         self.phi = phi
         self.positive_threshold_temp = positive_threshold_temp
         self.refreeze = refreeze
+        self.refreeze_ice_melt = refreeze_ice_melt
         self.solar_constant = solar_constant
         self.std_dev = std_dev
         self.std_dev_param_a = std_dev_param_a
@@ -381,6 +385,14 @@ class DEBMModel:
         self._refreeze = value
 
     @property
+    def refreeze_ice_melt(self):
+        return self._refreeze_ice_melt
+
+    @refreeze_ice_melt.setter
+    def refreeze_ice_melt(self, value):
+        self._refreeze_ice_melt = value
+
+    @property
     def solar_constant(self):
         return self._solar_constant
 
@@ -457,7 +469,8 @@ class DEBMModel:
         temperature: np.ndarray,
         temperature_std_deviation: np.ndarray,
         precipitation: np.ndarray,
-        surface_elevation: Union[None, np.ndarray] = None,
+        elevation: Union[None, np.ndarray] = None,
+        ice_thickness: Union[None, np.ndarray] = None,
         latitude: Union[None, np.ndarray] = None,
     ) -> dict:
         """Run the DEBM model.
@@ -477,10 +490,6 @@ class DEBMModel:
         ('smb'), and many other output variables in a dictionary.
         """
 
-        # ensure numpy arrays
-        temperature = np.asarray(temperature)
-        precipitation = np.asarray(precipitation)
-
         # initialize snow depth and melt rates
         snow_depth = np.zeros_like(temperature)
         snow_melted = np.zeros_like(temperature)
@@ -499,7 +508,8 @@ class DEBMModel:
         temperature = self._expand(temperature, maxshape)
         temperature_std_deviation = self._expand(temperature_std_deviation, maxshape)
         precipitation = self._expand(precipitation, maxshape)
-        surface_elevation = self._expand(surface_elevation, maxshape)
+        elevation = self._expand(elevation, maxshape)
+        ice_thickness = self._expand(ice_thickness, maxshape)
         latitude = self._expand(latitude, maxshape)
 
         # interpolate time-series
@@ -507,12 +517,13 @@ class DEBMModel:
             temperature = self._interpolate(temperature)
             temperature_std_deviation = self._interpolate(temperature_std_deviation)
             precipitation = self._interpolate(precipitation)
-            surface_elevation = self._interpolate(surface_elevation)
+            elevation = self._interpolate(elevation)
+            ice_thickness = self._interpolate(ice_thickness)
             latitude = self._interpolate(latitude)
 
         # compute accumulation
         accumulation = self.snow_accumulation(temperature, precipitation)
-        
+
         # initialize snow depth and melt rates
         snow_depth = np.zeros_like(temperature)
         snow_melted = np.zeros_like(temperature)
@@ -525,7 +536,7 @@ class DEBMModel:
         runoff = np.zeros_like(temperature)
         smb = np.zeros_like(temperature)
         albedo = np.zeros_like(temperature)
-        
+
         nt = temperature.shape[0]
         dt = 1.0 / nt
         for i in range(nt):
@@ -535,42 +546,43 @@ class DEBMModel:
                 temperature[i],
                 temperature_std_deviation[i],
                 albedo[i],
-                surface_elevation[i],
+                elevation[i],
                 latitude[i],
                 year_fraction,
                 dt,
             )
             insolation_melt += melt_info["insolation_melt"] * self.seconds_per_year()
-            temperature_melt += melt_info["temperature_melt"]  * self.seconds_per_year()
-            offset_melt  += melt_info["offset_melt"]  * self.seconds_per_year()
+            temperature_melt += melt_info["temperature_melt"] * self.seconds_per_year()
+            offset_melt += melt_info["offset_melt"] * self.seconds_per_year()
             total_melt += melt_info["total_melt"] * self.seconds_per_year()
 
-
-            changes = self.step(total_melt[i-1], snow_depth[i-1], accumulation[i])
+            changes = self.step(
+                ice_thickness[i], total_melt[i], snow_depth[i], accumulation[i]
+            )
 
             if i == 0:
                 snow_depth[i] = changes["snow_depth"]
                 melt[i] = changes["melt"]
                 runoff[i] = changes["runoff"]
-                smb[i]= changes["smb"]
+                smb[i] = changes["smb"]
                 albedo[i] = self.albedo(melt[i] / dt)  ## ????
             else:
-                snow_depth[i] = snow_depth[i-1] + changes["snow_depth"]
-                melt[i] = melt[i-1] + changes["melt"]
-                runoff[i] = runoff[i-1] + changes["runoff"]
-                smb[i] = smb[i-1] + changes["smb"]
-                albedo[i] = albedo[i-1] + self.albedo(melt[i] / dt)  ## ????
-                
+                snow_depth[i] = snow_depth[i - 1] + changes["snow_depth"]
+                melt[i] = melt[i - 1] + changes["melt"]
+                runoff[i] = runoff[i - 1] + changes["runoff"]
+                smb[i] = smb[i - 1] + changes["smb"]
+                albedo[i] = albedo[i - 1] + self.albedo(melt[i] / dt)  ## ????
+
         result = {
             "temperature": temperature,
             "precipitation": precipitation,
             "smb": smb[-1] * dt,
             "snow_depth": snow_depth[-1],
             "runoff": runoff[-1] * dt,
-            "melt":melt[-1] * dt,
-            "temperature_melt": temperature_melt[-1]  * dt,
-            "offset_melt": offset_melt[-1]  * dt,
-            "insolation_melt": insolation_melt[-1]  * dt,
+            "melt": melt[-1] * dt,
+            "temperature_melt": temperature_melt[-1] * dt,
+            "offset_melt": offset_melt[-1] * dt,
+            "insolation_melt": insolation_melt[-1] * dt,
             "accumulation": self._integrate(accumulation),
         }
 
@@ -590,7 +602,7 @@ class DEBMModel:
             raise ValueError(
                 "could not expand array of shape %s to %s" % (array.shape, shape)
             )
-    
+
     def _integrate(self, array):
         """Integrate an array over one year"""
         return np.sum(array, axis=0) / (self.interpolate_n - 1)
@@ -634,7 +646,9 @@ class DEBMModel:
         """
 
         if temperature.shape != precipitation.shape:
-            raise ValueError("temperature and precipitation arrays must have the same shape")
+            raise ValueError(
+                "temperature and precipitation arrays must have the same shape"
+            )
 
         # compute snow fraction as a function of temperature
         reduced_temp = (self.air_temp_all_precip_as_rain - temperature) / (
@@ -650,7 +664,7 @@ class DEBMModel:
         temperature: np.ndarray,
         temperature_std_deviaton: np.ndarray,
         albedo: np.ndarray,
-        surface_elevation: np.ndarray,
+        elevation: np.ndarray,
         latitude: np.ndarray,
         year_fraction: float,
         dt: float,
@@ -662,8 +676,8 @@ class DEBMModel:
         orbital_parameters = self.orbital_parameters(year_fraction)
         distance_factor = orbital_parameters["distance_factor"]
         declination = orbital_parameters["declination"]
-        
-        transmissivity = self.atmosphere_transmissivity(surface_elevation)
+
+        transmissivity = self.atmosphere_transmissivity(elevation)
         phi_rad = np.deg2rad(self.phi)
         h_phi = self.hour_angle(phi_rad, latitude_rad, declination)
         insolation = self.insolation(
@@ -695,28 +709,57 @@ class DEBMModel:
         }
 
     def step(
-        self, max_melt: np.ndarray, old_snow_depth: np.ndarray, accumulation: np.ndarray
+        self,
+        ice_thickness: np.ndarray,
+        max_melt: np.ndarray,
+        old_snow_depth: np.ndarray,
+        accumulation: np.ndarray,
     ) -> dict:
-        snow_depth = old_snow_depth
+        assert np.all(ice_thickness >= 0)
+
+        # snow depth cannot exceed total ice_thickness
+        snow_depth = np.minimum(old_snow_depth, ice_thickness)
+
+        assert np.all(snow_depth >= 0)
+
         snow_depth += accumulation
 
-        snow_melted = np.where(max_melt < 0, 0.0, max_melt)
-        snow_melted = np.where(snow_melted <= snow_depth, snow_melted, snow_depth)
-        ice_melted = np.minimum(max_melt - snow_melted, snow_depth)
-        snow_depth = np.maximum(snow_depth - snow_melted, 0.0)
-        snow_depth -= old_snow_depth
-        ice_melted = max_melt - snow_melted
-        total_melt = snow_melted + ice_melted
+        # Initialize arrays
+        snow_melted = np.zeros_like(max_melt)
+        ice_melted = np.zeros_like(max_melt)
+
+        # The "no melt" case
+        mask1 = max_melt <= 0.0
+        # Some of the snow melted and some is left
+        mask2 = np.logical_and(~mask1, max_melt <= snow_depth)
+        # All (snow_depth meters) of snow melted. Excess melt is available to melt ice.
+        mask3 = np.logical_and(~mask1, ~mask2)
+
+        snow_melted[mask2] = max_melt[mask2]
+        snow_melted[mask3] = snow_depth[mask3]
+        ice_melted[mask3] = np.minimum(
+            max_melt[mask3] - snow_melted[mask3], ice_thickness[mask3]
+        )
+
         ice_created_by_refreeze = self.refreeze * snow_melted
+        if self.refreeze_ice_melt:
+            ice_created_by_refreeze += self.refreeze * ice_melted
+
+        snow_depth = np.maximum(snow_depth - snow_melted, 0.0)
+
+        total_melt = snow_melted + ice_melted
         runoff = total_melt - ice_created_by_refreeze
         smb = accumulation - runoff
 
         result = {
-            "snow_depth": snow_depth,
+            "snow_depth": snow_depth - old_snow_depth,
             "melt": total_melt,
             "runoff": runoff,
-            "smb": smb,
+            "smb": smb if np.all(ice_thickness + smb >= 0) else -ice_thickness,
         }
+
+        assert np.all(ice_thickness + result["smb"] >= 0)
+
         return result
 
     def year_fraction(self, time: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
@@ -1334,7 +1377,6 @@ class DEBMModel:
         return self.tau_a_intercept + self.tau_a_slope * elevation
 
 
-    
 class TorchDEBMModel:
     """
     This class implements dEBM-simple, the simple diurnal energy balance model described in
@@ -1372,6 +1414,7 @@ class TorchDEBMModel:
         water_density: float = 1000.0,
         latent_heat_of_fusion: float = 3.34e5,
         refreeze: float = 0.6,
+        refreeze_ice_melt: bool = False,
         interpolate_n: int = 52,
         interpolate_rule: Literal[
             "linear", "nearest", "zero", "slinear", "quadratic", "cubic"
@@ -1393,7 +1436,6 @@ class TorchDEBMModel:
         tau_a_slope: float = 0.000032,
         device="cpu",
     ):
-
         """
         Initialize the DEBMModel with the given parameters.
 
@@ -1429,6 +1471,8 @@ class TorchDEBMModel:
             Latent heat of fusion, by default 3.34e5
         refreeze : float, optional
             Refreeze parameter, by default 0.6
+        refreeze_ice_melt : bool, optional
+            Refreeze ice melt, by default True
         interpolate_n : int, optional
             Number of points for interpolation, by default 52
         interpolate_rule : str, optional
@@ -1444,7 +1488,7 @@ class TorchDEBMModel:
         paleo_perihelion_longitude : float, optional
             Paleo perihelion longitude, by default 102.947
         """
-        
+
         super().__init__()
         self.air_temp_all_precip_as_rain = air_temp_all_precip_as_rain
         self.air_temp_all_precip_as_snow = air_temp_all_precip_as_snow
@@ -1468,6 +1512,7 @@ class TorchDEBMModel:
         self.phi = phi
         self.positive_threshold_temp = positive_threshold_temp
         self.refreeze = refreeze
+        self.refreeze_ice_melt = refreeze_ice_melt
         self.solar_constant = solar_constant
         self.std_dev = std_dev
         self.std_dev_param_a = std_dev_param_a
@@ -1665,6 +1710,14 @@ class TorchDEBMModel:
         self._refreeze = value
 
     @property
+    def refreeze_ice_melt(self):
+        return self._refreeze_ice_melt
+
+    @refreeze_ice_melt.setter
+    def refreeze_ice_melt(self, value):
+        self._refreeze_ice_melt = value
+
+    @property
     def solar_constant(self):
         return self._solar_constant
 
@@ -1736,12 +1789,12 @@ class TorchDEBMModel:
     def water_density(self, value):
         self._water_density = value
 
-    def __call__(
+    def forward(
         self,
         temperature: torch.tensor,
         temperature_std_deviation: torch.tensor,
         precipitation: torch.tensor,
-        surface_elevation: Union[None, torch.tensor] = None,
+        elevation: Union[None, torch.tensor] = None,
         latitude: Union[None, torch.tensor] = None,
     ) -> dict:
         """Run the DEBM model.
@@ -1783,7 +1836,7 @@ class TorchDEBMModel:
         temperature = self._expand(temperature, maxshape)
         temperature_std_deviation = self._expand(temperature_std_deviation, maxshape)
         precipitation = self._expand(precipitation, maxshape)
-        surface_elevation = self._expand(surface_elevation, maxshape)
+        elevation = self._expand(elevation, maxshape)
         latitude = self._expand(latitude, maxshape)
 
         # interpolate time-series
@@ -1791,12 +1844,12 @@ class TorchDEBMModel:
             temperature = self._interpolate(temperature)
             temperature_std_deviation = self._interpolate(temperature_std_deviation)
             precipitation = self._interpolate(precipitation)
-            surface_elevation = self._interpolate(surface_elevation)
+            elevation = self._interpolate(elevation)
             latitude = self._interpolate(latitude)
 
         # compute accumulation
         accumulation = self.snow_accumulation(temperature, precipitation)
-        
+
         # initialize snow depth and melt rates
         snow_depth = torch.zeros_like(temperature)
         snow_melted = torch.zeros_like(temperature)
@@ -1809,7 +1862,7 @@ class TorchDEBMModel:
         runoff = torch.zeros_like(temperature)
         smb = torch.zeros_like(temperature)
         albedo = torch.zeros_like(temperature)
-        
+
         nt = torch.tensor(temperature.shape[0])
         dt = 1.0 / nt
         for i in range(nt):
@@ -1819,42 +1872,43 @@ class TorchDEBMModel:
                 temperature[i],
                 temperature_std_deviation[i],
                 albedo[i],
-                surface_elevation[i],
+                elevation[i],
                 latitude[i],
                 year_fraction,
                 dt,
             )
             insolation_melt += melt_info["insolation_melt"] * self.seconds_per_year()
-            temperature_melt += melt_info["temperature_melt"]  * self.seconds_per_year()
-            offset_melt  += melt_info["offset_melt"]  * self.seconds_per_year()
+            temperature_melt += melt_info["temperature_melt"] * self.seconds_per_year()
+            offset_melt += melt_info["offset_melt"] * self.seconds_per_year()
             total_melt += melt_info["total_melt"] * self.seconds_per_year()
 
-
-            changes = self.step(total_melt[i-1], snow_depth[i-1], accumulation[i])
+            changes = self.step(
+                ice_thickness[i], total_melt[i - 1], snow_depth[i - 1], accumulation[i]
+            )
 
             if i == 0:
                 snow_depth[i] = changes["snow_depth"]
                 melt[i] = changes["melt"]
                 runoff[i] = changes["runoff"]
-                smb[i]= changes["smb"]
+                smb[i] = changes["smb"]
                 albedo[i] = self.albedo(melt[i] / dt)  ## ????
             else:
-                snow_depth[i] = snow_depth[i-1] + changes["snow_depth"]
-                melt[i] = melt[i-1] + changes["melt"]
-                runoff[i] = runoff[i-1] + changes["runoff"]
-                smb[i] = smb[i-1] + changes["smb"]
-                albedo[i] = albedo[i-1] + self.albedo(melt[i] / dt)  ## ????
-                
+                snow_depth[i] = snow_depth[i - 1] + changes["snow_depth"]
+                melt[i] = melt[i - 1] + changes["melt"]
+                runoff[i] = runoff[i - 1] + changes["runoff"]
+                smb[i] = smb[i - 1] + changes["smb"]
+                albedo[i] = albedo[i - 1] + self.albedo(melt[i] / dt)  ## ????
+
         result = {
             "temperature": temperature,
             "precipitation": precipitation,
             "smb": smb[-1] * dt,
             "snow_depth": snow_depth[-1],
             "runoff": runoff[-1] * dt,
-            "melt":melt[-1] * dt,
-            "temperature_melt": temperature_melt[-1]  * dt,
-            "offset_melt": offset_melt[-1]  * dt,
-            "insolation_melt": insolation_melt[-1]  * dt,
+            "melt": melt[-1] * dt,
+            "temperature_melt": temperature_melt[-1] * dt,
+            "offset_melt": offset_melt[-1] * dt,
+            "insolation_melt": insolation_melt[-1] * dt,
             "accumulation": self._integrate(accumulation),
         }
 
@@ -1874,7 +1928,7 @@ class TorchDEBMModel:
             raise ValueError(
                 "could not expand array of shape %s to %s" % (array.shape, shape)
             )
-    
+
     def _integrate(self, array):
         """Integrate an array over one year"""
         dx = torch.sum(array, axis=0) / (self.interpolate_n - 1)
@@ -1895,7 +1949,6 @@ class TorchDEBMModel:
         interp = torch.from_numpy(newy)
 
         return interp.to(self.device)
-
 
     def snow_accumulation(
         self, temperature: torch.tensor, precipitation: torch.tensor
@@ -1925,7 +1978,9 @@ class TorchDEBMModel:
         """
 
         if temperature.shape != precipitation.shape:
-            raise ValueError("temperature and precipitation arrays must have the same shape")
+            raise ValueError(
+                "temperature and precipitation arrays must have the same shape"
+            )
 
         # compute snow fraction as a function of temperature
         reduced_temp = (self.air_temp_all_precip_as_rain - temperature) / (
@@ -1941,7 +1996,7 @@ class TorchDEBMModel:
         temperature: torch.tensor,
         temperature_std_deviaton: torch.tensor,
         albedo: torch.tensor,
-        surface_elevation: torch.tensor,
+        elevation: torch.tensor,
         latitude: torch.tensor,
         year_fraction: float,
         dt: float,
@@ -1953,11 +2008,11 @@ class TorchDEBMModel:
         orbital_parameters = self.orbital_parameters(year_fraction)
         distance_factor = orbital_parameters["distance_factor"]
         declination = orbital_parameters["declination"]
-        
-        transmissivity = self.atmosphere_transmissivity(surface_elevation)
+
+        transmissivity = self.atmosphere_transmissivity(elevation)
         phi_rad = np.deg2rad(self.phi)
         h_phi = self.hour_angle(phi_rad, latitude_rad, declination)
-        
+
         print(phi_rad, latitude_rad)
         insolation = self.insolation(
             self.solar_constant, distance_factor, h_phi, latitude_rad, declination
@@ -1989,31 +2044,62 @@ class TorchDEBMModel:
         }
 
     def step(
-        self, max_melt: torch.tensor, old_snow_depth: torch.tensor, accumulation: torch.tensor
+        self,
+        ice_thickness: torch.tensor,
+        max_melt: torch.tensor,
+        old_snow_depth: torch.tensor,
+        accumulation: torch.tensor,
     ) -> dict:
-        snow_depth = old_snow_depth
+        assert torch.all(ice_thickness >= 0)
+
+        # snow depth cannot exceed total ice_thickness
+        snow_depth = torch.minimum(old_snow_depth, ice_thickness)
+
+        assert torch.all(snow_depth >= 0)
+
         snow_depth += accumulation
 
-        snow_melted = torch.where(max_melt < 0, 0.0, max_melt)
-        snow_melted = torch.where(snow_melted <= snow_depth, snow_melted, snow_depth)
-        ice_melted = torch.minimum(max_melt - snow_melted, snow_depth)
-        snow_depth = torch.maximum(snow_depth - snow_melted, torch.tensor(0.0))
-        snow_depth -= old_snow_depth
-        ice_melted = max_melt - snow_melted
-        total_melt = snow_melted + ice_melted
+        # Initialize arrays
+        snow_melted = torch.zeros_like(max_melt)
+        ice_melted = torch.zeros_like(max_melt)
+
+        # The "no melt" case
+        mask1 = max_melt <= 0.0
+        # Some of the snow melted and some is left
+        mask2 = torch.logical_and(~mask1, max_melt <= snow_depth)
+        # All (snow_depth meters) of snow melted. Excess melt is available to melt ice.
+        mask3 = torch.logical_and(~mask1, ~mask2)
+
+        snow_melted[mask2] = max_melt[mask2]
+        snow_melted[mask3] = snow_depth[mask3]
+        ice_melted[mask3] = torch.minimum(
+            max_melt[mask3] - snow_melted[mask3], ice_thickness[mask3]
+        )
+
         ice_created_by_refreeze = self.refreeze * snow_melted
+        if self.refreeze_ice_melt:
+            ice_created_by_refreeze += self.refreeze * ice_melted
+
+        snow_depth = torch.maximum(snow_depth - snow_melted, torch.tensor(0.0))
+
+        total_melt = snow_melted + ice_melted
         runoff = total_melt - ice_created_by_refreeze
         smb = accumulation - runoff
 
         result = {
-            "snow_depth": snow_depth,
+            "snow_depth": snow_depth - old_snow_depth,
             "melt": total_melt,
             "runoff": runoff,
-            "smb": smb,
+            "smb": smb if torch.all(ice_thickness + smb >= 0) else -ice_thickness,
         }
+
+        assert torch.all(ice_thickness + result["smb"] >= 0)
+
         return result
 
-    def year_fraction(self, time: Union[float, torch.tensor]) -> Union[float, torch.tensor]:
+    def year_fraction(
+        self, time: Union[float, torch.tensor]
+    ) -> Union[float, torch.tensor]:
         """
         Fractional part of a year
 
@@ -2304,7 +2390,9 @@ class TorchDEBMModel:
             1.0 + E * np.cos(solar_longitude - perhelion_longitude) / (1.0 - E**2)
         ) ** 2.0
 
-    def solar_declination_present_day(self, year_fraction: torch.tensor) -> torch.tensor:
+    def solar_declination_present_day(
+        self, year_fraction: torch.tensor
+    ) -> torch.tensor:
         """
         Solar declination (radians)
 
