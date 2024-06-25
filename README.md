@@ -23,7 +23,7 @@ Optionally create Conda environment named *pism-emulator*:
 
 Install pism-emulator:
 
-    $ pip install -e .
+    $ pip install .
 
 
 ## Methods
@@ -40,7 +40,7 @@ To perform the Bayesian calibration and reproduce the probability plots from the
 
 1. Download the repository with `git clone https://github.com/pism/pism-emulator`.
 
-2. Install repository and dependencies with `python setup.py install --user`
+2. Install repository and dependecies (see above).
 
 3. Download observations of [surface speeds](https://nsidc.org/data/NSIDC-0670/versions/1) to `data/observed_speeds` by running `01_download_nsidc_0670.py` and `02_convert.sh`.
 

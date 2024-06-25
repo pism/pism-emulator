@@ -3,6 +3,8 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11.6
+  - pre-commit
+  - mypy
   - pip
   - pip:
       - -r requirements.txt

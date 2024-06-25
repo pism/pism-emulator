@@ -343,7 +343,6 @@ def test_step():
 
     debm = DEBMModel()
     changes = debm.step(ice_thickness, max_melt, old_snow_depth, accumulation)
-    print(changes)
 
     assert_almost_equal(np.array([-1.0, 0.8, -0.1]), changes["snow_depth"], decimal=4)
     assert_almost_equal(np.array([2.0, 0.0, 0.0]), changes["melt"], decimal=4)
@@ -429,7 +428,17 @@ def test_debm():
 
     debm = DEBMModel()
     result = debm(T, sd, P, elevation, ice_thickness, latitude)
-    print(result)
-    assert_array_almost_equal(
-        np.array([10.0, 0.2, 1.0, 0.1, 0.0, 0.0]), accumulation_rate
+    print(result["smb"])
+
+    debm = TorchDEBMModel()
+    torch_result = debm.forward(
+        torch.from_numpy(T),
+        torch.from_numpy(sd),
+        torch.from_numpy(P),
+        torch.from_numpy(elevation),
+        torch.from_numpy(ice_thickness),
+        torch.from_numpy(latitude),
     )
+    print(torch_result["smb"])
+
+    assert_array_almost_equal(result["smb"], torch_result["smb"], decimal=4)

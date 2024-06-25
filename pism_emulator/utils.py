@@ -126,6 +126,15 @@ def load_hirham_climate_w_std_dev(
     """
 
     with xr.open_dataset(file) as Obs:
+        nlat = len(Obs["rlat"])
+        nlon = len(Obs["rlon"])
+
+        Obs = Obs.isel(
+            rlat=slice(0, nlat, thinning_factor),
+            rlon=slice(0, nlon, thinning_factor),
+            ncl4=slice(0, nlat, thinning_factor),
+            ncl5=slice(0, nlon, thinning_factor),
+        )
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -205,19 +214,18 @@ def load_hirham_climate_w_std_dev(
         precip = rainfall + snowfall
 
         obs = {
-            "snow_depth": snowdepth[..., ::thinning_factor]
-            - snowdepth[0, ::thinning_factor],
-            "accumulation": snowfall.sum(axis=0)[::thinning_factor],
-            "melt": snowmelt.sum(axis=0)[::thinning_factor],
-            "runoff": runoff.sum(axis=0)[::thinning_factor],
-            "refreeze": refreeze.sum(axis=0)[::thinning_factor],
-            "smb": smb.sum(axis=0)[::thinning_factor],
+            "snow_depth": snowdepth - snowdepth[0],
+            "accumulation": snowfall.sum(axis=0),
+            "melt": snowmelt.sum(axis=0),
+            "runoff": runoff.sum(axis=0),
+            "refreeze": refreeze.sum(axis=0),
+            "smb": smb.sum(axis=0),
         }
 
     return (
-        temp[..., ::thinning_factor],
-        precip[..., ::thinning_factor],
-        temp_std_dev[..., ::thinning_factor],
+        temp,
+        precip,
+        temp_std_dev,
         obs,
     )
 

@@ -846,7 +846,7 @@ class TorchPDDModel(torch.nn.modules.Module):
 
     def _integrate(self, array):
         """Integrate an array over one year"""
-        dx = torch.sum(array, axis=0) / (self.interpolate_n - 1)
+        dx = torch.sum(array, axis=0) / (self.interpolate_n - 1)  # type: ignore[call-overload]
         return dx.to(self.device)
 
     def _interpolate(self, array):

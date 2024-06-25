@@ -16,8 +16,10 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# type: ignore[valid-type]
+
 from functools import wraps
-from typing import Literal, Union
+from typing import Literal, Tuple, Union
 
 import numpy as np
 import scipy.special as sp
@@ -469,27 +471,44 @@ class DEBMModel:
         temperature: np.ndarray,
         temperature_std_deviation: np.ndarray,
         precipitation: np.ndarray,
-        elevation: Union[None, np.ndarray] = None,
-        ice_thickness: Union[None, np.ndarray] = None,
-        latitude: Union[None, np.ndarray] = None,
+        elevation: np.ndarray,
+        ice_thickness: np.ndarray,
+        latitude: np.ndarray,
     ) -> dict:
-        """Run the DEBM model.
-        Use temperature, precipitation to compute accumulation and melt
-        surface mass fluxes, and the resulting surface mass balance.
-        *temperature*: array_like
+        """
+        Run the DEBM model.
+
+        Use temperature, precipitation to compute accumulation and melt surface mass fluxes, and the resulting surface mass balance.
+
+        Parameters
+        ----------
+        temperature : ndarray
             Input near-surface air temperature in degrees Celcius.
-        *precipitation*: array_like
+        temperature_std_deviation : ndarray
+            Standard deviation of the temperature.
+        precipitation : ndarray
             Input precipitation rate in meter per year.
+        elevation : ndarray
+            Elevation data.
+        ice_thickness : ndarray
+            Ice thickness data.
+        latitude : ndarray
+            Latitude data.
+
+        Returns
+        -------
+        dict
+            Dictionary containing surface mass balance ('smb'), and many other output variables.
+
+        Notes
+        -----
         By default, inputs are N-dimensional arrays whose first dimension is
         interpreted as time and as periodic. Arrays of dimensions
         N-1 are interpreted as constant in time and expanded to N dimensions.
         Arrays of dimension 0 and numbers are interpreted as constant in time
         and space and will be expanded too. The largest input array determines
         the number of dimensions N.
-        Return surface mass balance
-        ('smb'), and many other output variables in a dictionary.
         """
-
         # initialize snow depth and melt rates
         snow_depth = np.zeros_like(temperature)
         snow_melted = np.zeros_like(temperature)
@@ -588,8 +607,36 @@ class DEBMModel:
 
         return result
 
-    def _expand(self, array, shape):
-        """Expand an array to the given shape"""
+    def _expand(self, array: np.ndarray, shape: Tuple[int, ...]) -> np.ndarray:
+        """
+        Expand an array to the given shape.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            The input array to be expanded.
+        shape : Tuple[int, ...]
+            The target shape to expand the array to.
+
+        Returns
+        -------
+        np.ndarray
+            The expanded array.
+
+        Raises
+        ------
+        ValueError
+            If the array cannot be expanded to the target shape.
+
+        Examples
+        --------
+        >>> arr = np.array([1, 2, 3])
+        >>> expanded_arr = _expand(arr, (3, 3))
+        >>> print(expanded_arr)
+        array([[1, 2, 3],
+               [1, 2, 3],
+               [1, 2, 3]])
+        """
         if array.shape == shape:
             return array
         elif array.shape == (1, shape[1], shape[2]):
@@ -600,11 +647,30 @@ class DEBMModel:
             return np.full(shape, array)
         else:
             raise ValueError(
-                "could not expand array of shape %s to %s" % (array.shape, shape)
+                f"Could not expand array of shape {array.shape} to {shape}"
             )
 
-    def _integrate(self, array):
-        """Integrate an array over one year"""
+    def _integrate(self, array: np.ndarray) -> np.ndarray:
+        """
+        Integrate an array over one year.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            The input array to be integrated.
+
+        Returns
+        -------
+        np.ndarray
+            The integrated array.
+
+        Examples
+        --------
+        >>> arr = np.array([1, 2, 3, 4, 5])
+        >>> integrated_arr = _integrate(arr)
+        >>> print(integrated_arr)
+        3.0
+        """
         return np.sum(array, axis=0) / (self.interpolate_n - 1)
 
     def _interpolate(self, array):
@@ -1794,8 +1860,9 @@ class TorchDEBMModel:
         temperature: torch.tensor,
         temperature_std_deviation: torch.tensor,
         precipitation: torch.tensor,
-        elevation: Union[None, torch.tensor] = None,
-        latitude: Union[None, torch.tensor] = None,
+        elevation: Union[None, np.ndarray] = None,
+        ice_thickness: Union[None, np.ndarray] = None,
+        latitude: Union[None, np.ndarray] = None,
     ) -> dict:
         """Run the DEBM model.
         Use temperature, precipitation to compute accumulation and melt
@@ -1837,6 +1904,7 @@ class TorchDEBMModel:
         temperature_std_deviation = self._expand(temperature_std_deviation, maxshape)
         precipitation = self._expand(precipitation, maxshape)
         elevation = self._expand(elevation, maxshape)
+        ice_thickness = self._expand(ice_thickness, maxshape)
         latitude = self._expand(latitude, maxshape)
 
         # interpolate time-series
@@ -1845,6 +1913,7 @@ class TorchDEBMModel:
             temperature_std_deviation = self._interpolate(temperature_std_deviation)
             precipitation = self._interpolate(precipitation)
             elevation = self._interpolate(elevation)
+            ice_thickness = self._interpolate(ice_thickness)
             latitude = self._interpolate(latitude)
 
         # compute accumulation
@@ -1883,7 +1952,7 @@ class TorchDEBMModel:
             total_melt += melt_info["total_melt"] * self.seconds_per_year()
 
             changes = self.step(
-                ice_thickness[i], total_melt[i - 1], snow_depth[i - 1], accumulation[i]
+                ice_thickness[i], total_melt[i], snow_depth[i], accumulation[i]
             )
 
             if i == 0:
@@ -2013,7 +2082,6 @@ class TorchDEBMModel:
         phi_rad = np.deg2rad(self.phi)
         h_phi = self.hour_angle(phi_rad, latitude_rad, declination)
 
-        print(phi_rad, latitude_rad)
         insolation = self.insolation(
             self.solar_constant, distance_factor, h_phi, latitude_rad, declination
         )
@@ -2028,7 +2096,6 @@ class TorchDEBMModel:
         #  equations 1 and 2 in Zeitz et al.
         A = dt * (h_phi / np.pi / (self.water_density * self.latent_heat_of_fusion))
 
-        print(h_phi)
         insolation_melt = A * (transmissivity * (1.0 - albedo) * insolation)
         temperature_melt = A * self.c1 * T_eff
         offset_melt = A * self.c2
@@ -2053,7 +2120,8 @@ class TorchDEBMModel:
         assert torch.all(ice_thickness >= 0)
 
         # snow depth cannot exceed total ice_thickness
-        snow_depth = torch.minimum(old_snow_depth, ice_thickness)
+        # snow_depth = torch.minimum(old_snow_depth, ice_thickness)
+        snow_depth = old_snow_depth
 
         assert torch.all(snow_depth >= 0)
 

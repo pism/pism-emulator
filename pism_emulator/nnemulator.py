@@ -16,16 +16,258 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+from argparse import ArgumentParser
 from collections import OrderedDict
+from typing import Dict, List, Tuple
 
 import lightning as pl
 import numpy as np
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import ExponentialLR, _LRScheduler
 
 from pism_emulator.metrics import AreaAbsoluteError, area_absolute_error
+
+
+class DNNEmulator(pl.LightningModule):
+    """
+    A class used to represent a Deep Neural Network Emulator.
+
+    ...
+
+    Attributes
+    ----------
+    n_parameters : int
+        Number of parameters.
+    n_eigenglaciers : int
+        Number of eigenglaciers.
+    V_hat : Tensor
+        Tensor representing V_hat.
+    F_mean : Tensor
+        Tensor representing F_mean.
+    area : Tensor
+        Tensor representing area.
+    hparams :
+        Hyperparameters.
+    *args :
+        Variable length argument list.
+    **kwargs :
+        Arbitrary keyword arguments.
+
+    Methods
+    -------
+    forward(x, add_mean=False):
+        Passes the input tensor through each operation.
+    add_model_specific_args(parent_parser):
+        Adds model specific arguments.
+    configure_optimizers():
+        Configures optimizers.
+    training_step(batch, batch_idx):
+        Defines a single step in the training loop.
+    validation_step(batch, batch_idx):
+        Defines a single step in the validation loop.
+    on_validation_epoch_end():
+        Defines what to do at the end of each validation epoch.
+    """
+
+    def __init__(
+        self,
+        n_parameters: int,
+        n_eigenglaciers: int,
+        V_hat: Tensor,
+        F_mean: Tensor,
+        area: Tensor,
+        hparams,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.save_hyperparameters(hparams)
+        n_layers = self.hparams.n_layers
+        n_hidden = self.hparams.n_hidden
+
+        if isinstance(n_hidden, int):
+            n_hidden = [n_hidden] * n_layers
+        p = [0.0] + [0.5] * (n_layers - 2) + [0.3]
+
+        # Inputs to hidden layer linear transformation
+        self.l_first = nn.Linear(n_parameters, n_hidden[0])
+        self.norm_first = nn.LayerNorm(n_hidden[0])
+        self.dropout_first = nn.Dropout(p=p[0])
+
+        models = []
+        for n in range(1, n_layers):
+            models.append(
+                nn.Sequential(
+                    OrderedDict(
+                        [
+                            ("Linear", nn.Linear(n_hidden[n - 1], n_hidden[n])),
+                            ("LayerNorm", nn.LayerNorm(n_hidden[n])),
+                            ("Dropout", nn.Dropout(p=p[n])),
+                        ]
+                    )
+                )
+            )
+        self.dnn = nn.ModuleList(models)
+        self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers, bias=False)
+
+        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
+        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
+
+        self.register_buffer("area", area)
+
+        self.train_ae = AreaAbsoluteError()
+        self.test_ae = AreaAbsoluteError()
+
+    def forward(self, x: Tensor, add_mean: bool = False) -> Tensor:
+        """
+        Passes the input tensor through each operation.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor.
+        add_mean : bool, optional
+            If True, adds mean to the predicted F.
+
+        Returns
+        -------
+        Tensor
+            Predicted F.
+        """
+        # Pass the input tensor through each of our operations
+
+        a = self.l_first(x)
+        a = self.norm_first(a)
+        a = self.dropout_first(a)
+        z = torch.relu(a)
+
+        for dnn in self.dnn:
+            a = dnn(z)
+            z = torch.relu(a) + z
+
+        z_last = self.l_last(z)
+
+        F_pred = z_last @ self.V_hat.T
+        if add_mean:
+            F_pred += self.F_mean
+
+        return F_pred
+
+    @staticmethod
+    def add_model_specific_args(parent_parser) -> ArgumentParser:
+        """
+        Adds model specific arguments.
+
+        Parameters
+        ----------
+        parent_parser : ArgumentParser
+            Parent argument parser.
+
+        Returns
+        -------
+        ArgumentParser
+            Parent argument parser with added arguments.
+        """
+        parser = parent_parser.add_argument_group("NNEmulator")
+        parser.add_argument("--batch_size", type=int, default=128)
+        parser.add_argument("--n_hidden", type=int, default=128)
+        parser.add_argument("--n_layers", type=int, default=4)
+        parser.add_argument("--learning_rate", type=float, default=0.01)
+
+        return parent_parser
+
+    def configure_optimizers(
+        self,
+    ) -> Tuple[List[Optimizer], List[Dict[str, _LRScheduler]]]:
+        """
+        Configures optimizers.
+
+        Returns
+        -------
+        Tuple[List[Optimizer], List[Dict[str, _LRScheduler]]]
+            Tuple containing list of optimizers and list of schedulers.
+        """
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
+        # This is an approximation to Doug's version:
+        scheduler = {
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
+        }
+
+        return [optimizer], [scheduler]
+
+    def training_step(
+        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
+    ) -> Tensor:
+        """
+        Defines a single step in the training loop.
+
+        Parameters
+        ----------
+        batch : Tuple[Tensor, Tensor, Tensor, Tensor]
+            Input batch.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        Tensor
+            Loss.
+        """
+        x, f, o, _ = batch
+        f_pred = self.forward(x)
+        loss = area_absolute_error(f_pred, f, o, self.area)
+
+        return loss
+
+    def validation_step(
+        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
+    ) -> Dict[str, Tensor]:
+        """
+        Defines a single step in the validation loop.
+
+        Parameters
+        ----------
+        batch : Tuple[Tensor, Tensor, Tensor, Tensor]
+            Input batch.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        Dict[str, Tensor]
+            Dictionary containing tensors for x, f, f_pred, o, o_0.
+        """
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+
+        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
+
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
+
+    def on_validation_epoch_end(self) -> None:
+        """
+        Defines what to do at the end of each validation epoch.
+        """
+        self.log(
+            "train_loss",
+            self.train_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 
 class DNNEmulator(pl.LightningModule):
