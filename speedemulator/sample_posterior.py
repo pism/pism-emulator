@@ -1,4 +1,21 @@
 #!/bin/env python3
+# Copyright (C) 2021-23 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
 import time
@@ -7,19 +24,16 @@ from os.path import join
 from typing import Union
 
 import arviz as az
-import seaborn as sns
 import numpy as np
 import pandas as pd
-import pylab as plt
 import torch
+from joblib import Parallel, delayed
 from lightning import LightningModule
 from scipy.stats import beta
-from tqdm import tqdm
-from torch.profiler import profile, record_function, ProfilerActivity
+from tqdm.auto import tqdm
 
-from pismemulator.datasets import PISMDataset
-from pismemulator.nnemulator import NNEmulator
-from pismemulator.utils import param_keys_dict as keys_dict
+from pism_emulator.datasets import PISMDataset
+from pism_emulator.nnemulator import NNEmulator
 
 
 class MALASampler(object):
@@ -57,14 +71,14 @@ class MALASampler(object):
     def __init__(
         self,
         model: LightningModule,
-        X_min: Union[float, torch.tensor],
-        X_max: Union[float, torch.tensor],
-        Y_target: Union[np.ndarray, torch.tensor],
-        sigma_hat: Union[np.ndarray, torch.tensor],
-        alpha: Union[float, torch.tensor] = 0.01,
-        alpha_b: Union[float, torch.tensor] = 3.0,
-        beta_b: Union[float, torch.tensor] = 3.0,
-        nu: Union[float, torch.tensor] = 1.0,
+        X_min: Union[float, torch.Tensor],
+        X_max: Union[float, torch.Tensor],
+        Y_target: Union[np.ndarray, torch.Tensor],
+        sigma_hat: Union[np.ndarray, torch.Tensor],
+        alpha: Union[float, torch.Tensor] = 0.01,
+        alpha_b: Union[float, torch.Tensor] = 3.0,
+        beta_b: Union[float, torch.Tensor] = 3.0,
+        nu: Union[float, torch.Tensor] = 1.0,
         emulator_dir="./emulator",
         device="cpu",
     ):
@@ -224,7 +238,15 @@ class MALASampler(object):
         self,
         X,
     ):
+        """
+        The log likelihood and log prior could be written as
+        log_likelihood = torch.distributions.StudentT(nu).log_prob(t).sum()
+        log_prior = torch.distributions.Beta(alpha_b, beta_b).log_prob(X_bar).sum()
+        but X_bar may contain negative values, for which the Beta distribution bails but torch.log
+        returns NaN, which is then just ignored. We could do
+        log_prior = torch.distributions.Beta(alpha_b, beta_b, validate_args=False).log_prob(X_bar).sum()
 
+        """
         Y_pred = 10 ** self.model(X, add_mean=True)
         r = Y_pred - self.Y_target
         sigma_hat = self.sigma_hat
@@ -245,7 +267,11 @@ class MALASampler(object):
         # Prior
         X_bar = (X - X_min) / (X_max - X_min)
         log_prior = torch.sum(
-            (alpha_b - 1) * torch.log(X_bar) + (beta_b - 1) * torch.log(1 - X_bar)
+            (alpha_b - 1) * torch.log(X_bar)
+            + (beta_b - 1) * torch.log(1 - X_bar)
+            + torch.lgamma(alpha_b + beta_b)
+            - torch.lgamma(alpha_b)
+            - torch.lgamma(beta_b)
         )
         return -(self.alpha * log_likelihood + log_prior)
 
@@ -272,7 +298,13 @@ class MALASampler(object):
 
     def get_proposal_likelihood(self, Y, mu, inverse_cov, log_det_cov):
         # - 0.5 * log_det_Hinv - 0.5 * (Y - mu) @ H / (2*h) * (Y - mu)
-        return -0.5 * log_det_cov - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+        # Log-likelihood of a Multivariate Normal distribution
+        k = Y.shape[0]
+        return (
+            -0.5 * log_det_cov
+            - 0.5 * (Y - mu) @ inverse_cov @ (Y - mu)
+            + k * torch.log(torch.tensor(2) * torch.pi)
+        )
 
     def MALA_step(self, X, h, local_data=None):
         if local_data is not None:
@@ -285,6 +317,8 @@ class MALASampler(object):
         X_.requires_grad = True
 
         log_pi_ = self.get_log_like_gradient_and_hessian(X_, compute_hessian=False)
+        # logq = torch.distributions.MultivariateNormal(X_, precision_matrix=H / (2 * h)).log_prob(X).sum()
+        # logq_ = torch.distributions.MultivariateNormal(X, precision_matrix=H / (2 * h)).log_prob(X_).sum()
         logq = self.get_proposal_likelihood(X_, X, H / (2 * h), log_det_Hinv)
         logq_ = self.get_proposal_likelihood(X, X_, H / (2 * h), log_det_Hinv)
 
@@ -304,20 +338,10 @@ class MALASampler(object):
 
         return X, local_data, s
 
-    def MetropolisHastingsAcceptance(self, log_pi, log_pi_, logq, logq_):
-        log_alpha = -log_pi_ + logq_ + log_pi - logq
-        alpha = torch.exp(min(log_alpha, torch.tensor([0.0], device=device)))
-        u = torch.rand(1, device=device)
-        if u <= alpha and log_alpha != np.inf:
-            X.data = X_.data
-            s = 1
-        else:
-            s = 0
-        return s
-
     def sample(
         self,
         X,
+        chain: int = 0,
         burn: int = 1000,
         samples: int = 10001,
         h: float = 0.1,
@@ -333,9 +357,6 @@ class MALASampler(object):
             "****************************************************************************"
         )
         print(
-            "****************************************************************************"
-        )
-        print(
             "Running Metropolis-Adjusted Langevin Algorithm for model {0}".format(
                 model_index
             )
@@ -343,18 +364,11 @@ class MALASampler(object):
         print(
             "****************************************************************************"
         )
-        print(
-            "****************************************************************************"
-        )
-
-        posterior_dir = f"{self.emulator_dir}/posterior_samples/"
-        if not os.path.isdir(posterior_dir):
-            os.makedirs(posterior_dir)
 
         local_data = None
         m_vars = []
         acc = acc_target
-        progress = tqdm(range(samples + burn))
+        progress = tqdm(range(samples + burn), position=chain, leave=False)
         for i in progress:
             X, local_data, s = self.MALA_step(X, h, local_data=local_data)
             if i >= burn:
@@ -376,9 +390,19 @@ class MALASampler(object):
                     columns=dataset.X_keys,
                 )
                 if out_format == "csv":
-                    df.to_csv(join(posterior_dir, f"X_posterior_model_{0}.csv.gz"))
+                    df.to_csv(
+                        join(
+                            posterior_dir,
+                            f"X_posterior_model_{model_index}_chain_{chain}.csv.gz",
+                        )
+                    )
                 elif out_format == "parquet":
-                    df.to_parquet(join(posterior_dir, f"X_posterior_model_{0}.parquet"))
+                    df.to_parquet(
+                        join(
+                            posterior_dir,
+                            f"X_posterior_model_{model_index}_chain_{chain}.parquet",
+                        )
+                    )
                 else:
                     raise NotImplementedError(f"{out_format} not implemented")
 
@@ -391,6 +415,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
+    parser.add_argument("--chains", type=int, default=1)
     parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
@@ -419,6 +444,7 @@ if __name__ == "__main__":
     emulator_dir = args.emulator_dir
     alpha = args.alpha
     model_index = args.model_index
+    chains = args.chains
     samples = args.samples
     burn = args.burn
     out_format = args.out_format
@@ -426,12 +452,18 @@ if __name__ == "__main__":
     target_file = args.target_file
     thinning_factor = args.thinning_factor
 
+    posterior_dir = f"{emulator_dir}/posterior_samples/"
+    if not os.path.isdir(posterior_dir):
+        os.makedirs(posterior_dir)
+
     dataset = PISMDataset(
         data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
         thinning_factor=thinning_factor,
         target_corr_threshold=0,
+        target_error_var="velsurf_mag_error",
+        target_var="velsurf_mag",
     )
 
     X = dataset.X
@@ -492,34 +524,34 @@ if __name__ == "__main__":
         alpha=alpha,
     )
     X_map = sampler.find_MAP(X_0)
-    X_posterior = sampler.sample(
-        X_map,
-        samples=samples,
-        model_index=int(model_index),
-        burn=burn,
-        save_interval=1000,
-        print_interval=100,
-    )
-    print(time.process_time() - start)
-    X_posterior *= dataset.X_std.cpu().numpy()
-    X_posterior += dataset.X_mean.cpu().numpy()
 
-    fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(12, 6))
-    fig.subplots_adjust(wspace=0.05, hspace=0.5)
-    for k in range(X_posterior.shape[1]):
-        ax = axs.ravel()[k]
-        sns.kdeplot(
-            X_posterior[:, k],
-            ax=ax,
+    result = Parallel(n_jobs=chains)(
+        delayed(sampler.sample)(
+            X_map,
+            samples=samples,
+            model_index=int(model_index),
+            burn=burn,
+            chain=c,
+            save_interval=1000,
+            print_interval=100,
         )
-        sns.despine(ax=ax, left=True, bottom=False)
-        ax.set_xlabel(keys_dict[dataset.X_keys[k]])
-        ax.set_ylabel(None)
-        ax.axes.yaxis.set_visible(False)
-    fig.tight_layout()
-    d = {}
-    for k, key in enumerate(dataset.X_keys):
-        d[key] = X_posterior[:, k]
+        for c in range(chains)
+    )
 
-    trace = az.convert_to_inference_data(d)
-    az.plot_trace(trace)
+    print(time.process_time() - start)
+
+    traces = []
+    for X_posterior in result:
+        d = {}
+        for k, key in enumerate(dataset.X_keys):
+            X_posterior *= dataset.X_std.cpu().numpy()
+            X_posterior += dataset.X_mean.cpu().numpy()
+            d[key] = X_posterior[:, k]
+
+        traces.append(az.convert_to_inference_data(d))
+
+    all_traces = az.concat(traces, dim="chain")
+    all_traces.to_zarr(
+        store=join(posterior_dir, f"X_posterior_model_{model_index}.zarr")
+    )
+    az.plot_trace(all_traces)

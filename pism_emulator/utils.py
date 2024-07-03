@@ -29,20 +29,14 @@ import pandas as pd
 import pylab as plt
 import xarray as xr
 from matplotlib.colors import LogNorm
-from pyDOE import lhs
+from pyDOE2 import lhs
 from SALib.sample import saltelli
 from scipy.stats.distributions import gamma, randint, truncnorm, uniform
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_squared_error
 
 np.random.seed(0)
 
-import logging
-import math
-import os
-from numbers import Number
-
-import torch
 
 param_keys_dict = {
     "GCM": "GCM (1)",
@@ -62,11 +56,14 @@ param_keys_dict = {
     "PHIMAX": "$\phi_{\mathrm{max}}$ ($^{\circ}$)",
     "ZMIN": "$z_{\mathrm{min}}$ (m)",
     "ZMAX": "$z_{\mathrm{max}}$ (m)",
+    "a_glen": "A (Pa^{-n} s^{-1})",
     "sia_e": "$E_{\mathrm{SIA}}$ (1)",
     "ssa_e": "$E_{\mathrm{SSA}}$ (1)",
     "ssa_n": "$n_{\mathrm{SSA}}$ (1)",
     "ppq": "$q$ (1)",
     "tefo": "$\delta$ (1)",
+    "till_effective_fraction_overburden": "$\delta$ (1)",
+    "pseudo_plastic_uthershold": "u_{\mathrm{thr} (m yr^{-1})}",
     "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
     "z_min": "$z_{\mathrm{min}}$ (m)",
     "z_max": "$z_{\mathrm{max}}$ (m)",
@@ -84,7 +81,161 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
     """
 
     with xr.open_dataset(file) as Obs:
+        stacked = Obs.stack(z=("rlat", "rlon"))
+        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
+        temp = stacked.tas.dropna(dim="z").values - 273.15
+        rainfall = stacked.rainfall.dropna(dim="z").values * 365.242198781 / 1000
+        snowfall = stacked.snfall.dropna(dim="z").values * 365.242198781 / 1000
+        smb = stacked.gld.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        refreeze = ncl_stacked.rfrz.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        melt = stacked.snmel.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        runoff = stacked.rogl.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        precip = rainfall + snowfall
+
+    return (
+        temp[..., ::thinning_factor],
+        precip[..., ::thinning_factor],
+        snowfall.sum(axis=0)[::thinning_factor],
+        melt.sum(axis=0)[::thinning_factor],
+        runoff.sum(axis=0)[::thinning_factor],
+        refreeze.sum(axis=0)[::thinning_factor],
+        smb.sum(axis=0)[::thinning_factor],
+    )
+
+
+def load_hirham_climate_w_std_dev(
+    file="DMI-HIRHAM5_1980_2020_MMS.nc", thinning_factor=1
+):
+    """
+    Read and return HIRHAM5 data grouped by year
+
+    n: monthly forcing (12
+
+    Returns
+
+    temp (n, m) array
+    precip (n, m) array
+    std_dev (n, m) array
+    a (1, m) array
+    m (1, m) array
+    r (1, m) array
+    f (1, m) array
+    b (1, m) array
+
+    """
+
+    with xr.open_dataset(file) as Obs:
+        nlat = len(Obs["rlat"])
+        nlon = len(Obs["rlon"])
+
+        Obs = Obs.isel(
+            rlat=slice(0, nlat, thinning_factor),
+            rlon=slice(0, nlon, thinning_factor),
+            ncl4=slice(0, nlat, thinning_factor),
+            ncl5=slice(0, nlon, thinning_factor),
+        )
+        stacked = Obs.stack(z=("rlat", "rlon"))
+        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
+
+        temp = (
+            np.hstack(
+                [d.dropna(dim="z").values for _, d in stacked.tas.groupby("time.year")]
+            )
+            - 273.15
+        )
+        temp_std_dev = np.hstack(
+            [
+                d.dropna(dim="z").values
+                for _, d in stacked.tas_std_dev.groupby("time.year")
+            ]
+        )
+        rainfall = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in stacked.rainfall.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+        )
+        snowfall = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in stacked.snfall.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+        )
+        smb = (
+            np.hstack(
+                [d.dropna(dim="z").values for _, d in stacked.gld.groupby("time.year")]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
+        refreeze = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in ncl_stacked.rfrz.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
+        snowmelt = (
+            np.hstack(
+                [
+                    d.dropna(dim="z").values
+                    for _, d in stacked.snmel.groupby("time.year")
+                ]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
+        snowdepth = np.hstack(
+            [d.dropna(dim="z").values for _, d in stacked.sn.groupby("time.year")]
+        )
+        runoff = (
+            np.hstack(
+                [d.dropna(dim="z").values for _, d in stacked.rogl.groupby("time.year")]
+            )
+            * 365.242198781
+            / 1000
+            / 12
+        )
+        precip = rainfall + snowfall
+
+        obs = {
+            "snow_depth": snowdepth - snowdepth[0],
+            "accumulation": snowfall.sum(axis=0),
+            "melt": snowmelt.sum(axis=0),
+            "runoff": runoff.sum(axis=0),
+            "refreeze": refreeze.sum(axis=0),
+            "smb": smb.sum(axis=0),
+        }
+
+    return (
+        temp,
+        precip,
+        temp_std_dev,
+        obs,
+    )
+
+
+def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
+    """
+    Read and return Obs
+    """
+
+    with xr.open_dataset(file) as Obs:
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
@@ -95,19 +246,20 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
         refreeze = ncl_stacked.rfrz.dropna(dim="z").values
         melt = stacked.snmel.dropna(dim="z").values
         precip = rainfall + snowfall
+        runoff = stacked.rogl.dropna(dim="z").values
 
     return (
-        temp[..., ::thinning_factor] - 273.15,
-        precip[..., ::thinning_factor],
-        snowfall.sum(axis=0)[::thinning_factor],
-        melt.sum(axis=0)[::thinning_factor],
-        refreeze.sum(axis=0)[::thinning_factor],
-        smb.sum(axis=0)[::thinning_factor],
+        (temp[::thinning_factor] - 273.15).reshape(1, -1),
+        precip[::thinning_factor].reshape(1, -1),
+        snowfall[::thinning_factor].reshape(1, -1),
+        melt[::thinning_factor].reshape(1, -1),
+        runoff[::thinning_factor].reshape(1, -1),
+        smb[::thinning_factor].reshape(1, -1),
+        refreeze[::thinning_factor].reshape(1, -1),
     )
 
 
 def load_imbie_csv(proj_start=2008):
-
     df = pd.read_csv("imbie_greenland_2021_Gt.csv")
 
     df = df.rename(
@@ -188,11 +340,11 @@ def load_imbie(proj_start=2008):
     s = df[(df["Year"] >= 1980) & (df["Year"] < 1990)]
     mass_mean = s["Mass (Gt)"].mean() / (1990 - 1980)
     smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
-    df[f"SMB (Gt/yr)"] += 2 * 1964 / 10
-    df[f"D (Gt/yr)"] -= 2 * 1964 / 10
+    df["SMB (Gt/yr)"] += 2 * 1964 / 10
+    df["D (Gt/yr)"] -= 2 * 1964 / 10
     cmSLE = 1.0 / 362.5 / 10.0
-    df[f"SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
-    df[f"SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
+    df["SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
+    df["SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
 
     return df
 
@@ -200,6 +352,8 @@ def load_imbie(proj_start=2008):
 def plot_compare(
     F_p,
     F_v,
+    dataset,
+    X_val_unscaled,
     validation=False,
     return_fig=False,
 ):
@@ -300,7 +454,7 @@ def plot_compare(
     else:
         mode = "train"
 
-    fig.savefig(f"test_comp.pdf")
+    fig.savefig("test_comp.pdf")
 
     if return_fig:
         return fig
@@ -314,9 +468,9 @@ def plot_eigenglaciers(
     nrows=2,
     ncols=3,
     figsize=(3.2, 3.6),
+    q: int = 6,
 ):
-
-    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True)
+    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True, q=q)
 
     lamda_scaled = lamda / lamda.sum() * 100
     fig, axs = plt.subplots(
@@ -348,9 +502,9 @@ def plot_eigenglaciers(
 
 
 def calc_bic(
-    X: Union[list, np.ndarray, pd.core.frame.DataFrame],
-    Y: Union[list, np.ndarray, pd.core.frame.DataFrame],
-):
+    X: Union[np.ndarray, pd.core.frame.DataFrame],
+    Y: Union[np.ndarray, pd.core.frame.DataFrame],
+) -> float:
     """
     Bayesian Information Criterion
 
@@ -377,7 +531,7 @@ def calc_bic(
           The Bayesian Information Criterion (BIC)
     """
 
-    lm = LinearRegression(normalize=False)
+    lm = LinearRegression()
     lm.fit(X, Y)
     Y_hat = lm.predict(X)
     res = Y - Y_hat
@@ -390,11 +544,17 @@ def calc_bic(
     return BIC
 
 
-def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
+def stepwise_bic(
+    X: np.ndarray,
+    Y: np.ndarray,
+    varnames: Union[None, list] = None,
+    interactions: bool = True,
+    **kwargs,
+):
     """
     Stepwise model selection using the Bayesian Information Criterion (BIC)
 
-    General fuction (not project-specific) modeled after R's stepAIC function.
+    General function modeled after R's stepAIC function.
 
     Starts with full least squares model as in backward selection. If interactions=True, performs
     bidirectional stepwise selection. Otherwise only performs backwards selection.
@@ -420,13 +580,12 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
     """
 
     n = X.shape[1]
-    names = ["X{}".format(x) for x in range(n)]
-    if not isinstance(varnames, type(None)):
+    if varnames is None:
+        names = [f"X{x}" for x in range(n)]
+    else:
         names = varnames
 
     assert n == len(names)
-    # Need assertion error here
-
     params_dict = {k: v for v, k in enumerate(names)}
     params_to_check = list(names)
     # Variables in model, initially start with model Y = X1 + X2 + X3 + ... + Xn (no interactions)
@@ -450,9 +609,9 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
         print("\nStep {}".format(step))
         print("  Baseline model BIC: {:2.2f}".format(whole_lm_bic))
         bic_dict = {}
-        for i in names:
-            if "*" in i:
-                subnames = i.split("*")
+        for m_str in names:
+            if "*" in m_str:
+                subnames = m_str.split("*")
                 if len(subnames) != 2:
                     sys.exit("Interaction unexpected")
                 # Temporary X that contains the interaction term
@@ -463,11 +622,11 @@ def stepwise_bic(X, Y, varnames=None, interactions=True, **kwargs):
                 lm_bic = calc_bic(tempX, Y)
             else:
                 # Temporary X that drops main effect
-                tempX = np.delete(X, params_dict[i], axis=1)
+                tempX = np.delete(X, params_dict[m_str], axis=1)
                 # BIC for baseline model without main effect
                 lm_bic = calc_bic(tempX, Y)
             # Number of entries in bic_dict should equal the number of variables left to test
-            bic_dict[i] = lm_bic
+            bic_dict[m_str] = lm_bic
 
         # Lowest BIC and variable associated from variables left to test
         min_key = min(bic_dict.keys(), key=(lambda k: bic_dict[k]))
@@ -560,7 +719,6 @@ def prepare_data(
     return_missing=False,
     return_numpy=False,
 ):
-
     """
     Reads samples_file and response_file as a pandas.DataFrame. Removes samples that do
     not have a response by differencing the DataFrames based on "id", i.e.
@@ -626,7 +784,6 @@ def prepare_data(
 
 
 def draw_samples(distributions, n_samples=100000, method="lhs"):
-
     """
     Draw n_samples Sobol sequences using the Saltelli method
     or using Latin Hypercube Sampling (LHS)
@@ -682,7 +839,6 @@ def draw_samples(distributions, n_samples=100000, method="lhs"):
 
 
 def kl_divergence(p, q):
-
     """
     Kullback-Leibler divergence
 
@@ -704,7 +860,6 @@ def kl_divergence(p, q):
 
 
 def distributions_as19():
-
     """
 
     Returns the distributions used by Aschwanden et al (2019):
@@ -741,7 +896,6 @@ def distributions_as19():
 
 
 def rmsd(a, b):
-
     """
     Root mean square difference between a and b
 
@@ -751,19 +905,18 @@ def rmsd(a, b):
 
 
 def set_size(w, h, ax=None):
-
     """
     w, h: width, height in inches
     """
 
     if not ax:
         ax = plt.gca()
-    l = ax.figure.subplotpars.left
-    r = ax.figure.subplotpars.right
-    t = ax.figure.subplotpars.top
-    b = ax.figure.subplotpars.bottom
-    figw = float(w) / (r - l)
-    figh = float(h) / (t - b)
+    left = ax.figure.subplotpars.left
+    right = ax.figure.subplotpars.right
+    top = ax.figure.subplotpars.top
+    bottom = ax.figure.subplotpars.bottom
+    figw = float(w) / (right - left)
+    figh = float(h) / (top - bottom)
     ax.figure.set_size_inches(figw, figh)
 
 

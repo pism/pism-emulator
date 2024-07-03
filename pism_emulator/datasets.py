@@ -2,14 +2,24 @@ import re
 from collections import OrderedDict
 from glob import glob
 from os.path import join
-from typing import Optional
+from time import time
 
 import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
-from torch.utils.data import TensorDataset
-from tqdm.auto import tqdm
+from tqdm.autonotebook import tqdm
+
+
+def preprocess(ds, thinning_factor: int = 1, mapplane_vars: list[str] = ["x", "y"]):
+    """
+    Select slices from dataset
+    """
+    slices = {key: slice(0, value, thinning_factor) for key, value in ds.sizes.items()}
+    drop_dims = [key for (key, val) in slices.items() if key not in mapplane_vars]
+    for d in drop_dims:
+        del slices[d]
+    return ds.isel(slices)
 
 
 class PISMDataset(torch.utils.data.Dataset):
@@ -28,7 +38,6 @@ class PISMDataset(torch.utils.data.Dataset):
         log_y=True,
         threshold=100e3,
         epsilon=0,
-        return_numpy=False,
         verbose=False,
     ):
         self.data_dir = data_dir
@@ -44,7 +53,6 @@ class PISMDataset(torch.utils.data.Dataset):
         self.epsilon = epsilon
         self.log_y = log_y
         self.normalize_x = normalize_x
-        self.return_numpy = return_numpy
         self.verbose = verbose
         self.load_target()
         self.load_data()
@@ -57,75 +65,74 @@ class PISMDataset(torch.utils.data.Dataset):
 
     def load_target(self):
         epsilon = self.epsilon
-        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
         print(f"Loading target {self.target_file}")
-        ds = xr.open_dataset(self.target_file)
-        data = ds.variables[self.target_var].squeeze()
+        ds = xr.open_dataset(self.target_file, decode_times=False)
+        ds = preprocess(ds, thinning_factor=thinning_factor)
+        data = ds[self.target_var].squeeze()
         mask = data.isnull()
-        mask = mask[::thinning_factor, ::thinning_factor]
         data = np.nan_to_num(
-            data.values[::thinning_factor, ::thinning_factor],
+            data.values,
             nan=epsilon,
         )
+        ny, nx = data.shape
         self.target_has_error = False
         if self.target_error_var in ds.variables:
-            data_error = ds.variables[self.target_error_var].squeeze()
+            data_error = ds[self.target_error_var].squeeze()
             data_error = np.nan_to_num(
-                data_error.values[::thinning_factor, ::thinning_factor],
+                data_error.values,
                 nan=epsilon,
             )
             self.target_has_error = True
 
         self.target_has_corr = False
         if self.target_corr_var in ds.variables:
-            data_corr = ds.variables[self.target_corr_var].squeeze()
+            data_corr = ds[self.target_corr_var].squeeze()
             data_corr = np.nan_to_num(
-                data_corr.values[::thinning_factor, ::thinning_factor],
+                data_corr.values,
                 nan=epsilon,
             )
             self.target_has_corr = True
             mask = mask.where(data_corr >= self.target_corr_threshold, True)
         mask = mask.values
 
-        grid_resolution = np.abs(np.diff(ds.variables["x"][0:2]))[0]
+        grid_resolution = np.abs(np.diff(ds["x"][0:2]))[0]
         self.grid_resolution = grid_resolution
         ds.close()
 
-        idx = (mask == False).nonzero()
+        idx = (mask == 0).nonzero()
 
         data = data[idx]
-        Y_target_2d = data
-        Y_target = np.array(data.flatten(), dtype=np.float32)
-        if not return_numpy:
-            Y_target = torch.from_numpy(Y_target)
+        Y_target = torch.from_numpy(np.array(data.flatten(), dtype=np.float32))
         self.Y_target = Y_target
-        self.Y_target_2d = Y_target_2d
         if self.target_has_error:
             data_error = data_error[idx]
             Y_target_error_2d = data_error
-            Y_target_error = np.array(data_error.flatten(), dtype=np.float32)
-            if not return_numpy:
-                Y_target_error = torch.from_numpy(Y_target_error)
+            Y_target_error = torch.from_numpy(
+                np.array(data_error.flatten(), dtype=np.float32)
+            )
 
             self.Y_target_error = Y_target_error
             self.Y_target_error_2d = Y_target_error_2d
         if self.target_has_corr:
             data_corr = data_corr[idx]
             Y_target_corr_2d = data_corr
-            Y_target_corr = np.array(data_corr.flatten(), dtype=np.float32)
-            if not return_numpy:
-                Y_target_corr = torch.from_numpy(Y_target_corr)
+            Y_target_corr = torch.from_numpy(
+                np.array(data_corr.flatten(), dtype=np.float32)
+            )
 
             self.Y_target_corr = Y_target_corr
             self.Y_target_corr_2d = Y_target_corr_2d
         self.mask_2d = mask
         self.sparse_idx_2d = idx
         self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
+        data_2d = np.zeros((ny, nx))
+        data_2d.put(self.sparse_idx_1d, data)
+        Y_target_2d = np.ma.array(data=data_2d, mask=self.mask_2d)
+        self.Y_target_2d = Y_target_2d
 
     def load_data(self):
         epsilon = self.epsilon
-        return_numpy = self.return_numpy
         thinning_factor = self.thinning_factor
 
         identifier_name = "id"
@@ -160,45 +167,40 @@ class PISMDataset(torch.utils.data.Dataset):
         m_samples, n_parameters = samples.shape
         self.X_keys = samples.keys()
 
-        ds0 = xr.open_dataset(training_files[0])
-        _, ny, nx = (
-            ds0.variables["velsurf_mag"]
-            .values[:, ::thinning_factor, ::thinning_factor]
-            .shape
-        )
+        ds0 = xr.open_dataset(training_files[0], decode_times=False)
+        ds0 = preprocess(ds0, thinning_factor=thinning_factor)
+        _, ny, nx = ds0.variables[self.target_var].values.shape
 
         ds0.close()
         self.nx = nx
         self.ny = ny
-
         response = np.zeros((m_samples, len(self.sparse_idx_1d)))
 
         print("  Loading data sets...")
         training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
-
-        for idx, m_file in tqdm(enumerate(training_files)):
-            ds = xr.open_dataset(m_file)
+        start_time = time()
+        for idx, m_file in tqdm(enumerate(training_files), total=len(training_files)):
+            ds = xr.open_dataset(m_file, decode_times=False)
+            ds = preprocess(ds, thinning_factor=thinning_factor)
             data = np.squeeze(
                 np.nan_to_num(
-                    ds.variables[training_var].values[
-                        :, ::thinning_factor, ::thinning_factor
-                    ],
+                    ds.variables[training_var].values,
                     nan=epsilon,
                 )
             )
             response[idx, :] = data[self.sparse_idx_2d].flatten()
             ds.close()
+        end_time = time()
+        self.training_files = training_files
+        print(f"Reading training data took {(end_time-start_time):.0f}s")
 
         p = response.max(axis=1) < self.threshold
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
 
-        X = np.array(samples[p], dtype=np.float32)
-        Y = np.array(response[p], dtype=np.float32)
-        if not return_numpy:
-            X = torch.from_numpy(X)
-            Y = torch.from_numpy(Y)
+        X = torch.from_numpy(np.array(samples[p], dtype=np.float32))
+        Y = torch.from_numpy(np.array(response[p], dtype=np.float32))
         Y[Y < 0] = 0
 
         X_mean = X.mean(axis=0)
@@ -219,8 +221,7 @@ class PISMDataset(torch.utils.data.Dataset):
         self.n_grid_points = n_grid_points
 
         normed_area = np.ones(n_grid_points, dtype=np.float32)
-        if not return_numpy:
-            normed_area = torch.tensor(normed_area)
+        normed_area = torch.tensor(normed_area)
         normed_area /= normed_area.sum()
         self.normed_area = normed_area
 

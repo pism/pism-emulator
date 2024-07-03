@@ -1,0 +1,30 @@
+name: pism-emulator
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+  - scikit-learn
+dependencies:
+  - python>=3.12
+  - pip
+  - numpy
+  - xarray
+  - matplotlib
+  - pandas
+  - pytorch
+  - pytorch-cuda=12.1
+  - torchvision
+  - torchaudio
+  - lightning
+  - tensorboard
+  - joblib
+  - pyDOE2
+  - pytest
+  - SALib
+  - scikit-learn
+  - scipy
+  - seaborn
+  - tqdm
+  - arviz
+  - pip:
+      - -r requirements.txt

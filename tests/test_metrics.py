@@ -16,16 +16,13 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import pytest
 import torch
 from numpy.testing import assert_almost_equal
 
-from pismemulator.metrics import (AbsoluteError, AreaAbsoluteError,
-                                  L2MeanSquaredError)
+from pism_emulator.metrics import AbsoluteError, AreaAbsoluteError, L2MeanSquaredError
 
 
 def test_AreaAbsoluteError():
-
     x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
     y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
     o = torch.tensor([0.25, 0.25, 0.3, 0.2])
@@ -36,7 +33,6 @@ def test_AreaAbsoluteError():
 
 
 def test_AbsoluteError():
-
     x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
     y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
     o = torch.tensor([0.25, 0.25, 0.3, 0.2])

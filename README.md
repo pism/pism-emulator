@@ -9,6 +9,23 @@
 
 pism-emulator is the codebase for the two-step Bayesian calibration process proposed by Aschwanden and Brinkerhoff [1]. The goal is to condition ensemble predictions of Greenland's contribution to future sea-level on contemporary [surface speeds](https://nsidc.org/data/NSIDC-0670/versions/1) and [cumulative mass loss](http://imbie.org). However, the method is model-agnostic and instead of surface speeds and mass loss, one can use other calibration targets.
 
+## Installation
+
+Get pism-emulator source from GitHub:
+
+    $ git clone git@github.com:pism/pism-emulator.git
+    $ cd pism-emulator
+
+Optionally create Conda environment named *pism-emulator*:
+
+    $ conda env create -f environment.yml
+    $ conda activate pism-emulator
+
+Install pism-emulator:
+
+    $ pip install .
+
+
 ## Methods
 
 1. We first calibrate ice dynamics parameters using artificial neural network to act as a surrogate for the ice flow model, which provides a mapping from ice flow parameters to surface speeds at a fraction of PISM's computational cost. This method also provides us the means to employ efficient statistical methods that rely on the gradients of model outputs with respect to its input. We then find the joint marginal distributions given surface speed observations using the [Metropolis-adjusted Langevin algorithm](https://en.wikipedia.org/wiki/Metropolis-adjusted_Langevin_algorithm) (MALA), a Markov-chain Monte Carlo Method. Both the surrogate model and the MALA sampler are implemented in [PyTorch](https://pytorch.org) and [PyTorch-Lightning](https://www.pytorchlightning.ai) and can be run on GPUs.
@@ -23,7 +40,7 @@ To perform the Bayesian calibration and reproduce the probability plots from the
 
 1. Download the repository with `git clone https://github.com/pism/pism-emulator`.
 
-2. Install repository and dependencies with `python setup.py install --user`
+2. Install repository and dependecies (see above).
 
 3. Download observations of [surface speeds](https://nsidc.org/data/NSIDC-0670/versions/1) to `data/observed_speeds` by running `01_download_nsidc_0670.py` and `02_convert.sh`.
 
@@ -74,6 +91,5 @@ number = {19},
 pages = {e2022GL099058},
 keywords = {ice sheet modeling, Bayesian calibration, data assimilation, sea level rise, Greenland, uncertainty quantification},
 doi = {https://doi.org/10.1029/2022GL099058},
-abstract = {Abstract The potential contribution of ice sheets remains the largest source of uncertainty in predicting sea-level due to the limited predictive skill of numerical ice sheet models, yet effective planning necessitates that these predictions are credible and accompanied by a defensible assessment of uncertainty. While the use of large ensembles of simulations allows probabilistic assessments, there is no guarantee that these simulations are aligned with observations. Here, we present a probabilistic prediction of 21st century mass loss from the Greenland Ice Sheet calibrated with observations of surface speeds and mass change using a novel two-stage surrogate-based approach. Our results suggest a sea-level contribution ranging from 4 to 30 cm at the year 2100, proviso the assumption that our chosen ice sheet model’s physics represent reality.},
 year = {2022}
 }

@@ -1,12 +1,21 @@
-import re
-from collections import OrderedDict
-from glob import glob
+import random
 from typing import Optional
 
 import lightning as pl
+import numpy as np
 import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+g = torch.Generator()
+g.manual_seed(0)
 
 
 class PISMDataModule(pl.LightningDataModule):
@@ -30,7 +39,6 @@ class PISMDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
 
     def setup(self, stage: Optional[str] = None):
-
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
 
@@ -47,6 +55,8 @@ class PISMDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
+            worker_init_fn=seed_worker,
+            generator=g,
         )
         self.train_all_loader = train_all_loader
         val_all_loader = DataLoader(
@@ -55,6 +65,8 @@ class PISMDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
+            worker_init_fn=seed_worker,
+            generator=g,
         )
         self.val_all_loader = val_all_loader
         train_loader = DataLoader(
@@ -63,6 +75,8 @@ class PISMDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
+            worker_init_fn=seed_worker,
+            generator=g,
         )
         self.train_loader = train_loader
         self.test_loader = train_loader
@@ -71,6 +85,8 @@ class PISMDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            worker_init_fn=seed_worker,
+            generator=g,
         )
         self.val_loader = val_loader
 
@@ -86,11 +102,17 @@ class PISMDataModule(pl.LightningDataModule):
         print("Generating eigenglaciers")
         defaultKwargs = {
             "cutoff": 1.0,
-            "q": 100,
+            "q": 10,
             "svd_lowrank": True,
             "eigenvalues": False,
         }
-        kwargs = {**defaultKwargs, **kwargs}
+        if len(kwargs) > 0:
+            kwargs = {**defaultKwargs, **kwargs}
+        else:
+            kwargs = defaultKwargs
+
+        q = kwargs["q"]
+
         F = self.F
         omegas = self.omegas
         n_grid_points = F.shape[1]
@@ -98,21 +120,18 @@ class PISMDataModule(pl.LightningDataModule):
         F_bar = F - F_mean  # Eq. 28
         if kwargs["svd_lowrank"]:
             Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-            U, S, V = torch.svd_lowrank(Z @ F_bar, q=kwargs["q"])
+            U, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
             lamda = S**2 / (n_grid_points)
         else:
             S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
-            lamda, V = torch.eig(S, eigenvectors=True)  # Eq. 26
+            lamda, V = torch.linalg.eig(S)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        cutoff_index = torch.sum(
-            torch.cumsum(lamda / lamda.sum(), 0) < kwargs["cutoff"]
-        )
-        print(f"...using the first {cutoff_index} eigen values")
-        lamda_truncated = lamda.detach()[:cutoff_index]
-        V = V.detach()[:, :cutoff_index]
-        V_hat = V @ torch.diag(torch.sqrt(lamda_truncated))
+        print(f"...using the first {q} eigen values")
+        lamda_truncated = lamda.detach()
+        V = V.detach()
+        V_hat = V @ torch.diag(torch.sqrt(lamda))
 
         if kwargs["eigenvalues"]:
             return V_hat, F_bar, F_mean, lamda
@@ -147,7 +166,6 @@ class PDDDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
 
     def setup(self, stage: Optional[str] = None):
-
         all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
         self.all_data = all_data
 
@@ -155,39 +173,25 @@ class PDDDataModule(pl.LightningDataModule):
             all_data, train_size=self.train_size, random_state=0
         )
         self.training_data = training_data
-        self.test_data = training_data
-
         self.val_data = val_data
-        train_all_loader = DataLoader(
-            dataset=all_data,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-        self.train_all_loader = train_all_loader
-        val_all_loader = DataLoader(
-            dataset=all_data,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-        self.val_all_loader = val_all_loader
+
         train_loader = DataLoader(
             dataset=training_data,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
+            worker_init_fn=seed_worker,
+            generator=g,
         )
         self.train_loader = train_loader
-        self.test_loader = train_loader
         val_loader = DataLoader(
             dataset=val_data,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            worker_init_fn=seed_worker,
+            generator=g,
         )
         self.val_loader = val_loader
 

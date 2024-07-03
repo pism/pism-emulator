@@ -1,4 +1,4 @@
-# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-23 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -16,83 +16,127 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+from argparse import ArgumentParser
+from collections import OrderedDict
+from typing import Dict, List, Tuple
 
 import lightning as pl
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-import xarray as xr
 from torch import Tensor
-from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
-from torchmetrics import Metric
-from torchmetrics.utilities.checks import _check_same_shape
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import ExponentialLR, _LRScheduler
 
-from pismemulator.metrics import (
-    AbsoluteError,
-    AreaAbsoluteError,
-    absolute_error,
-    area_absolute_error,
-)
+from pism_emulator.metrics import AreaAbsoluteError, area_absolute_error
 
 
-class PDDEmulator(pl.LightningModule):
+class DNNEmulator(pl.LightningModule):
     """
-    The Neural Network emulator is adapted from Aschwanden & Brinkerhoff (2022),
-    sans Principal Component Analysis.
-    but maps (T, P, beta) -> A, M, R where
-    T: temperature (monthly or daily)
-    P: precipitation (monthly or daily)
-    beta: f_snow, f_ice, f_refreeze the three PDD parameters
+    A class used to represent a Deep Neural Network Emulator.
 
-    A: Accumulation (annual)
-    M: Melt (annual)
-    R: Refreeze (annual)
+    ...
+
+    Attributes
+    ----------
+    n_parameters : int
+        Number of parameters.
+    n_eigenglaciers : int
+        Number of eigenglaciers.
+    V_hat : Tensor
+        Tensor representing V_hat.
+    F_mean : Tensor
+        Tensor representing F_mean.
+    area : Tensor
+        Tensor representing area.
+    hparams :
+        Hyperparameters.
+    *args :
+        Variable length argument list.
+    **kwargs :
+        Arbitrary keyword arguments.
+
+    Methods
+    -------
+    forward(x, add_mean=False):
+        Passes the input tensor through each operation.
+    add_model_specific_args(parent_parser):
+        Adds model specific arguments.
+    configure_optimizers():
+        Configures optimizers.
+    training_step(batch, batch_idx):
+        Defines a single step in the training loop.
+    validation_step(batch, batch_idx):
+        Defines a single step in the validation loop.
+    on_validation_epoch_end():
+        Defines what to do at the end of each validation epoch.
     """
 
     def __init__(
         self,
         n_parameters: int,
-        n_outputs: int,
+        n_eigenglaciers: int,
+        V_hat: Tensor,
+        F_mean: Tensor,
+        area: Tensor,
         hparams,
         *args,
         **kwargs,
     ):
         super().__init__()
-        hparams["n_paramters"] = n_parameters
-        hparams["n_outputs"] = n_outputs
         self.save_hyperparameters(hparams)
         n_layers = self.hparams.n_layers
         n_hidden = self.hparams.n_hidden
 
         if isinstance(n_hidden, int):
-            n_hidden = [n_hidden] * (n_layers - 1)
+            n_hidden = [n_hidden] * n_layers
+        p = [0.0] + [0.5] * (n_layers - 2) + [0.3]
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden[0])
         self.norm_first = nn.LayerNorm(n_hidden[0])
-        self.dropout_first = nn.Dropout(p=0.0)
+        self.dropout_first = nn.Dropout(p=p[0])
 
         models = []
-        for n in range(n_layers - 2):
+        for n in range(1, n_layers):
             models.append(
                 nn.Sequential(
                     OrderedDict(
                         [
-                            ("Linear", nn.Linear(n_hidden[n], n_hidden[n + 1])),
-                            ("LayerNorm", nn.LayerNorm(n_hidden[n + 1])),
-                            ("Dropout", nn.Dropout(p=0.1)),
+                            ("Linear", nn.Linear(n_hidden[n - 1], n_hidden[n])),
+                            ("LayerNorm", nn.LayerNorm(n_hidden[n])),
+                            ("Dropout", nn.Dropout(p=p[n])),
                         ]
                     )
                 )
             )
         self.dnn = nn.ModuleList(models)
-        self.l_last = nn.Linear(n_hidden[-1], n_outputs)
+        self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers, bias=False)
 
-        self.train_ae = AbsoluteError()
-        self.test_ae = AbsoluteError()
+        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
+        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
 
-    def forward(self, x, add_mean=False):
+        self.register_buffer("area", area)
+
+        self.train_ae = AreaAbsoluteError()
+        self.test_ae = AreaAbsoluteError()
+
+    def forward(self, x: Tensor, add_mean: bool = False) -> Tensor:
+        """
+        Passes the input tensor through each operation.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor.
+        add_mean : bool, optional
+            If True, adds mean to the predicted F.
+
+        Returns
+        -------
+        Tensor
+            Predicted F.
+        """
         # Pass the input tensor through each of our operations
 
         a = self.l_first(x)
@@ -104,18 +148,48 @@ class PDDEmulator(pl.LightningModule):
             a = dnn(z)
             z = torch.relu(a) + z
 
-        return self.l_last(z)
+        z_last = self.l_last(z)
+
+        F_pred = z_last @ self.V_hat.T
+        if add_mean:
+            F_pred += self.F_mean
+
+        return F_pred
 
     @staticmethod
-    def add_model_specific_args(parent_parser):
-        parser = parent_parser.add_argument_group("PDDEmulator")
+    def add_model_specific_args(parent_parser) -> ArgumentParser:
+        """
+        Adds model specific arguments.
+
+        Parameters
+        ----------
+        parent_parser : ArgumentParser
+            Parent argument parser.
+
+        Returns
+        -------
+        ArgumentParser
+            Parent argument parser with added arguments.
+        """
+        parser = parent_parser.add_argument_group("NNEmulator")
         parser.add_argument("--batch_size", type=int, default=128)
-        parser.add_argument("--n_hidden", default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.1)
+        parser.add_argument("--n_hidden", type=int, default=128)
+        parser.add_argument("--n_layers", type=int, default=4)
+        parser.add_argument("--learning_rate", type=float, default=0.01)
 
         return parent_parser
 
-    def configure_optimizers(self):
+    def configure_optimizers(
+        self,
+    ) -> Tuple[List[Optimizer], List[Dict[str, _LRScheduler]]]:
+        """
+        Configures optimizers.
+
+        Returns
+        -------
+        Tuple[List[Optimizer], List[Dict[str, _LRScheduler]]]
+            Tuple containing list of optimizers and list of schedulers.
+        """
         optimizer = torch.optim.Adam(
             self.parameters(), self.hparams.learning_rate, weight_decay=0.0
         )
@@ -126,24 +200,60 @@ class PDDEmulator(pl.LightningModule):
 
         return [optimizer], [scheduler]
 
-    def training_step(self, batch, batch_idx):
+    def training_step(
+        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
+    ) -> Tensor:
+        """
+        Defines a single step in the training loop.
+
+        Parameters
+        ----------
+        batch : Tuple[Tensor, Tensor, Tensor, Tensor]
+            Input batch.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        Tensor
+            Loss.
+        """
         x, f, o, _ = batch
         f_pred = self.forward(x)
-        loss = absolute_error(f_pred, f, o)
+        loss = area_absolute_error(f_pred, f, o, self.area)
 
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(
+        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
+    ) -> Dict[str, Tensor]:
+        """
+        Defines a single step in the validation loop.
+
+        Parameters
+        ----------
+        batch : Tuple[Tensor, Tensor, Tensor, Tensor]
+            Input batch.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        Dict[str, Tensor]
+            Dictionary containing tensors for x, f, f_pred, o, o_0.
+        """
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
 
-        self.log("train_loss", self.train_ae(f_pred, f, o))
-        self.log("test_loss", self.test_ae(f_pred, f, o_0))
+        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
-    def validation_epoch_end(self, outputs):
-
+    def on_validation_epoch_end(self) -> None:
+        """
+        Defines what to do at the end of each validation epoch.
+        """
         self.log(
             "train_loss",
             self.train_ae,
@@ -178,28 +288,29 @@ class DNNEmulator(pl.LightningModule):
         n_hidden = self.hparams.n_hidden
 
         if isinstance(n_hidden, int):
-            n_hidden = [n_hidden] * (n_layers - 1)
+            n_hidden = [n_hidden] * n_layers
+        p = [0.0] + [0.5] * (n_layers - 2) + [0.3]
 
         # Inputs to hidden layer linear transformation
         self.l_first = nn.Linear(n_parameters, n_hidden[0])
         self.norm_first = nn.LayerNorm(n_hidden[0])
-        self.dropout_first = nn.Dropout(p=0.0)
+        self.dropout_first = nn.Dropout(p=p[0])
 
         models = []
-        for n in range(n_layers - 2):
+        for n in range(1, n_layers):
             models.append(
                 nn.Sequential(
                     OrderedDict(
                         [
-                            ("Linear", nn.Linear(n_hidden[n], n_hidden[n + 1])),
-                            ("LayerNorm", nn.LayerNorm(n_hidden[n + 1])),
-                            ("Dropout", nn.Dropout(p=0.1)),
+                            ("Linear", nn.Linear(n_hidden[n - 1], n_hidden[n])),
+                            ("LayerNorm", nn.LayerNorm(n_hidden[n])),
+                            ("Dropout", nn.Dropout(p=p[n])),
                         ]
                     )
                 )
             )
         self.dnn = nn.ModuleList(models)
-        self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers)
+        self.l_last = nn.Linear(n_hidden[-1], n_eigenglaciers, bias=False)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
@@ -234,7 +345,8 @@ class DNNEmulator(pl.LightningModule):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("NNEmulator")
         parser.add_argument("--batch_size", type=int, default=128)
-        parser.add_argument("--n_hidden", default=128)
+        parser.add_argument("--n_hidden", type=int, default=128)
+        parser.add_argument("--n_layers", type=int, default=4)
         parser.add_argument("--learning_rate", type=float, default=0.01)
 
         return parent_parser
@@ -268,8 +380,7 @@ class DNNEmulator(pl.LightningModule):
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
-    def validation_epoch_end(self, outputs):
-
+    def on_validation_epoch_end(self):
         self.log(
             "train_loss",
             self.train_ae,
@@ -317,8 +428,8 @@ class NNEmulator(pl.LightningModule):
         self.dropout_3 = nn.Dropout(p=0.5)
         self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
         self.norm_4 = nn.LayerNorm(n_hidden_3)
-        self.dropout_4 = nn.Dropout(p=0.5)
-        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
+        self.dropout_4 = nn.Dropout(p=0.3)
+        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers, bias=False)
 
         self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
         self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
@@ -362,7 +473,6 @@ class NNEmulator(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--batch_size", type=int, default=128)
         parser.add_argument("--n_hidden_1", type=int, default=128)
         parser.add_argument("--n_hidden_2", type=int, default=128)
         parser.add_argument("--n_hidden_3", type=int, default=128)
@@ -400,8 +510,7 @@ class NNEmulator(pl.LightningModule):
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
-    def validation_epoch_end(self, outputs):
-
+    def on_validation_epoch_end(self):
         self.log(
             "train_loss",
             self.train_ae,
@@ -452,15 +561,16 @@ class TorchPDDModel(torch.nn.modules.Module):
 
     def __init__(
         self,
-        pdd_factor_snow=3,
-        pdd_factor_ice=8,
-        refreeze_snow=0.0,
-        refreeze_ice=0.0,
-        temp_snow=0.0,
-        temp_rain=2.0,
-        interpolate_rule="linear",
-        interpolate_n=52,
+        pdd_factor_snow: float = 3.0,
+        pdd_factor_ice: float = 8.0,
+        refreeze_snow: float = 0.0,
+        refreeze_ice: float = 0.0,
+        temp_snow: float = 0.0,
+        temp_rain: float = 0.0,
+        interpolate_rule: str = "linear",
+        interpolate_n: int = 12,
         device="cpu",
+        all_vars: bool = False,
         *args,
         **kwargs,
     ):
@@ -476,6 +586,55 @@ class TorchPDDModel(torch.nn.modules.Module):
         self.interpolate_rule = interpolate_rule
         self.interpolate_n = interpolate_n
         self.device = device
+        self.all_vars = all_vars
+
+    @property
+    def pdd_factor_snow(self):
+        return self._pdd_factor_snow
+
+    @pdd_factor_snow.setter
+    def pdd_factor_snow(self, value):
+        self._pdd_factor_snow = value
+
+    @property
+    def pdd_factor_ice(self):
+        return self._pdd_factor_ice
+
+    @pdd_factor_ice.setter
+    def pdd_factor_ice(self, value):
+        self._pdd_factor_ice = value
+
+    @property
+    def temp_snow(self):
+        return self._temp_snow
+
+    @temp_snow.setter
+    def temp_snow(self, value):
+        self._temp_snow = value
+
+    @property
+    def temp_ice(self):
+        return self._temp_ice
+
+    @temp_ice.setter
+    def temp_ice(self, value):
+        self._temp_ice = value
+
+    @property
+    def refreeze_snow(self):
+        return self._refreeze_snow
+
+    @refreeze_snow.setter
+    def refreeze_snow(self, value):
+        self._refreeze_snow = value
+
+    @property
+    def refreeze_ice(self):
+        return self._refreeze_ice
+
+    @refreeze_ice.setter
+    def refreeze_ice(self, value):
+        self._refreeze_ice = value
 
     def forward(self, temp, prec, stdv=0.0):
         """Run the positive degree day model.
@@ -531,27 +690,26 @@ class TorchPDDModel(torch.nn.modules.Module):
         snow_refreeze_rate = torch.zeros_like(temp)
         ice_refreeze_rate = torch.zeros_like(temp)
 
-        sd_changes = torch.stack(
-            [
-                (snow_depth[i - 1] + accu_rate[i])
-                - self.melt_rates(snow_depth[i - 1] + accu_rate[i], inst_pdd[i])[0]
-                for i in range(len(temp))
-            ]
-        )
-        snow_melt_rate = torch.stack(
-            [
-                self.melt_rates(snow_depth[i - 1] + accu_rate[i], inst_pdd[i])[0]
-                for i in range(len(temp))
-            ]
-        )
-        ice_melt_rate = torch.stack(
-            [
-                self.melt_rates(snow_depth[i - 1] + accu_rate[i], inst_pdd[i])[1]
-                for i in range(len(temp))
-            ]
-        )
+        # parse model parameters for readability
+        ddf_snow = self.pdd_factor_snow / 1000
+        ddf_ice = self.pdd_factor_ice / 1000
 
-        snow_depth = [sd_changes[0 : i + 1].sum(0) for i in range(len(temp)) if i > 0]
+        for i in range(len(temp)):
+            if i == 0:
+                intermediate_snow_depth = accu_rate[i]
+            else:
+                intermediate_snow_depth = snow_depth[i - 1] + accu_rate[i]
+            potential_snow_melt = ddf_snow * inst_pdd[i]
+
+            snow_melt_rate[i] = torch.minimum(
+                intermediate_snow_depth, potential_snow_melt
+            )
+
+            ice_melt_rate[i] = (
+                (potential_snow_melt - snow_melt_rate[i]) * ddf_ice / ddf_snow
+            )
+
+            snow_depth[i] = intermediate_snow_depth - snow_melt_rate[i]
 
         melt_rate = snow_melt_rate + ice_melt_rate
         snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
@@ -561,30 +719,46 @@ class TorchPDDModel(torch.nn.modules.Module):
         inst_smb = accu_rate - runoff_rate
 
         # output
-        return {
-            "temp": temp,
-            "prec": prec,
-            "stdv": stdv,
-            "inst_pdd": inst_pdd,
-            "accu_rate": accu_rate,
-            "snow_melt_rate": snow_melt_rate,
-            "ice_melt_rate": ice_melt_rate,
-            "melt_rate": melt_rate,
-            "snow_refreeze_rate": snow_refreeze_rate,
-            "ice_refreeze_rate": ice_refreeze_rate,
-            "refreeze_rate": refreeze_rate,
-            "runoff_rate": runoff_rate,
-            "inst_smb": inst_smb,
-            "snow_depth": snow_depth,
-            "pdd": self._integrate(inst_pdd),
-            "accu": self._integrate(accu_rate),
-            "snow_melt": self._integrate(snow_melt_rate),
-            "ice_melt": self._integrate(ice_melt_rate),
-            "melt": self._integrate(melt_rate),
-            "runoff": self._integrate(runoff_rate),
-            "refreeze": self._integrate(refreeze_rate),
-            "smb": self._integrate(inst_smb),
-        }
+        if not self.all_vars:
+            output = {
+                "accu": self._integrate(accu_rate),
+                "snow_melt": self._integrate(snow_melt_rate),
+                "ice_melt": self._integrate(ice_melt_rate),
+                "melt": self._integrate(melt_rate),
+                "runoff": self._integrate(runoff_rate),
+                "refreeze": self._integrate(refreeze_rate),
+                "snow_refreeze": self._integrate(snow_refreeze_rate),
+                "ice_refreeze": self._integrate(ice_refreeze_rate),
+                "smb": self._integrate(inst_smb),
+            }
+        else:
+            output = {
+                "temp": temp,
+                "prec": prec,
+                "stdv": stdv,
+                "inst_pdd": inst_pdd,
+                "accu_rate": accu_rate,
+                "snow_melt_rate": snow_melt_rate,
+                "ice_melt_rate": ice_melt_rate,
+                "melt_rate": melt_rate,
+                "snow_refreeze_rate": snow_refreeze_rate,
+                "ice_refreeze_rate": ice_refreeze_rate,
+                "refreeze_rate": refreeze_rate,
+                "runoff_rate": runoff_rate,
+                "inst_smb": inst_smb,
+                "snow_depth": snow_depth,
+                "pdd": self._integrate(inst_pdd),
+                "accu": self._integrate(accu_rate),
+                "snow_melt": self._integrate(snow_melt_rate),
+                "ice_melt": self._integrate(ice_melt_rate),
+                "melt": self._integrate(melt_rate),
+                "runoff": self._integrate(runoff_rate),
+                "refreeze": self._integrate(refreeze_rate),
+                "snow_refreeze": self._integrate(snow_refreeze_rate),
+                "ice_refreeze": self._integrate(ice_refreeze_rate),
+                "smb": self._integrate(inst_smb),
+            }
+        return output
 
     def _expand(self, array, shape):
         """Expand an array to the given shape"""
@@ -667,32 +841,3 @@ class TorchPDDModel(torch.nn.modules.Module):
 
         # return accumulation rate
         return snowfrac * prec
-
-    def melt_rates(self, snow, pdd):
-        """Compute melt rates from snow precipitation and pdd sum.
-
-        Snow melt is computed from the number of positive degree days (*pdd*)
-        and the `pdd_factor_snow` model attribute. If all snow is melted and
-        some energy (PDD) remains, ice melt is computed using `pdd_factor_ice`.
-
-        *snow*: array_like
-            Snow precipitation rate.
-        *pdd*: array_like
-            Number of positive degree days.
-        """
-
-        # parse model parameters for readability
-        ddf_snow = self.pdd_factor_snow
-        ddf_ice = self.pdd_factor_ice
-
-        # compute a potential snow melt
-        pot_snow_melt = ddf_snow * pdd
-
-        # effective snow melt can't exceed amount of snow
-        snow_melt = torch.minimum(snow, pot_snow_melt)
-
-        # ice melt is proportional to excess snow melt
-        ice_melt = (pot_snow_melt - snow_melt) * ddf_ice / ddf_snow
-
-        # return melt rates
-        return (snow_melt, ice_melt)

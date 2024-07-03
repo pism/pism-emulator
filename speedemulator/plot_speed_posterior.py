@@ -1,6 +1,22 @@
 #!/bin/env python3
+# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import os
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
@@ -11,9 +27,8 @@ import pylab as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
-from scipy.stats import beta, gaussian_kde
-
 from pismemulator.utils import param_keys_dict as keys_dict
+from scipy.stats import beta, gaussian_kde
 
 fontsize = 6
 lw = 1.0
@@ -105,7 +120,7 @@ if __name__ == "__main__":
         df["Model"] = int(model)
         X_list.append(df)
 
-    print(f"Merging posteriors into dataframe")
+    print("Merging posteriors into dataframe")
     posterior_df = pd.concat(X_list)
 
     X_posterior = posterior_df.drop(columns=["Model"]).values
@@ -122,7 +137,6 @@ if __name__ == "__main__":
     for i in range(n_parameters):
         for j in range(n_parameters):
             if i > j:
-
                 axs[i, j].scatter(
                     X_posterior[:, j],
                     X_posterior[:, i],

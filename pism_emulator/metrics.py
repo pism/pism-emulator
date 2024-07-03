@@ -38,25 +38,35 @@ def _area_absolute_error_compute(absolute_error) -> Tensor:
     return absolute_error
 
 
+from torch import Tensor
+
+
 def area_absolute_error(
     preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
 ) -> Tensor:
     """
-    Computes squared absolute error
-    Args:
-        preds: estimated labels
-        target: ground truth labels
-        omegas: weights
-        area: area of each cell
-    Return:
-        Tensor with absolute error
-    Example:
-        >>> x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-        >>> y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-        >>> o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-        >>> a = torch.tensor([0.25, 0.25])
-        >>> absolute_error(x, y, o, a)
-        tensor(0.4000)
+    Compute the area absolute error between the predicted and target tensors.
+
+    Parameters
+    ----------
+    preds : Tensor
+        The predicted values as a PyTorch Tensor.
+    target : Tensor
+        The target values as a PyTorch Tensor.
+    omegas : Tensor
+        The omegas values as a PyTorch Tensor.
+    area : Tensor
+        The area values as a PyTorch Tensor.
+
+    Returns
+    -------
+    Tensor
+        The area absolute error as a PyTorch Tensor.
+
+    Notes
+    -----
+    This function uses the '_area_absolute_error_update' and '_area_absolute_error_compute' functions
+    to calculate the area absolute error.
     """
     sum_abs_error = _area_absolute_error_update(preds, target, omegas, area)
     return _area_absolute_error_compute(sum_abs_error)
@@ -150,13 +160,11 @@ class AbsoluteError(Metric):
 
     full_state_update: bool = False
 
-    def __init__(self, compute_on_step: bool = True, dist_sync_on_step=False):
+    def __init__(self, dist_sync_on_step=False):
         # call `self.add_state`for every internal state that is needed for the metrics computations
         # dist_reduce_fx indicates the function that should be used to reduce
         # state from multiple processes
-        super().__init__(
-            compute_on_step=compute_on_step, dist_sync_on_step=dist_sync_on_step
-        )
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
 
         self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
 
@@ -199,6 +207,7 @@ class L2MeanSquaredError(Metric):
         >>> l2_mean_squared_error(preds, target, weight, k)
         tensor(0.8835)
     """
+
     is_differentiable = True
     higher_is_better = False
     full_state_update = False

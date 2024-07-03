@@ -18,21 +18,31 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import os
 from argparse import ArgumentParser
 from os import mkdir
-from os.path import isdir, join
+from os.path import abspath, dirname, isdir, join, realpath
 
 import numpy as np
 import pylab as plt
 import torch
 from matplotlib.colors import LogNorm
-from scipy.stats import dirichlet, pearsonr
+from scipy.stats import pearsonr
 from sklearn.metrics import mean_absolute_error, r2_score
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
-from pismemulator.nnemulator import NNEmulator, PISMDataModule, PISMDataset
-from pismemulator.utils import param_keys_dict as keys_dict
+from pism_emulator.datasets import PISMDataset
+from pism_emulator.nnemulator import NNEmulator
+from pism_emulator.utils import param_keys_dict as keys_dict
+
+
+def current_script_directory():
+    import inspect
+
+    filename = inspect.stack(0)[0][1]
+    return realpath(dirname(filename))
+
+
+script_directory = current_script_directory()
 
 if __name__ == "__main__":
     __spec__ = None
@@ -44,12 +54,18 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
         "--samples_file",
-        default="../data/samples/velocity_calibration_samples_lhs_100.csv",
+        default=abspath(
+            join(
+                script_directory, "../data/samples/velocity_calibration_samples_50.csv"
+            )
+        ),
     )
     parser.add_argument(
         "--target_file",
-        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc",
+        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
+    parser.add_argument("--target_var", type=str, default="velsurf_mag")
+    parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--sample_size", type=int, default=80)
 
     parser = NNEmulator.add_model_specific_args(parser)
@@ -61,6 +77,8 @@ if __name__ == "__main__":
     num_models = args.num_models
     samples_file = args.samples_file
     target_file = args.target_file
+    target_var = args.target_var
+    target_error_var = args.target_error_var
     sample_size = args.sample_size
     mode = args.mode
     if mode == "train":
@@ -75,6 +93,8 @@ if __name__ == "__main__":
         data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
+        target_var=target_var,
+        target_error_var=target_error_var,
         thinning_factor=1,
         threshold=1e7,
     )
@@ -98,7 +118,7 @@ if __name__ == "__main__":
 
     cmap = "viridis"
     fig, axs = plt.subplots(
-        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
+        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 10)
     )
 
     k = 0
@@ -107,7 +127,6 @@ if __name__ == "__main__":
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
         for model_index in tqdm(range(0, num_models)):
-
             emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
             state_dict = torch.load(emulator_file)
             e = NNEmulator(
@@ -125,7 +144,7 @@ if __name__ == "__main__":
             F_v = F[m].detach().numpy()
             F_p = e(X_val, add_mean=True).detach().numpy()
             F_val[:] = F_v
-            F_pred[:] = F_p[dataset.sparse_idx_1d]
+            F_pred[:] = F_p
         rmse = np.sqrt(
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
@@ -143,7 +162,6 @@ if __name__ == "__main__":
         )
 
         if m in plot_glaciers:
-            print(k)
             X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
 
             F_val_2d = np.zeros((dataset.ny, dataset.nx))
@@ -169,19 +187,34 @@ if __name__ == "__main__":
                 vmax=50,
                 cmap="coolwarm",
             )
-            axs[-1, k].text(
-                0.01,
-                0.0,
-                "\n".join(
-                    [
-                        f"{keys_dict[i]}: {j:.3f}"
-                        for i, j in zip(dataset.X_keys, X_val_unscaled)
-                    ]
-                ),
-                c="k",
-                size=7,
-                transform=axs[-1, k].transAxes,
-            )
+            try:
+                axs[-1, k].text(
+                    0.01,
+                    0.0,
+                    "\n".join(
+                        [
+                            f"{keys_dict[i]}: {j:.3f}"
+                            for i, j in zip(dataset.X_keys, X_val_unscaled)
+                        ]
+                    ),
+                    c="k",
+                    size=7,
+                    transform=axs[-1, k].transAxes,
+                )
+            except:
+                axs[-1, k].text(
+                    0.01,
+                    0.0,
+                    "\n".join(
+                        [
+                            f"{i}: {j:.3f}"
+                            for i, j in zip(dataset.X_keys, X_val_unscaled)
+                        ]
+                    ),
+                    c="k",
+                    size=7,
+                    transform=axs[-1, k].transAxes,
+                )
 
             axs[-1, k].text(
                 0.01,
@@ -197,7 +230,7 @@ if __name__ == "__main__":
             axs[2, k].set_axis_off()
             axs[-1, k].set_axis_off()
 
-        k += 1
+            k += 1
 
     rmse_mean = np.array(rmses).mean()
     mae_mean = np.array(maes).mean()

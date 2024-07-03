@@ -198,7 +198,6 @@ def saltresponse():
 
 @pytest.fixture(scope="session")
 def pq():
-
     # Binomial with p=0.4, N=2
     p = np.array([0.36, 0.48, 0.16])
     # Uniform with p=1/3
