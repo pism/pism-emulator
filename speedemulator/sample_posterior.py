@@ -475,7 +475,7 @@ if __name__ == "__main__":
     np.random.seed(0)
     emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
 
-    state_dict = torch.load(emulator_file)
+    state_dict = torch.load(emulator_file, weights_only=True)
     e = NNEmulator(
         state_dict["l_1.weight"].shape[1],
         state_dict["V_hat"].shape[1],
