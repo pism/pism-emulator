@@ -195,7 +195,7 @@ class DNNEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
+            "scheduler": ExponentialLR(optimizer, 0.9975),
         }
 
         return [optimizer], [scheduler]
@@ -357,7 +357,7 @@ class DNNEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
+            "scheduler": ExponentialLR(optimizer, 0.9975),
         }
 
         return [optimizer], [scheduler]
@@ -487,7 +487,7 @@ class NNEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=False),
+            "scheduler": ExponentialLR(optimizer, 0.9975),
         }
 
         return [optimizer], [scheduler]

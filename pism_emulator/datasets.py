@@ -153,7 +153,7 @@ class PISMDataset(torch.utils.data.Dataset):
         ids_df.index.name = None
 
         # It is possible that not all ensemble simulations succeeded and returned a value
-        # so we much search for missing response values
+        # so we must search for missing response values
         missing_ids = list(set(samples["id"]).difference(ids_df["id"]))
         if missing_ids:
             if self.verbose:
