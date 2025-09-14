@@ -45,7 +45,7 @@ def current_script_directory():
 script_directory = current_script_directory()
 
 if __name__ == "__main__":
-    __spec__ = None
+    __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../tests/training_data")
@@ -95,7 +95,7 @@ if __name__ == "__main__":
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        thinning_factor=1,
+        thin=1,
         threshold=1e7,
     )
     X = dataset.X

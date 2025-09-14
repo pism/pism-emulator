@@ -16,7 +16,6 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-# type: ignore[valid-type]
 
 from functools import wraps
 from typing import Literal, Tuple, Union
@@ -1312,7 +1311,7 @@ class DEBMModel:
             )
         )
 
-    def orbital_parameters(self, time: np.ndarray) -> dict[float]:
+    def orbital_parameters(self, time: np.ndarray) -> dict[str, float]:
         """
         Calculate orbital parameters (declination, distance_factor) given a time
 
@@ -2653,7 +2652,7 @@ class TorchDEBMModel:
             )
         )
 
-    def orbital_parameters(self, time: torch.tensor) -> dict[float]:
+    def orbital_parameters(self, time: torch.tensor) -> dict[str, float]:
         """
         Calculate orbital parameters (declination, distance_factor) given a time
 

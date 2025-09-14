@@ -225,7 +225,7 @@ class L2MeanSquaredError(Metric):
         self.add_state("total", default=tensor(0), dist_reduce_fx="sum")
         self.squared = squared
 
-    def update(self, preds: Tensor, target: Tensor, weight: Tensor, K: float) -> None:  # type: ignore
+    def update(self, preds: Tensor, target: Tensor, weight: Tensor, K: float) -> None:
         """Update state with predictions and targets.
         Args:
             preds: Predictions from model

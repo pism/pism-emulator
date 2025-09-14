@@ -1,7 +1,10 @@
-numpy
-xarray
+dask[distributed,dataframe]
 matplotlib
+netcdf4
+numpy
 pandas
+pylint
+xarray
 joblib
 pyDOE2
 pytest

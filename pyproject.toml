@@ -1,6 +1,6 @@
 [project]
 name = "pism-emulator"
-version = "0.2.0"
+version = "0.2.1"
 maintainers = [{name = "Andy Aschwanden", email = "andy.aschwanden@gmail.com"}]
 description = """Home of NASA ROSES project "A Reanalysis of the Greenland Ice Sheet"""
 readme = "README.md"
@@ -17,8 +17,11 @@ classifiers = [
         ]
 dynamic = ["dependencies"]
 
+[project.scripts]
+train-speed-emulator = "pism_emulator.emulators.speed.train:main"
+
 [tool.setuptools.packages.find]
-include = ["pism_emulator"]
+include = ["pism_emulator*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
@@ -30,10 +33,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["pism_emulator"]
 
-[tool.pytest.ini_options]
-pythonpath = [
-  "."
-]
 
 [tool.flake8]
 # https://pep8.readthedocs.io/en/latest/intro.html#error-codes

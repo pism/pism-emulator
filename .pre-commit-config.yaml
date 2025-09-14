@@ -1,5 +1,5 @@
 exclude: "docs|node_modules|migrations|.git|.tox"
-default_stages: [commit]
+default_stages: [pre-commit]
 fail_fast: true
 
 repos:
@@ -26,24 +26,32 @@ repos:
           - --profile
           - black
 
-  # - repo: https://github.com/srstevenson/nb-clean
-  #   rev: 3.2.0
+  # # Numpydoc
+  # - repo: https://github.com/numpy/numpydoc
+  #   rev: v1.9.0
   #   hooks:
-  #    - id: nb-clean
+  #     - id: numpydoc-validation
 
-  # # Can run individually with `pre-commit run mypy --all-files`
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.10.0
-  #   hooks:
-  #     - id: mypy
-  #       args: [--config-file=pyproject.toml]
-  #       language: system
+  # Can run individually with `pre-commit run mypy --all-files`
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.17.0
+    hooks:
+      - id: mypy
+        args: ["--config-file", "pyproject.toml", "--ignore-missing-imports"]
+        additional_dependencies: [types-toml, types-requests]
+
 
   # - repo: local
   #   hooks:
-  #    - id: pytest # pytest is a pre-commit hook
-  #      name: pytest
-  #      entry: pytest
-  #      language: system
-  #      types: [python]
-  #      exclude: ^venv/ ^.git/ ^.vscode/ ^.DS_Store
+  #     - id: pylint
+  #       name: pylint
+  #       entry: pylint
+  #       language: system
+  #       types: [python]
+  #       require_serial: true
+  #       args:
+  #         [
+  #           "-rn", # Only display messages
+  #           "-sn", # Don't display the score
+  #           "--extension-pkg-whitelist=scipy",
+  #         ]

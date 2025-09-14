@@ -411,7 +411,7 @@ class MALASampler(object):
 
 
 if __name__ == "__main__":
-    __spec__ = None
+    __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
@@ -432,7 +432,7 @@ if __name__ == "__main__":
         "--target_file",
         default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
-    parser.add_argument("--thinning_factor", type=int, default=1)
+    parser.add_argument("--thin", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -450,7 +450,7 @@ if __name__ == "__main__":
     out_format = args.out_format
     samples_file = args.samples_file
     target_file = args.target_file
-    thinning_factor = args.thinning_factor
+    thin = args.thin
 
     posterior_dir = f"{emulator_dir}/posterior_samples/"
     if not os.path.isdir(posterior_dir):
@@ -460,7 +460,7 @@ if __name__ == "__main__":
         data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
-        thinning_factor=thinning_factor,
+        thin=thin,
         target_corr_threshold=0,
         target_error_var="velsurf_mag_error",
         target_var="velsurf_mag",
@@ -495,7 +495,7 @@ if __name__ == "__main__":
         sigma = 10
 
     rho = 1.0 / (1e4**2)
-    point_area = (dataset.grid_resolution * thinning_factor) ** 2
+    point_area = (dataset.grid_resolution * thin) ** 2
     K = point_area * rho
     sigma_hat = np.sqrt(sigma**2 / K**2)
 

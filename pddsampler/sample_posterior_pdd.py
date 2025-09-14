@@ -442,7 +442,7 @@ def draw_samples(n_samples=1_0000, random_seed=2):
 
 
 if __name__ == "__main__":
-    __spec__ = None
+    __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
     parser.add_argument("--alpha", type=float, default=0.01)

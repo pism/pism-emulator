@@ -51,21 +51,9 @@ import ssl
 import sys
 import time
 from getpass import getpass
-
-try:
-    from urllib.error import HTTPError, URLError
-    from urllib.parse import urlparse
-    from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
-except ImportError:
-    from urllib2 import (
-        HTTPCookieProcessor,
-        HTTPError,
-        Request,
-        URLError,
-        build_opener,
-        urlopen,
-    )
-    from urlparse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 short_name = "NSIDC-0670"
 version = "1"
@@ -74,7 +62,7 @@ time_end = "2015-10-31T23:59:59Z"
 bounding_box = ""
 polygon = ""
 filename_filter = ""
-url_list = []
+url_list: list[str] = []
 
 CMR_URL = "https://cmr.earthdata.nasa.gov"
 URS_URL = "https://urs.earthdata.nasa.gov"
@@ -89,11 +77,7 @@ CMR_FILE_URL = (
 def get_username():
     username = ""
 
-    # For Python 2/3 compatibility:
-    try:
-        do_input = raw_input  # noqa
-    except NameError:
-        do_input = input
+    do_input = input
 
     username = do_input("Earthdata username (or press Return to use a bearer token): ")
     return username
@@ -120,7 +104,7 @@ def get_login_credentials():
 
     try:
         info = netrc.netrc()
-        username, account, password = info.authenticators(urlparse(URS_URL).hostname)
+        username, account, password = info.authenticators(urlparse(URS_URL).hostname)  # type: ignore
         if username == "token":
             token = password
         else:
