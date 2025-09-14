@@ -1,5 +1,5 @@
 #!/bin/env python3
-# Copyright (C) 2021-23 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-25 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -410,9 +410,7 @@ class MALASampler(object):
         return X_posterior
 
 
-if __name__ == "__main__":
-    __spec__ = None  # type: ignore
-
+def main():
     parser = ArgumentParser()
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--chains", type=int, default=1)
@@ -555,3 +553,8 @@ if __name__ == "__main__":
         store=join(posterior_dir, f"X_posterior_model_{model_index}.zarr")
     )
     az.plot_trace(all_traces)
+
+
+if __name__ == "__main__":
+    __spec__ = None  # type: ignore
+    main()
