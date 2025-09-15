@@ -7,7 +7,13 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
-from tqdm.auto import tqdm
+from collections import deque
+from math import isnan
+import os
+from tqdm import tqdm  # plain tqdm (not auto/asyncio)
+
+os.environ.setdefault("TQDM_MONITOR", "0")  # disable TMonitor thread
+
 
 # -----------------------------
 # Small helper
@@ -118,6 +124,7 @@ class MALASamplerModule(pl.LightningModule):
         samples: int = 2000,
         show_progress: bool = True,
         pbar_update_every: int = 10,
+        acc_window: int = 100,
     ):
 
         super().__init__()
@@ -166,7 +173,25 @@ class MALASamplerModule(pl.LightningModule):
             persistent=False,
         )
 
-        # Numerics
+        self._pbar = None
+        self._bar_format = (
+            "{desc:<10} {percentage:3.0f}%|{bar}| "
+            "{n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}"
+        )  # rolling acceptance window for display only (smoother than EMA)
+        self.acc_window = 100
+        self._acc_hist = deque(maxlen=self.acc_window)
+
+        # Compact single-line bar; fixed fields (no rate/ETA).
+        self._bar_format = (
+            "{desc:<9}"  # 'chain 0 ' prefix
+            "{percentage:3.0f}%|{bar}| "
+            "it {n_fmt}/{total_fmt} "
+            "samp={postfix[sample]:>6} "
+            "acc={postfix[acc]:>4} "
+            "h={postfix[h]:>6} "
+            "logP={postfix[logp]:>10}"
+        )  # Numerics
+
         self._eps_beta = 1e-7
         self._eps_eig = 1e-6
         self.hessian_counter = 0
@@ -185,7 +210,6 @@ class MALASamplerModule(pl.LightningModule):
     def configure_optimizers(self):
         return None  # no training here
 
-    # ------------- Core maths -------------
     def forward(self, X: Tensor) -> Tensor:
         """Emulator wrapper; expects model(X, add_mean=True) -> log10(Y)."""
         return 10.0 ** self.emulator(X, add_mean=True)
@@ -418,6 +442,7 @@ class MALASamplerModule(pl.LightningModule):
                 h = float(math.exp(log_hbar))
                 h = min(max(h, h_min), h_max)
 
+            # compute logP for display if available
             if local is not None:
                 try:
                     logP = -float(local[0].detach().item())
@@ -425,54 +450,76 @@ class MALASamplerModule(pl.LightningModule):
                     logP = float("nan")
             else:
                 logP = float("nan")
-            self._update_bar(t, h, logP)
+
+            self._update_bar(t, s, h, logP)
 
         # (samples, dim)
         return torch.stack(kept)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_pbar"] = None  # don't pickle live bars across processes
+        return state
+
     def on_predict_start(self) -> None:
-        # one chain per process -> rank == chain id
         self._rank = int(getattr(self.trainer, "global_rank", 0))
-        if not self.show_progress:
-            return
-
-        # total iterations (burn + samples)
         self._total_steps = int(self.burn + self.samples)
-        # a dedicated line per rank
-        self._pbar = tqdm(
-            total=self._total_steps,
-            position=self._rank,
-            leave=True,
-            dynamic_ncols=True,
-            desc=f"chain {self._rank}",
-        )
-
-    def on_predict_end(self) -> None:
-        if self._pbar is not None:
-            try:
-                self._pbar.close()
-            finally:
-                self._pbar = None
-
-    def _update_bar(self, t: int, h: float, logp: float) -> None:
-        """Update tqdm bar every `pbar_update_every` steps."""
-        if self._pbar is None:
+        if not self.show_progress:
+            self._pbar = None
             return
-        # Display post-burn sample index; '—' during burn-in
-        if t < self.burn:
-            sample_str = "—"
-        else:
-            sample_str = str(t - self.burn + 1)
+        try:
+            self._pbar = tqdm(
+                total=self._total_steps,
+                position=self._rank,  # one line per rank
+                leave=True,
+                ncols=100,  # fixed width (no terminal probing)
+                desc=f"chain {self._rank}",
+                file=sys.stderr,  # <<< KEY: write to stderr, not stdout
+                miniters=1,
+                mininterval=0.1,
+                smoothing=0,
+                disable=False,
+                bar_format="{desc} {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} "
+                "[{elapsed}<{remaining}, {rate_fmt}] {postfix}",
+            )
+            # Make sure destructor has these even if tqdm hiccups
+            if not hasattr(self._pbar, "start_t"):
+                self._pbar.start_t = time.time()
+            if not hasattr(self._pbar, "last_print_t"):
+                self._pbar.last_print_t = self._pbar.start_t
+        except Exception:
+            self._pbar = None  # fall back to silent mode
 
+    def _update_bar(self, t: int, acc_ema: float, h: float, logp: float) -> None:
+        p = self._pbar
+        if p is None:
+            return
+        sample_str = "—" if t < self.burn else str(t - self.burn + 1)
         if (t % self.pbar_update_every) == 0 or (t + 1) == self._total_steps:
-            self._pbar.set_postfix(
-                sample=sample_str,
-                h=f"{h:.3f}",
-                logp=f"{logp:.3f}",
+            # string postfix avoids tqdm’s dict formatter pitfalls
+            p.set_postfix_str(
+                f"smp={sample_str} acc={acc_ema:.2f} h={h:.3f} logp={logp:.1f}",
                 refresh=False,
             )
-        # Always advance the bar by 1
-        self._pbar.update(1)
+        try:
+            p.update(1)
+        except Exception:
+            pass
+
+    def on_predict_end(self) -> None:
+        p = getattr(self, "_pbar", None)
+        if p is not None:
+            # ensure attributes exist so close() can read them
+            if not hasattr(p, "start_t"):
+                p.start_t = time.time()
+            if not hasattr(p, "last_print_t"):
+                p.last_print_t = p.start_t
+            try:
+                p.close()
+            except Exception:
+                pass
+            finally:
+                self._pbar = None
 
 
 # -----------------------------

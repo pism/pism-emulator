@@ -18,9 +18,9 @@ classifiers = [
 dynamic = ["dependencies"]
 
 [project.scripts]
-train-speed-emulator = "pism_emulator.emulators.speed.train:main"
-sample-mala = "pism_emulator.sampler.sample-mala:main"
-sample-mala-pl = "pism_emulator.sampler.sample-mala-pl:main"
+train-emulator = "pism_emulator.emulators.speed.train:main"
+sample-mala = "pism_emulator.sampler.sample_mala:main"
+sample-mala-pl = "pism_emulator.sampler.sample_mala_pl:main"
 
 [tool.setuptools.packages.find]
 include = ["pism_emulator*"]

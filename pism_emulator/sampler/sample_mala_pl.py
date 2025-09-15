@@ -30,7 +30,6 @@ import torch
 from joblib import Parallel, delayed
 from lightning import LightningModule
 from scipy.stats import beta
-from tqdm.auto import tqdm
 import matplotlib.pylab as plt
 
 from pism_emulator.datasets import PISMDatasetXRP as PISMDataset
@@ -46,6 +45,56 @@ from pism_emulator.sampler.mala import MALASamplerModule, ChainInitDataset
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import torch
+
+
+def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
+    """
+    CPU: run n_chains processes in parallel (DDP spawn).
+    GPU/MPS: run 1 process (1 chain).
+    """
+    if accelerator.lower() == "cpu":
+        devices = n_chains
+        strategy = "ddp_spawn"  # safe on macOS/Windows; uses spawn
+    else:
+        devices = 1  # one chain per (single) GPU/MPS
+        strategy = "auto"
+
+    return pl.Trainer(
+        accelerator=accelerator,
+        devices=devices,
+        strategy=strategy,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        inference_mode=False,  # we need autograd for MALA
+        num_sanity_val_steps=0,
+    )
+
+
+def run_sampling(
+    sampler: pl.LightningModule,
+    inits: torch.Tensor,  # shape (n_chains, dim), requires_grad=False
+    accelerator: str = "cpu",
+    num_workers: int = 0,
+):
+    """
+    Returns: list length == n_chains; each item is (samples, dim) tensor.
+    """
+    # IMPORTANT: detach here so Tensors can be pickled for DDP spawn
+    inits = inits.detach()
+    n_chains = inits.shape[0]
+
+    dl = DataLoader(
+        ChainInitDataset(inits),
+        batch_size=1,  # exactly one chain per process
+        shuffle=False,
+        num_workers=num_workers,  # keep 0 on macOS/Windows; >0 ok on Linux
+        persistent_workers=False,
+    )
+
+    trainer = make_trainer_for_chains(accelerator, n_chains)
+    outs = trainer.predict(sampler, dl)
+    return outs
 
 
 def main():
@@ -177,6 +226,7 @@ def main():
         accelerator=accelerator,
         devices=chains,
         logger=False,
+        strategy="ddp_spawn",
         enable_progress_bar=False,
         enable_checkpointing=False,
         inference_mode=False,  # <-- IMPORTANT
