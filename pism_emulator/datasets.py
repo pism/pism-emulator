@@ -55,37 +55,8 @@ def _read_one_nc4(
     eps: float,
 ) -> NDArray[np.float32]:
     """
-    Read a NetCDF variable quickly and extract thinned values at given nodes.
-
-    Uses ``netCDF4`` directly (no xarray). Disables auto mask/scale and then
-    manually masks values equal to ``_FillValue``/``missing_value`` and anything
-    outside ``valid_min``/``valid_max`` (if present). NaNs are replaced by ``eps``,
-    and values are gathered via a flat index.
-
-    Parameters
-    ----------
-    path : str or os.PathLike[str]
-        NetCDF file path.
-    var : str
-        Variable name (must have ``y`` and ``x`` dims).
-    step : int
-        Stride for thinning along ``y`` and ``x`` (>=1).
-    idx1d : ndarray of intp, shape (N,)
-        Flat indices on the thinned grid (into ``arr.ravel()``).
-    eps : float
-        Replacement for missing values (NaNs).
-
-    Returns
-    -------
-    ndarray of float32, shape (N,)
-        Selected values at ``idx1d``.
-
-    Raises
-    ------
-    ValueError
-        If ``step < 1``.
-    KeyError
-        If the variable lacks ``y`` and ``x`` dimensions.
+    CF-compatible fast reader: auto mask/scale ON, masked->NaN, then NaN->eps.
+    Matches xarray ``open_dataset(..., decode_cf=True)`` semantics used in PISMDataset.
     """
     if step < 1:
         raise ValueError(f"'step' must be >= 1, got {step}")
@@ -93,9 +64,8 @@ def _read_one_nc4(
     ds = nc.Dataset(path, "r")
     try:
         v = ds.variables[var]
-        # No automatic conversions; we handle missing/valid manually
-        v.set_auto_mask(False)
-        v.set_auto_scale(False)
+        # Match xarray CF decode: enable both masking and scale/offset application
+        v.set_auto_maskandscale(True)
 
         dims: tuple[str, ...] = v.dimensions
         sizes = {d: ds.dimensions[d].size for d in dims}
@@ -115,38 +85,24 @@ def _read_one_nc4(
                 slicers.append(slice(0, None, step))
             else:
                 n = sizes[d]
-                slicers.append(0 if n == 1 else slice(0, 1))
-
+                slicers.append(0 if n == 1 else slice(0, 1))  # first entry if >1
         arr = v[tuple(slicers)]
+        # If a non-(y,x) leading axis of length 1 was kept, squeeze it now
         if arr.ndim > 2:
             arr = arr.reshape(arr.shape[-2], arr.shape[-1])  # (y, x)
 
-        # --- handle _FillValue / missing_value and valid range ---
+        # Convert MaskedArray → ndarray with NaNs where masked, then to float32
+        if np.ma.isMaskedArray(arr):
+            arr = np.ma.filled(arr, np.nan)
         arr = np.asarray(arr, dtype=np.float32, order="C")
-
-        # _FillValue or missing_value can be scalar or array; coerce to scalar float32
-        fill_val = None
-        if "_FillValue" in v.ncattrs():
-            fill_val = np.float32(np.array(v.getncattr("_FillValue")).ravel()[0])
-        elif "missing_value" in v.ncattrs():
-            fill_val = np.float32(np.array(v.getncattr("missing_value")).ravel()[0])
-        if fill_val is not None:
-            # equality is fine for sentinel values like -2e9; otherwise use isclose
-            arr[arr == fill_val] = np.nan
-
-        # valid_min / valid_max
-        if "valid_min" in v.ncattrs():
-            vmin = float(np.array(v.getncattr("valid_min")).ravel()[0])
-            arr[arr < vmin] = np.nan
-        if "valid_max" in v.ncattrs():
-            vmax = float(np.array(v.getncattr("valid_max")).ravel()[0])
-            arr[arr > vmax] = np.nan
 
     finally:
         ds.close()
 
-    # Replace NaNs with eps (in place), then gather
+    # Replace NaNs with epsilon, exactly like your old code
     np.nan_to_num(arr, nan=eps, copy=False)
+
+    # Gather sparse nodes in C-order (same as data[self.sparse_idx_2d].flatten())
     out = np.take(arr.ravel(), idx1d)
     return cast(NDArray[np.float32], out)
 
@@ -412,25 +368,23 @@ class PISMDatasetXRP(torch.utils.data.Dataset):
         end_time = time()
         print(f"Reading training data took {(end_time-start_time):.0f}s")
 
-        # Filter by threshold
+        # Filter by threshold (same as old code: on linear scale)
         good = response.max(axis=1) < float(self.threshold)
 
-        # Log10 transform w/out extra allocations
+        # Log10 transform EXACTLY like the old code
         if self.log_y:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                # write into response in place to avoid a new array
-                np.log10(response, out=response, where=(response > 0))
-                # zeros where <=0 already handled by where; fill -inf with 0
-                response[~np.isfinite(response)] = 0.0
+            response = np.log10(response)
+            response[np.isneginf(response)] = 0  # -inf -> 0
 
-        # Torch conversion
-        Y = torch.from_numpy(response[good])
+        # Torch conversion + clamp negatives to 0 (old code behavior)
         X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
+        Y = torch.from_numpy(response.astype(np.float32)[good])
+        Y[Y < 0] = 0  # clamp negative logs (values < 1) to 0
 
         self.X_keys = list(samples.columns)
         self.X_mean = X.mean(dim=0)
         self.X_std = X.std(dim=0)
-        self.X = (X - self.X_mean) / (self.X_std + 1e-12) if self.normalize_x else X
+        self.X = (X - self.X_mean) / (self.X_std) if self.normalize_x else X
         self.Y = Y
 
         self.n_parameters = self.X.shape[1]

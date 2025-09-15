@@ -442,7 +442,7 @@ class TorchPDDModel(torch.nn.modules.Module):
         temp_rain: float = 0.0,
         interpolate_rule: str = "linear",
         interpolate_n: int = 12,
-        device="cpu",
+        device="auto",
         all_vars: bool = False,
         *args,
         **kwargs,

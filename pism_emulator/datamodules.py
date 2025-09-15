@@ -1,5 +1,4 @@
 import random
-from typing import Optional
 
 import lightning as pl
 import numpy as np
@@ -38,7 +37,7 @@ class PISMDataModule(pl.LightningDataModule):
         self.train_size = train_size
         self.num_workers = num_workers
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str | None = None):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
 
@@ -54,7 +53,6 @@ class PISMDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
             worker_init_fn=seed_worker,
             generator=g,
         )
@@ -64,7 +62,6 @@ class PISMDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True,
             worker_init_fn=seed_worker,
             generator=g,
         )
@@ -74,7 +71,6 @@ class PISMDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
             worker_init_fn=seed_worker,
             generator=g,
         )
@@ -165,7 +161,7 @@ class PDDDataModule(pl.LightningDataModule):
         self.train_size = train_size
         self.num_workers = num_workers
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str | None = None):
         all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
         self.all_data = all_data
 
@@ -180,7 +176,6 @@ class PDDDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
             worker_init_fn=seed_worker,
             generator=g,
         )

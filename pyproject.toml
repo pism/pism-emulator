@@ -19,7 +19,8 @@ dynamic = ["dependencies"]
 
 [project.scripts]
 train-speed-emulator = "pism_emulator.emulators.speed.train:main"
-sample-speed-emulator = "pism_emulator.emulators.speed.sample:main"
+sample-mala = "pism_emulator.sampler.sample-mala:main"
+sample-mala-pl = "pism_emulator.sampler.sample-mala-pl:main"
 
 [tool.setuptools.packages.find]
 include = ["pism_emulator*"]
