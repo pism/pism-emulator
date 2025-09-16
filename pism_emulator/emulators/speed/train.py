@@ -30,6 +30,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import TQDMProgressBar
 from scipy.stats import dirichlet
+from tqdm import tqdm
 
 from pism_emulator.datamodules import PISMDataModule
 from pism_emulator.datasets import PISMDataset
