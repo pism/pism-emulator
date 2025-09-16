@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from typing import Callable, Iterable, Literal, Optional, Sequence, Tuple
 import math
+import os
+import sys
+from pathlib import Path
+from typing import Callable, Iterable, Literal, Optional, Sequence, Tuple
+
 import numpy as np
+import pytorch_lightning as pl
 import torch
 from torch import Tensor
-from torch.utils.data import Dataset, DataLoader
-import pytorch_lightning as pl
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from pathlib import Path
-import sys
-import os
 
 # -----------------------------
 # Small helper
@@ -170,7 +171,7 @@ class MALASamplerModule(pl.LightningModule):
         self.pbar_update_every = int(pbar_update_every)
         self._pbar = None
         self._rank = 0
-        self._total_steps = None
+        self._total_steps = 0
         self.burn = burn
         self.samples = samples
         self.delayed_accept = delayed_accept
@@ -428,7 +429,7 @@ class MALASamplerModule(pl.LightningModule):
         torch.manual_seed(s)
         np.random.seed(s % (2**32))
 
-        self._total_steps = int(self.burn + self.samples)
+        self._total_steps = self.burn + self.samples
 
         # Pretty, stable single-line bar per rank
         bar_fmt = (

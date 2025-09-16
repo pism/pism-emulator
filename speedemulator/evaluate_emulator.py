@@ -48,7 +48,6 @@ if __name__ == "__main__":
     __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
-    parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=50)
     parser.add_argument("--mode", choices=["train", "validation"], default="validation")
@@ -67,12 +66,12 @@ if __name__ == "__main__":
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--sample_size", type=int, default=80)
+    parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
     hparams = vars(args)
 
-    data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     num_models = args.num_models
     samples_file = args.samples_file
@@ -85,12 +84,13 @@ if __name__ == "__main__":
         validation = False
     else:
         validation = True
+    training_files = args.TRAINING_FILES
 
     torch.manual_seed(0)
     rng = np.random.default_rng(2021)
 
     dataset = PISMDataset(
-        data_dir=data_dir,
+        training_files=training_files,
         samples_file=samples_file,
         target_file=target_file,
         target_var=target_var,

@@ -7,7 +7,23 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 
 
-def seed_worker(worker_id):
+def seed_worker(worker_id: int) -> None:
+    """Seed NumPy and Python RNGs for a DataLoader worker.
+
+    Parameters
+    ----------
+    worker_id : int
+        The integer id of the worker process/thread. The value is not
+        directly used; it exists to match the signature expected by
+        ``DataLoader(worker_init_fn=...)``.
+
+    Notes
+    -----
+    This function uses :func:`torch.initial_seed` to derive a 32-bit worker
+    seed, then seeds both :mod:`numpy.random` and :mod:`random` so that
+    each worker has a reproducible, independent RNG stream.
+    """
+    # Derive a 32-bit seed from PyTorch's worker-specific seed
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
@@ -124,7 +140,7 @@ class PISMDataModule(pl.LightningDataModule):
             lamda, V = torch.linalg.eig(S)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        print(f"...using the first {q} eigen values")
+        print(f"    using the first {q} eigen values")
         lamda_truncated = lamda.detach()
         V = V.detach()
         V_hat = V @ torch.diag(torch.sqrt(lamda))
