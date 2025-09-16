@@ -30,6 +30,7 @@ import torch
 from joblib import Parallel, delayed
 from lightning import LightningModule
 from scipy.stats import beta
+from tqdm.auto import tqdm
 import matplotlib.pylab as plt
 
 from pism_emulator.datasets import PISMDatasetXRP as PISMDataset
@@ -45,6 +46,56 @@ from pism_emulator.sampler.mala import MALASamplerModule, ChainInitDataset
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import torch
+from pytorch_lightning.callbacks import BasePredictionWriter
+
+from pathlib import Path
+import torch
+import pytorch_lightning as pl
+
+
+class DiskPredictionWriter(BasePredictionWriter):
+    """Write each chain's samples to disk during predict (works with DDP spawn/fork)."""
+
+    def __init__(self, out_dir: str, write_interval: str = "batch"):
+        # write_interval: "batch" | "epoch"
+        super().__init__(write_interval=write_interval)
+        self.out_dir = Path(out_dir)
+
+    def write_on_batch_end(  # called every batch when write_interval="batch"
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        prediction,  # whatever predict_step returned
+        batch_indices,
+        batch,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        if prediction is None:
+            return
+
+        # Lightning may give a single dict or a list of dicts
+        preds = prediction if isinstance(prediction, (list, tuple)) else [prediction]
+        rank = int(getattr(trainer, "global_rank", 0))
+
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        for p in preds:
+            chain = int(p["chain"])
+            samples = p["samples"]  # (S, D) CPU tensor
+            path = self.out_dir / f"rank{rank:02d}_chain{chain:06d}.pt"
+            torch.save({"chain": chain, "rank": rank, "samples": samples}, path)
+
+
+def load_pred_dir(pred_dir: str, expected_chains: int | None = None) -> torch.Tensor:
+    pred_dir = Path(pred_dir)
+    files = sorted(pred_dir.glob("rank*_chain*.pt"))
+    records = [torch.load(f) for f in files]
+    if not records:
+        raise RuntimeError(f"No prediction files found in {pred_dir}")
+    records.sort(key=lambda r: r["chain"])
+    if expected_chains is not None and len(records) != expected_chains:
+        raise RuntimeError(f"Expected {expected_chains} chains, found {len(records)}.")
+    return torch.stack([r["samples"] for r in records])  # (C, S, D)
 
 
 def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
@@ -52,7 +103,7 @@ def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
     CPU: run n_chains processes in parallel (DDP spawn).
     GPU/MPS: run 1 process (1 chain).
     """
-    if accelerator.lower() == "cpu":
+    if accelerator.lower() == "cpu" and n_chains > 1:
         devices = n_chains
         strategy = "ddp_spawn"  # safe on macOS/Windows; uses spawn
     else:
@@ -65,36 +116,62 @@ def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
         strategy=strategy,
         logger=False,
         enable_checkpointing=False,
-        enable_progress_bar=False,
         inference_mode=False,  # we need autograd for MALA
         num_sanity_val_steps=0,
     )
 
 
-def run_sampling(
-    sampler: pl.LightningModule,
-    inits: torch.Tensor,  # shape (n_chains, dim), requires_grad=False
-    accelerator: str = "cpu",
-    num_workers: int = 0,
-):
-    """
-    Returns: list length == n_chains; each item is (samples, dim) tensor.
-    """
-    # IMPORTANT: detach here so Tensors can be pickled for DDP spawn
-    inits = inits.detach()
+from torch.utils.data import DataLoader
+
+
+def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
+    # Dataset should yield (chain_id, init_vector)
+    dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False)
+
     n_chains = inits.shape[0]
+    multi_cpu = accelerator == "cpu" and n_chains > 1
 
-    dl = DataLoader(
-        ChainInitDataset(inits),
-        batch_size=1,  # exactly one chain per process
-        shuffle=False,
-        num_workers=num_workers,  # keep 0 on macOS/Windows; >0 ok on Linux
-        persistent_workers=False,
-    )
+    if multi_cpu:
+        # DDP spawn/fork: must NOT use return_predictions=True
+        trainer = pl.Trainer(
+            accelerator="cpu",
+            devices=n_chains,
+            strategy="ddp_spawn",
+            logger=False,
+            enable_checkpointing=False,
+            inference_mode=False,  # you need autograd
+            num_sanity_val_steps=0,
+            enable_progress_bar=False,  # use your own per-rank tqdm
+            callbacks=[DiskPredictionWriter(tmp_dir, write_interval="batch")],
+        )
+        _ = trainer.predict(sampler, dl, return_predictions=False)
 
-    trainer = make_trainer_for_chains(accelerator, n_chains)
-    outs = trainer.predict(sampler, dl)
-    return outs
+        # Load everything that each rank just wrote:
+        from pathlib import Path
+
+        files = sorted(Path(tmp_dir).glob("rank*_chain*.pt"))
+        if not files:
+            raise RuntimeError(f"No prediction files found in {tmp_dir}")
+        records = [torch.load(f) for f in files]
+        records.sort(key=lambda r: r["chain"])
+        chains = torch.stack([r["samples"] for r in records])  # (C, S, D)
+    else:
+        # single GPU or single CPU process
+        trainer = pl.Trainer(
+            accelerator=accelerator,
+            devices=1,
+            logger=False,
+            enable_checkpointing=False,
+            inference_mode=False,
+            num_sanity_val_steps=0,
+            enable_progress_bar=False,
+        )
+        outs = trainer.predict(sampler, dl, return_predictions=True)
+        outs = [o for o in outs if o is not None]
+        outs.sort(key=lambda d: int(d["chain"]))
+        chains = torch.stack([d["samples"] for d in outs])
+
+    return chains
 
 
 def main():
@@ -205,7 +282,7 @@ def main():
         delayed_accept=False,
         hess_refresh=1,
         burn=1000,
-        samples=3000,
+        samples=samples,
         h0=0.1,
         acc_target=0.25,
     )
@@ -220,21 +297,22 @@ def main():
     )
 
     inits = torch.stack([X_map.clone() for _ in range(chains)])
-    dl = DataLoader(ChainInitDataset(inits), batch_size=1, num_workers=0, shuffle=False)
+    chains = run_sampling(sampler, inits, accelerator=accelerator)
+    print(chains)
+    # dl = DataLoader(ChainInitDataset(inits), batch_size=1, num_workers=0, shuffle=False)
 
-    trainer = pl.Trainer(
-        accelerator=accelerator,
-        devices=chains,
-        logger=False,
-        strategy="ddp_spawn",
-        enable_progress_bar=False,
-        enable_checkpointing=False,
-        inference_mode=False,  # <-- IMPORTANT
-        num_sanity_val_steps=0,  # optional: skip sanity steps
-    )
-    chains = trainer.predict(
-        sampler, dl
-    )  # list length = n_chains, each (samples, dim) tensor
+    # trainer = pl.Trainer(
+    #     accelerator=accelerator,
+    #     devices=chains,
+    #     logger=False,
+    #     enable_progress_bar=False,
+    #     enable_checkpointing=False,
+    #     inference_mode=False,  # <-- IMPORTANT
+    #     num_sanity_val_steps=0,  # optional: skip sanity steps
+    # )
+    # chains = trainer.predict(
+    #     sampler, dl
+    # )  # list length = n_chains, each (samples, dim) tensor
     print(time.process_time() - start)
 
     # result: iterable of chains, each array (draw, dim)
