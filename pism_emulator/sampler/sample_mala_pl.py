@@ -286,13 +286,12 @@ def main():
 
     X_map = sampler.find_MAP(
         X_0,
-        X_keys=dataset.X_keys,  # optional pretty printing
-        X_mean=dataset.X_mean.cpu(),
-        X_std=dataset.X_std.cpu(),
         n_iters=25,
         lr=0.1,
     )
     X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
+    X_mean = np.asarray(dataset.X_mean.cpu().numpy(), dtype=np.float32)
+    X_std = np.asarray(dataset.X_std.cpu().numpy(), dtype=np.float32)
 
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     chains = run_sampling(sampler, inits, accelerator=accelerator)

@@ -9,6 +9,8 @@ from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 from tqdm import tqdm
 from pathlib import Path
+import sys
+import os
 
 # -----------------------------
 # Small helper
@@ -321,9 +323,6 @@ class MALASamplerModule(pl.LightningModule):
     def find_MAP(
         self,
         X: torch.Tensor,
-        X_keys: Optional[Sequence[str]] = None,
-        X_mean: Optional[torch.Tensor] = None,
-        X_std: Optional[torch.Tensor] = None,
         n_iters: int = 25,
         lr: float = 0.1,
     ) -> torch.Tensor:
@@ -345,14 +344,6 @@ class MALASamplerModule(pl.LightningModule):
             last_val = float(val.detach())
             self.zero_grad(set_to_none=True)
 
-            if i == n_iters - 1:
-                log_post = -last_val  # report log posterior
-                if X_keys is not None and X_mean is not None and X_std is not None:
-                    xm = (X.detach().cpu() * X_std + X_mean).flatten().tolist()
-                    lines = "\n".join(f"{k}: {v:.4f}" for k, v in zip(X_keys, xm))
-                    print(f"iter: {i:4d} | logP: {log_post:.3f}\n{lines}")
-                else:
-                    print(f"iter: {i:4d} | logP: {log_post:.3f}")
         return X
 
     # ------------- Predict loop (one chain per batch item) -------------
@@ -432,49 +423,66 @@ class MALASamplerModule(pl.LightningModule):
     def on_predict_start(self) -> None:
         # one chain per process -> rank == chain id
         self._rank = int(getattr(self.trainer, "global_rank", 0))
+
         s = self._base_seed + 1000 * self._rank + 12345
         torch.manual_seed(s)
         np.random.seed(s % (2**32))
-        if not self.show_progress:
-            return
 
-        # total iterations (burn + samples)
         self._total_steps = int(self.burn + self.samples)
-        # a dedicated line per rank
+
+        # Pretty, stable single-line bar per rank
+        bar_fmt = (
+            f"chain {self._rank}: "
+            "{percentage:>3.0f}%|{bar}| {n_fmt}/{total_fmt} "
+            "[{elapsed}<{remaining}, {rate_fmt}] {postfix}"
+        )
+
+        # If stdout isn’t a TTY (e.g. piping to a file), suppress bars
+        disable_bars = not sys.stdout.isatty() or not self.show_progress
+
         self._pbar = tqdm(
             total=self._total_steps,
-            position=self._rank,
+            position=self._rank,  # each rank gets its own line
             leave=True,
-            dynamic_ncols=True,
-            desc=f"chain {self._rank}",
+            ncols=120,  # fixed width avoids flicker
+            dynamic_ncols=False,
+            ascii=True,  # safe in multi-proc terminals
+            bar_format=bar_fmt,
+            mininterval=0.25,  # throttle refresh rate
+            disable=disable_bars,
         )
 
     def on_predict_end(self) -> None:
-        if self._pbar is not None:
+        p = self._pbar
+        self._pbar = None
+        if p is not None:
             try:
-                self._pbar.disable = True
-                self._pbar.close()
-            finally:
-                self._pbar = None
+                # final refresh; then close without tripping tqdm internals
+                p.set_postfix_str("done", refresh=True)
+                p.refresh()
+            except Exception:
+                pass
+            try:
+                p.disable = True
+                p.close()
+            except Exception:
+                pass
 
     def _update_bar(self, t: int, h: float, logp: float) -> None:
         """Update tqdm bar every `pbar_update_every` steps."""
         if self._pbar is None:
             return
-        # Display post-burn sample index; '—' during burn-in
-        if t < self.burn:
-            sample_str = "—"
-        else:
-            sample_str = str(t - self.burn + 1)
 
+        # show post-burn sample index; ‘—’ during burn
+        sample_str = "—" if t < self.burn else f"{t - self.burn + 1}"
+
+        # update postfix only occasionally to reduce contention
         if (t % self.pbar_update_every) == 0 or (t + 1) == self._total_steps:
-            self._pbar.set_postfix(
-                sample=sample_str,
-                h=f"{h:.3f}",
-                logp=f"{logp:.3f}",
-                refresh=False,
+            # single string postfix is more robust than dict
+            self._pbar.set_postfix_str(
+                f"h={h:.3f}  logp={logp:.3f}  sample={sample_str}", refresh=True
             )
-        # Always advance the bar by 1
+
         self._pbar.update(1)
 
 
