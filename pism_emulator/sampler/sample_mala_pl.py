@@ -121,12 +121,9 @@ def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
     )
 
 
-from torch.utils.data import DataLoader
-
-
 def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
     # Dataset should yield (chain_id, init_vector)
-    dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False)
+    dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False, num_workers=0)
 
     n_chains = inits.shape[0]
     multi_cpu = accelerator == "cpu" and n_chains > 1
@@ -295,37 +292,34 @@ def main():
         n_iters=25,
         lr=0.1,
     )
+    X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
 
-    inits = torch.stack([X_map.clone() for _ in range(chains)])
+    inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     chains = run_sampling(sampler, inits, accelerator=accelerator)
-    print(chains)
-    # dl = DataLoader(ChainInitDataset(inits), batch_size=1, num_workers=0, shuffle=False)
-
-    # trainer = pl.Trainer(
-    #     accelerator=accelerator,
-    #     devices=chains,
-    #     logger=False,
-    #     enable_progress_bar=False,
-    #     enable_checkpointing=False,
-    #     inference_mode=False,  # <-- IMPORTANT
-    #     num_sanity_val_steps=0,  # optional: skip sanity steps
-    # )
-    # chains = trainer.predict(
-    #     sampler, dl
-    # )  # list length = n_chains, each (samples, dim) tensor
     print(time.process_time() - start)
 
-    # result: iterable of chains, each array (draw, dim)
-    arr = np.stack(chains, axis=0)  # (chain, draw, dim)
+    chains_np = [np.asarray(c) for c in chains]  # each (S, D)
+    arr = np.stack(chains_np, axis=0)  # (C, S, D)
 
-    # Denormalize ONCE (no in-place *= / += in a loop)
+    # Denorm once
     X_mean = np.asarray(dataset.X_mean.cpu().numpy(), dtype=np.float32)
     X_std = np.asarray(dataset.X_std.cpu().numpy(), dtype=np.float32)
     arr_denorm = arr * X_std[None, None, :] + X_mean[None, None, :]
 
-    # Build one InferenceData with all chains
+    C, S, D = arr_denorm.shape
+    coords = {"chain": np.arange(C), "draw": np.arange(S)}
+    dims = {name: ["chain", "draw"] for name in dataset.X_keys}
+
     posterior = {name: arr_denorm[:, :, i] for i, name in enumerate(dataset.X_keys)}
-    idata = az.from_dict(posterior=posterior)  # infers chain/draw from (C, S)
+
+    idata = az.from_dict(
+        posterior=posterior,
+        coords=coords,
+        dims=dims,
+    )
+
+    # (Optional) sanity check
+    print("posterior dims:", idata.posterior.sizes)  # should show chain=C, draw=S
 
     # Save to Zarr (overwrite)
     out_dir = Path(posterior_dir)

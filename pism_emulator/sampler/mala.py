@@ -110,6 +110,8 @@ class MALASamplerModule(pl.LightningModule):
         samples: int = 2000,
         show_progress: bool = True,
         pbar_update_every: int = 10,
+        seed: int | None = None,
+        **kwargs,
     ):
 
         super().__init__()
@@ -173,6 +175,7 @@ class MALASamplerModule(pl.LightningModule):
         self.metric_mode = metric_mode
         self._step_count = 0
         self.hess_refresh = hess_refresh
+        self._base_seed = 0 if seed is None else int(seed)
 
     def configure_optimizers(self):
         return None  # no training here
@@ -429,6 +432,9 @@ class MALASamplerModule(pl.LightningModule):
     def on_predict_start(self) -> None:
         # one chain per process -> rank == chain id
         self._rank = int(getattr(self.trainer, "global_rank", 0))
+        s = self._base_seed + 1000 * self._rank + 12345
+        torch.manual_seed(s)
+        np.random.seed(s % (2**32))
         if not self.show_progress:
             return
 
