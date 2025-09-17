@@ -87,7 +87,9 @@ def main():
             )
         ),
     )
-    parser.add_argument("--strategy", choices=["ddp_spawn", "auto"], default="auto")
+    parser.add_argument(
+        "--strategy", choices=["ddp_spawn", "ddp", "auto"], default="auto"
+    )
     parser.add_argument(
         "--target_file",
         default=abspath(
