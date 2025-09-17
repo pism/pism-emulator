@@ -181,7 +181,7 @@ class DNNEmulator(pl.LightningModule):
     def add_model_specific_args(parent_parser: ArgumentParser) -> ArgumentParser:
         parser = parent_parser.add_argument_group("DNNEmulator")
         parser.add_argument("--width", type=int, default=256)
-        parser.add_argument("--depth", type=int, default=6)
+        parser.add_argument("--depth", type=int, default=4)
         parser.add_argument("--dropout", type=float, default=0.1)
         parser.add_argument(
             "--norm", type=str, default="batch", choices=["batch", "layer", "none"]

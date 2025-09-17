@@ -31,7 +31,7 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
 
 from pism_emulator.datasets import PISMDataset
-from pism_emulator.nnemulator import NNEmulator
+from pism_emulator.emulators.nnemulator import NNEmulator
 from pism_emulator.utils import param_keys_dict as keys_dict
 
 
@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=50)
+    parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
         "--samples_file",

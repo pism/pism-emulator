@@ -87,6 +87,7 @@ def main():
             )
         ),
     )
+    parser.add_argument("--emulator", choices=["ddp_spawn", "auto"], default="auto")
     parser.add_argument(
         "--target_file",
         default=abspath(
@@ -125,6 +126,7 @@ def main():
     max_epochs = args.max_epochs
     q = args.q
     samples_file = args.samples_file
+    strategy = args.strategy
     target_file = args.target_file
     target_var = args.target_var
     target_error_var = args.target_error_var
@@ -219,6 +221,7 @@ def main():
         num_sanity_val_steps=0,
         accelerator=accelerator,
         devices=devices,
+        strategy=strategy,
     )
     if train_size == 1.0:
         train_loader = data_loader.train_all_loader
