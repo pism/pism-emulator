@@ -34,7 +34,7 @@ from tqdm import tqdm
 
 from pism_emulator.datamodules import PISMDataModule
 from pism_emulator.datasets import PISMDataset
-from pism_emulator.emulators.nnemulator import NNEmulator
+from pism_emulator.emulators.nnemulator import NNEmulator, DNNEmulator
 from pism_emulator.utils import plot_eigenglaciers
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
@@ -72,9 +72,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--devices", default="auto")
-    parser.add_argument(
-        "--emulator", choices=["NNEmulator", "DNNEmulator"], default="NNEmulator"
-    )
+    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
@@ -104,7 +102,16 @@ def main():
     parser.add_argument("--thin", type=int, default=1)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    parser = NNEmulator.add_model_specific_args(parser)
+    _args = parser.parse_args()
+    emulator = _args.emulator
+    if emulator == "DNN":
+        Emulator = DNNEmulator
+    elif emulator == "NN":
+        Emulator = NNEmulator
+    else:
+        print(f"Emulator {emulator} not supported")
+
+    parser = Emulator.add_model_specific_args(parser)
     args = parser.parse_args()
     hparams = vars(args)
 
@@ -195,7 +202,7 @@ def main():
     timer = Timer()
     callbacks.append(timer)
 
-    e = NNEmulator(
+    e = Emulator(
         n_parameters,
         n_eigenglaciers,
         V_hat,
