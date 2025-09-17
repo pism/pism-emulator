@@ -96,20 +96,26 @@ class DNNEmulator(pl.LightningModule):
 
     def __init__(
         self,
-        n_parameters: int,
-        n_eigenglaciers: int,
-        V_hat: Tensor,
+        n_parameters,
+        n_eigenglaciers,
+        V_hat,
         F_mean: Tensor,
-        area: Tensor,
-        hparams: Any,
-        *args: Any,
-        **kwargs: Any,
+        area,
+        hparams,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(hparams)
+        self.save_hyperparameters(
+            ignore=["n_parameters", "n_eigenglaciers", "V_hat", "F_mean", "area"]
+        )
+
+        hp = self.hparams["hparams"]
+        if isinstance(hp, dict):
+            self.hparams.update(hp)
+        elif hasattr(hp, "__dict__"):
+            self.hparams.update(vars(hp))
 
         width: int = int(self.hparams.get("width", 256))
-        depth: int = int(self.hparams.get("depth", 6))
+        depth: int = int(self.hparams.get("depth", 4))
         p_drop: float = float(self.hparams.get("dropout", 0.1))
         norm: str = str(self.hparams.get("norm", "batch"))
         activation: str = str(self.hparams.get("activation", "relu"))
@@ -259,20 +265,6 @@ class DNNEmulator(pl.LightningModule):
         )
         return {"loss": loss}
 
-    def on_after_backward(self):
-        if self.global_rank == 0:
-            unused = [
-                n
-                for n, p in self.named_parameters()
-                if p.requires_grad and p.grad is None
-            ]
-            if unused:
-                print(
-                    "UNUSED PARAMS THIS STEP:",
-                    unused[:10],
-                    "..." if len(unused) > 10 else "",
-                )
-
 
 class NNEmulator(pl.LightningModule):
     def __init__(
@@ -283,15 +275,21 @@ class NNEmulator(pl.LightningModule):
         F_mean,
         area,
         hparams,
-        *args,
-        **kwargs,
     ):
         super().__init__()
-        self.save_hyperparameters(hparams)
-        n_hidden_1 = self.hparams.n_hidden_1
-        n_hidden_2 = self.hparams.n_hidden_2
-        n_hidden_3 = self.hparams.n_hidden_3
-        n_hidden_4 = self.hparams.n_hidden_4
+        self.save_hyperparameters(
+            ignore=["n_parameters", "n_eigenglaciers", "V_hat", "F_mean", "area"]
+        )
+        hp = self.hparams["hparams"]
+        if isinstance(hp, dict):
+            self.hparams.update(hp)
+        elif hasattr(hp, "__dict__"):
+            self.hparams.update(vars(hp))
+
+        n_hidden_1 = self.hparams.get("n_hidden_1")
+        n_hidden_2 = self.hparams.get("n_hidden_2")
+        n_hidden_3 = self.hparams.get("n_hidden_3")
+        n_hidden_4 = self.hparams.get("n_hidden_4")
 
         # Inputs to hidden layer linear transformation
         self.l_1 = nn.Linear(n_parameters, n_hidden_1)
@@ -308,10 +306,9 @@ class NNEmulator(pl.LightningModule):
         self.dropout_4 = nn.Dropout(p=0.3)
         self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers, bias=False)
 
-        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
-        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
-
-        self.register_buffer("area", area)
+        self.register_buffer("V_hat", V_hat, persistent=True)
+        self.register_buffer("F_mean", F_mean, persistent=True)
+        self.register_buffer("area", area, persistent=True)
 
         self.train_ae = AreaAbsoluteError()
         self.test_ae = AreaAbsoluteError()
@@ -335,8 +332,8 @@ class NNEmulator(pl.LightningModule):
         z_3 = torch.relu(a_3) + z_2
 
         a_4 = self.l_4(z_3)
-        a_4 = self.norm_3(a_4)
-        a_4 = self.dropout_3(a_4)
+        a_4 = self.norm_4(a_4)
+        a_4 = self.dropout_4(a_4)
         z_4 = torch.relu(a_4) + z_3
 
         z_5 = self.l_5(z_4)
@@ -391,6 +388,7 @@ class NNEmulator(pl.LightningModule):
         self.log(
             "train_loss",
             self.train_ae,
+            sync_dist=True,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -398,10 +396,25 @@ class NNEmulator(pl.LightningModule):
         self.log(
             "test_loss",
             self.test_ae,
+            sync_dist=True,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
+
+    def on_after_backward(self):
+        if self.global_rank == 0:
+            unused = [
+                n
+                for n, p in self.named_parameters()
+                if p.requires_grad and p.grad is None
+            ]
+            if unused:
+                print(
+                    "UNUSED PARAMS THIS STEP:",
+                    unused[:10],
+                    "..." if len(unused) > 10 else "",
+                )
 
 
 class TorchPDDModel(torch.nn.modules.Module):
