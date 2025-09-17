@@ -105,6 +105,7 @@ def main():
 
     _args = parser.parse_args()
     emulator = _args.emulator
+    strategy = _args.strategy
     if emulator == "DNN":
         Emulator = DNNEmulator
     elif emulator == "NN":
@@ -126,7 +127,6 @@ def main():
     max_epochs = args.max_epochs
     q = args.q
     samples_file = args.samples_file
-    strategy = args.strategy
     target_file = args.target_file
     target_var = args.target_var
     target_error_var = args.target_error_var
