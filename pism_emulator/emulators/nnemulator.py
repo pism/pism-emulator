@@ -222,6 +222,7 @@ class DNNEmulator(pl.LightningModule):
         self.log(
             "train_loss",
             self.train_ae(f_pred, f, o_0, self.area),
+            sync_dist=True,
             prog_bar=True,
             on_step=False,
             on_epoch=True,
@@ -236,6 +237,7 @@ class DNNEmulator(pl.LightningModule):
         self.log(
             "val_loss",
             self.test_ae(f_pred, f, o_0, self.area),
+            sync_dist=True,
             prog_bar=True,
             on_step=False,
             on_epoch=True,
@@ -250,11 +252,26 @@ class DNNEmulator(pl.LightningModule):
         self.log(
             "test_loss",
             self.test_ae(f_pred, f, o_0, self.area),
+            sync_dist=True,
             prog_bar=True,
             on_step=False,
             on_epoch=True,
         )
         return {"loss": loss}
+
+    def on_after_backward(self):
+        if self.global_rank == 0:
+            unused = [
+                n
+                for n, p in self.named_parameters()
+                if p.requires_grad and p.grad is None
+            ]
+            if unused:
+                print(
+                    "UNUSED PARAMS THIS STEP:",
+                    unused[:10],
+                    "..." if len(unused) > 10 else "",
+                )
 
 
 class NNEmulator(pl.LightningModule):

@@ -219,6 +219,7 @@ def main():
         callbacks=callbacks,
         logger=logger,
         deterministic=True,
+        log_every_n_steps=1,
         max_epochs=max_epochs,
         num_sanity_val_steps=0,
         accelerator=accelerator,
