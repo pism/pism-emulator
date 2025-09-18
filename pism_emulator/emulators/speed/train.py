@@ -171,16 +171,15 @@ def main():
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    data_loader = PISMDataModule(
+    dm = PISMDataModule(
         X, F, omegas, omegas_0, num_workers=num_workers, batch_size=batch_size
     )
 
-    data_loader.prepare_data(q=q)
-    data_loader.setup(stage="fit")
-    n_eigenglaciers = data_loader.n_eigenglaciers
-    V_hat = data_loader.V_hat
-    F_mean = data_loader.F_mean
-    plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, q=q)
+    dm.prepare_data(q=q)
+    dm.setup(stage="fit")
+    V_hat = dm.eig.V_hat
+    F_mean = dm.eig.F_mean
+    plot_eigenglaciers(dataset, dm, model_index, emulator_dir, q=q)
     checkpoint_callback = ModelCheckpoint(
         dirpath=f"{emulator_dir}/emulator",
         filename="emulator_{model_index}",
@@ -197,7 +196,6 @@ def main():
 
     e = Emulator(
         n_parameters,
-        n_eigenglaciers,
         V_hat,
         F_mean,
         area,
@@ -215,10 +213,8 @@ def main():
         devices=devices,
         strategy=strategy,
     )
-    train_loader = data_loader.train_all_loader
-    val_loader = data_loader.val_all_loader
 
-    trainer.fit(e, train_loader, val_loader)
+    trainer.fit(e, datamodule=dm)
     rank_zero_info(f"Training took {timer.time_elapsed():.0f}s")
 
 

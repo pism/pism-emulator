@@ -226,6 +226,9 @@ class MALASamplerModule(pl.LightningModule):
         )
         H = 0.5 * (H + H.T)
 
+        _, S, V = torch.svd_lowrank(H, q=q)
+        lamda = S**2 / (n_grid_points)
+
         lam, Q = torch.linalg.eig(H)
         lam = lam.real
         Q = Q.real

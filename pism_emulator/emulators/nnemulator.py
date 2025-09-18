@@ -97,14 +97,22 @@ class DNNEmulator(pl.LightningModule):
     def __init__(
         self,
         n_parameters,
-        n_eigenglaciers,
         V_hat,
         F_mean: Tensor,
         area,
+        n_eigenglaciers: int | None = None,
         **hparams,
     ) -> None:
         super().__init__()
         flat = vars(hparams) if hasattr(hparams, "__dict__") else dict(hparams)
+
+        # infer n_eigenglaciers if not provided
+        if n_eigenglaciers is None:
+            if V_hat is None:
+                raise ValueError(
+                    "n_eigenglaciers is None and V_hat is None; cannot infer output size."
+                )
+            n_eigenglaciers = int(V_hat.shape[1])
         self.save_hyperparameters(
             {
                 **flat,

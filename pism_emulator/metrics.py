@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-25 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
