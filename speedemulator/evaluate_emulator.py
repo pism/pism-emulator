@@ -115,8 +115,8 @@ if __name__ == "__main__":
         thin=1,
         threshold=1e7,
     )
-    X = dataset.X
-    F = dataset.Y
+    X = dataset.samples.X
+    F = dataset.samples.Y
     n_members = len(F)
     if sample_size <= n_members:
         glaciers = rng.choice(range(n_members), size=sample_size, replace=False)
@@ -185,12 +185,14 @@ if __name__ == "__main__":
         )
 
         if m in plot_glaciers:
-            X_val_unscaled = X_val.squeeze() * dataset.X_std + dataset.X_mean
+            X_val_unscaled = (
+                X_val.squeeze() * dataset.samples.X_std + dataset.samples.X_mean
+            )
 
-            F_val_2d = np.zeros((dataset.ny, dataset.nx))
+            F_val_2d = np.zeros((dataset.target.ny, dataset.target.nx))
             F_val_2d.put(dataset.sparse_idx_1d, 10**F_val)
 
-            F_pred_2d = np.zeros((dataset.ny, dataset.nx))
+            F_pred_2d = np.zeros((dataset.target.ny, dataset.target.nx))
             F_pred_2d.put(dataset.sparse_idx_1d, 10**F_pred)
 
             mask = np.logical_or(F_val_2d < 0.01, F_pred_2d < 0.01)
@@ -217,7 +219,7 @@ if __name__ == "__main__":
                     "\n".join(
                         [
                             f"{keys_dict[i]}: {j:.3f}"
-                            for i, j in zip(dataset.X_keys, X_val_unscaled)
+                            for i, j in zip(dataset.samples.X_keys, X_val_unscaled)
                         ]
                     ),
                     c="k",
@@ -231,7 +233,7 @@ if __name__ == "__main__":
                     "\n".join(
                         [
                             f"{i}: {j:.3f}"
-                            for i, j in zip(dataset.X_keys, X_val_unscaled)
+                            for i, j in zip(dataset.samples.X_keys, X_val_unscaled)
                         ]
                     ),
                     c="k",

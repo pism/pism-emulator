@@ -478,9 +478,9 @@ def plot_eigenglaciers(
     )
     for k, ax in enumerate(axs.ravel()):
         V = V_hat[:, k]
-        data = np.zeros((dataset.ny, dataset.nx))
-        data.put(dataset.sparse_idx_1d, V)
-        eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
+        data = np.zeros((dataset.target.ny, dataset.target.nx))
+        data.put(dataset.target.sparse_idx_1d, V)
+        eigen_glacier = np.ma.array(data=data, mask=dataset.target.mask_2d)
         c = ax.imshow(
             eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3
         )

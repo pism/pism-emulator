@@ -151,13 +151,13 @@ def main():
         thin=thin,
         verbose=True,
     )
-
-    X = dataset.X
-    F = dataset.Y
-    area = dataset.normed_area
-    n_grid_points = dataset.n_grid_points
-    n_parameters = dataset.n_parameters
-    n_samples = dataset.n_samples
+    print(dataset)
+    X = dataset.samples.X
+    F = dataset.samples.Y
+    area = dataset.samples.normed_area
+    n_grid_points = dataset.samples.n_grid_points
+    n_parameters = dataset.samples.n_parameters
+    n_samples = dataset.samples.n_samples
 
     torch.manual_seed(0)
     np.random.seed(model_index)

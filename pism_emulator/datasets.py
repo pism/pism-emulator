@@ -20,7 +20,8 @@ Dataset Module
 """
 
 from __future__ import annotations
-
+from dataclasses import dataclass
+from torch.utils.data import Dataset
 import os
 import re
 from collections import OrderedDict
@@ -47,6 +48,45 @@ from torch.utils.data import get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
+
+
+def _sniff_engine(path: str) -> str:
+    """
+    Heuristically choose an xarray engine based on file signature.
+
+    Reads the first 8 bytes and returns an engine string suitable for
+    ``xarray.open_dataset``:
+
+    - NetCDF-4/HDF5 (magic ``\\x89HDF\\r\\n\\x1a\\n`` or ``b\"HDF\"``) → ``"h5netcdf"``
+    - NetCDF-3 (magic ``b\"CDF\\x01\"`` or ``b\"CDF\\x02\"``) → ``"scipy"``
+    - Fallback → ``"h5netcdf"``
+
+    Parameters
+    ----------
+    path : str
+        Path to the NetCDF file.
+
+    Returns
+    -------
+    str
+        Engine name: one of ``"h5netcdf"`` or ``"scipy"``.
+
+    Notes
+    -----
+    ``"h5netcdf"`` is preferred over ``"netcdf4"`` for NetCDF-4/HDF5 files for
+    improved stability and fewer dependency issues in many environments.
+    """
+    # HDF5 magic: \x89HDF\r\n\x1a\n ; NetCDF3: b"CDF\001" or b"CDF\002"
+    with open(path, "rb") as f:
+        sig = f.read(8)
+    if sig.startswith(b"\x89HDF") or sig.startswith(b"HDF"):
+        return (
+            "h5netcdf"  # NetCDF-4/HDF5 -> open with h5netcdf over netcdf4 for stability
+        )
+    if sig.startswith(b"CDF"):
+        return "scipy"  # NetCDF-3 -> scipy engine
+    # fallback: try h5netcdf first
+    return "h5netcdf"
 
 
 def _is_global_zero() -> bool:
@@ -291,276 +331,414 @@ def _read_one_nc4(
     return cast(NDArray[np.float32], out)
 
 
-class PISMDataset(torch.utils.data.Dataset):
+@dataclass
+class DatasetConfig:
+    """Immutable input/configuration for the dataset."""
+
+    training_files: list[str]
+    samples_file: str
+    target_file: str
+    training_var: str = "velsurf_mag"
+    target_var: str = "velsurf_mag"
+    target_corr_var: str = "thickness"
+    target_error_var: str = "velsurf_mag_error"
+    target_corr_threshold: float = 25.0
+    thin: int = 1
+    normalize_x: bool = True
+    log_y: bool = True
+    threshold: float = 100e3
+    epsilon: float = 0.0
+    verbose: bool = False
+    target_engine: Optional[str] = None
+    training_engine: Optional[str] = None
+    parallel: bool = True
+    chunks_after: Optional[dict[str, int]] = None
+    dask_scheduler: Optional[str] = None
+
+
+@dataclass
+class TargetData:
+    """Computed target/mask/grid info."""
+
+    ny: int
+    nx: int
+    mask_2d: np.ndarray  # bool      (ny, nx)
+    sparse_idx_2d: tuple[np.ndarray, np.ndarray]
+    sparse_idx_1d: np.ndarray  # intp      (nnodes,)
+    Y_target: torch.Tensor  # (nnodes,)
+    Y_target_2d: np.ma.MaskedArray  # (ny, nx)
+    Y_target_error: Optional[torch.Tensor] = None
+    Y_target_error_2d: Optional[np.ndarray] = None
+    Y_target_corr: Optional[torch.Tensor] = None
+    Y_target_corr_2d: Optional[np.ndarray] = None
+    grid_resolution: float = 0.0
+
+
+@dataclass
+class SamplesData:
+    """Prepared samples/features/responses."""
+
+    X: torch.Tensor  # (nruns, nparams) (normalized if requested)
+    Y: torch.Tensor  # (nruns, nnodes)
+    X_keys: list[str]
+    X_mean: torch.Tensor
+    X_std: torch.Tensor
+    n_parameters: int
+    n_samples: int
+    n_grid_points: int
+    normed_area: torch.Tensor  # (nnodes,)
+
+
+class PISMDataset(Dataset):
+    """
+    PISM training dataset (refactored).
+
+    This dataset:
+    - loads and masks the target field, building a sparse node index,
+    - reads many training NetCDFs in parallel (downsampled on (y,x)),
+    - aligns runs with a CSV of parameter samples,
+    - applies thresholding and optional log10 transform,
+    - normalizes features if requested.
+
+    Parameters
+    ----------
+    training_files : Sequence[str] | str
+        List/glob of NetCDF training files; each file name must contain ``id_<N>``.
+    samples_file : str
+        CSV with parameter samples; must contain an ``id`` column matching file ids.
+    target_file : str
+        NetCDF target file (observations).
+    training_var : str, default="velsurf_mag"
+        Variable to read from training files.
+    target_var : str, default="velsurf_mag"
+        Variable to read from the target file.
+    target_corr_var : str, default="thickness"
+        Optional correlation variable; values below ``target_corr_threshold`` are masked.
+    target_error_var : str, default="velsurf_mag_error"
+        Optional per-node error variable in the target file.
+    target_corr_threshold : float, default=25.0
+        Threshold for masking based on ``target_corr_var``.
+    thin : int, default=1
+        Spatial stride (downsampling) for the y/x dimensions.
+    normalize_x : bool, default=True
+        If True, z-score normalize the features (per column).
+    log_y : bool, default=True
+        If True, apply ``log10`` to responses (match previous behavior).
+    threshold : float, default=100e3
+        Filter out runs whose **max** response (linear scale) exceeds this value.
+    epsilon : float, default=0.0
+        Replace NaNs with this epsilon when reading arrays.
+    verbose : bool, default=False
+        Print rank-0 progress.
+    target_engine : str or None, default=None
+        xarray engine for the target file; if None, chosen via signature sniffing.
+    training_engine : str or None, default=None
+        Engine for multi-file training reads; defaults to ``"h5netcdf"``.
+    parallel : bool, default=True
+        If True, read training files in parallel with a process pool.
+    chunks_after : dict or None, default=None
+        Unused in this refactor (placeholder to match old signature).
+    dask_scheduler : str or None, default=None
+        If provided, sets ``dask.config.set(scheduler=...)``.
+
+    Notes
+    -----
+    - Instance attributes are kept minimal: ``cfg``, ``target``, ``samples``.
+    - Constructor is keyword-only to avoid pylint R0917.
+    """
+
+    # ↓↓↓ keep instance attribute count low: only three top-level fields
     def __init__(
         self,
-        training_files,
-        samples_file,
-        target_file,
-        training_var="velsurf_mag",
-        target_var="velsurf_mag",
-        target_corr_var="thickness",
-        target_error_var="velsurf_mag_error",
-        target_corr_threshold=25.0,
-        thin=1,
-        normalize_x=True,
-        log_y=True,
-        threshold=100e3,
-        epsilon=0.0,
-        verbose=False,
-        target_engine=None,
-        training_engine=None,
-        parallel=True,
-        chunks_after={"y": 512, "x": 512, "exp_id": 1},
-        dask_scheduler=None,
-    ):
-        self.training_files = sorted(
-            map(
-                str,
-                (
-                    training_files
-                    if isinstance(training_files, (list, tuple))
-                    else Path().glob(training_files)
-                ),
-            )
-        )
-        self.samples_file = samples_file
-        self.target_file = target_file
-        self.training_var = training_var
-        self.target_var = target_var
-        self.target_corr_var = target_corr_var
-        self.target_error_var = target_error_var
-        self.target_corr_threshold = float(target_corr_threshold)
-        self.thin = int(thin)
-        self.normalize_x = normalize_x
-        self.log_y = log_y
-        self.threshold = float(threshold)
-        self.epsilon = float(epsilon)
-        self.verbose = verbose
+        *,
+        training_files: Sequence[str] | str,
+        samples_file: str,
+        target_file: str,
+        training_var: str = "velsurf_mag",
+        target_var: str = "velsurf_mag",
+        target_corr_var: str = "thickness",
+        target_error_var: str = "velsurf_mag_error",
+        target_corr_threshold: float = 25.0,
+        thin: int = 1,
+        normalize_x: bool = True,
+        log_y: bool = True,
+        threshold: float = 100e3,
+        epsilon: float = 0.0,
+        verbose: bool = False,
+        target_engine: Optional[str] = None,
+        training_engine: Optional[str] = None,
+        parallel: bool = True,
+        chunks_after: Optional[dict[str, int]] = None,
+        dask_scheduler: Optional[str] = None,
+    ) -> None:
+        # normalize/collect file list
+        if isinstance(training_files, (list, tuple)):
+            tfiles = [str(p) for p in training_files]
+        else:
+            tfiles = [str(p) for p in Path().glob(training_files)]
+        tfiles = sorted(tfiles)
 
         if dask_scheduler:
             import dask
 
             dask.config.set(scheduler=dask_scheduler)
 
-        # Engines: sniff if not provided
-        self.target_engine = target_engine or _sniff_engine(self.target_file)
-        # Avoid netcdf4 for multi-file; prefer h5netcdf
-        self.training_engine = training_engine or "h5netcdf"
+        cfg = DatasetConfig(
+            training_files=tfiles,
+            samples_file=samples_file,
+            target_file=target_file,
+            training_var=training_var,
+            target_var=target_var,
+            target_corr_var=target_corr_var,
+            target_error_var=target_error_var,
+            target_corr_threshold=float(target_corr_threshold),
+            thin=int(thin),
+            normalize_x=bool(normalize_x),
+            log_y=bool(log_y),
+            threshold=float(threshold),
+            epsilon=float(epsilon),
+            verbose=bool(verbose),
+            target_engine=target_engine or _sniff_engine(target_file),
+            training_engine=training_engine or "h5netcdf",
+            parallel=bool(parallel),
+            chunks_after=chunks_after or {},
+            dask_scheduler=dask_scheduler,
+        )
+        self.cfg = cfg
 
-        self.parallel = bool(parallel)
-        self.chunks_after = chunks_after or {}
+        # build target & samples blocks
+        self.target: TargetData = self._load_target_and_mask()
+        self.samples: SamplesData = self._load_training_and_samples()
 
-        self._load_target_and_mask()
-        self._load_training_and_samples()
+    # ------------- PyTorch Dataset protocol -------------
 
-    # ---------------------------
-    # PyTorch Dataset interface
-    # ---------------------------
-    def __getitem__(self, i):
-        return self.X[i], self.Y[i]
+    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.samples.X[i], self.samples.Y[i]
 
-    def __len__(self):
-        return min(len(self.X), len(self.Y))
+    def __len__(self) -> int:
+        return min(self.samples.n_samples, self.samples.Y.shape[0])
 
-    # ---------------------------
-    # Helpers
-    # ---------------------------
-    def _thin_sel(self):
-        s = self.thin
+    # ------------- internals -------------
+
+    def _thin_sel(self) -> dict[str, slice]:
+        s = self.cfg.thin
         return {"x": slice(None, None, s), "y": slice(None, None, s)}
 
-    def _parse_id(self, path):
+    @staticmethod
+    def _parse_id(path: str) -> int:
         m = re.search(r"id_(\d+)_", Path(path).name)
         if not m:
             raise ValueError(f"Could not parse id from filename: {path}")
         return int(m.group(1))
 
-    # ---------------------------
-    # Target & mask
-    # ---------------------------
-    def _load_target_and_mask(self):
-        if self.verbose:
+    # ---------- target/mask ----------
+
+    def _load_target_and_mask(self) -> TargetData:
+        cfg = self.cfg
+        if cfg.verbose:
             rank_zero_info(
-                f"Loading target {self.target_file} (engine={self.target_engine})"
+                f"Loading target {cfg.target_file} (engine={cfg.target_engine})"
             )
 
-        # open without forcing chunks to avoid “separate stored chunks” warnings
         ds = xr.open_dataset(
-            self.target_file, decode_times=False, engine=self.target_engine
+            cfg.target_file, decode_times=False, engine=cfg.target_engine
         ).isel(**self._thin_sel())
 
-        if self.target_var not in ds:
-            raise KeyError(f"'{self.target_var}' not found in target file")
+        if cfg.target_var not in ds:
+            raise KeyError(f"'{cfg.target_var}' not found in target file")
 
-        targ_da = ds[self.target_var].squeeze(drop=True)
+        targ_da = ds[cfg.target_var].squeeze(drop=True)
         mask = targ_da.isnull()
 
-        self.target_has_error = self.target_error_var in ds
-        self.target_has_corr = self.target_corr_var in ds
+        has_err = cfg.target_error_var in ds
+        has_corr = cfg.target_corr_var in ds
 
-        if self.target_has_corr:
-            corr_da = ds[self.target_corr_var].squeeze(drop=True)
-            mask = xr.where(corr_da < self.target_corr_threshold, True, mask)
+        if has_corr:
+            corr_da = ds[cfg.target_corr_var].squeeze(drop=True)
+            mask = xr.where(corr_da < cfg.target_corr_threshold, True, mask)
 
-        # Compute mask once; use integer indices afterward
         mask_np = mask.compute().values.astype(bool)
-        self.mask_2d = mask_np
-        self.ny = int(ds.sizes["y"])
-        self.nx = int(ds.sizes["x"])
+        ny = int(ds.sizes["y"])
+        nx = int(ds.sizes["x"])
 
-        self.sparse_idx_2d = np.where(~mask_np)
-        self.sparse_idx_1d = np.ravel_multi_index(
-            self.sparse_idx_2d, (self.ny, self.nx)
-        )
+        sparse_idx_2d = np.where(~mask_np)
+        sparse_idx_1d = np.ravel_multi_index(sparse_idx_2d, (ny, nx))
 
         targ_vec = (
             targ_da.stack(node=("y", "x"))
-            .isel(node=self.sparse_idx_1d)
-            .fillna(self.epsilon)
+            .isel(node=sparse_idx_1d)
+            .fillna(cfg.epsilon)
             .astype("float32")
             .compute()
             .values
         )
-        self.Y_target = torch.from_numpy(targ_vec)
+        Y_target = torch.from_numpy(targ_vec.astype(np.float32))
 
-        if self.target_has_error:
+        Y_target_error = Y_target_error_2d = None
+        if has_err:
             err_vec = (
-                ds[self.target_error_var]
+                ds[cfg.target_error_var]
                 .squeeze(drop=True)
                 .stack(node=("y", "x"))
-                .isel(node=self.sparse_idx_1d)
-                .fillna(self.epsilon)
+                .isel(node=sparse_idx_1d)
+                .fillna(cfg.epsilon)
                 .astype("float32")
                 .compute()
                 .values
             )
-            self.Y_target_error = torch.from_numpy(err_vec)
-            self.Y_target_error_2d = (
-                ds[self.target_error_var]
+            Y_target_error = torch.from_numpy(err_vec.astype(np.float32))
+            Y_target_error_2d = (
+                ds[cfg.target_error_var]
                 .squeeze(drop=True)
-                .fillna(self.epsilon)
+                .fillna(cfg.epsilon)
                 .astype("float32")
                 .compute()
                 .values
             )
 
-        if self.target_has_corr:
+        Y_target_corr = Y_target_corr_2d = None
+        if has_corr:
             corr_vec = (
-                ds[self.target_corr_var]
+                ds[cfg.target_corr_var]
                 .squeeze(drop=True)
                 .stack(node=("y", "x"))
-                .isel(node=self.sparse_idx_1d)
-                .fillna(self.epsilon)
+                .isel(node=sparse_idx_1d)
+                .fillna(cfg.epsilon)
                 .astype("float32")
                 .compute()
                 .values
             )
-            self.Y_target_corr = torch.from_numpy(corr_vec)
-            self.Y_target_corr_2d = (
-                ds[self.target_corr_var]
+            Y_target_corr = torch.from_numpy(corr_vec.astype(np.float32))
+            Y_target_corr_2d = (
+                ds[cfg.target_corr_var]
                 .squeeze(drop=True)
-                .fillna(self.epsilon)
+                .fillna(cfg.epsilon)
                 .astype("float32")
                 .compute()
                 .values
             )
 
-        self.grid_resolution = float(abs(ds["x"][1] - ds["x"][0]))
+        grid_resolution = float(abs(ds["x"][1] - ds["x"][0]))
 
-        y2d = np.zeros((self.ny, self.nx), dtype=np.float32)
-        y2d.flat[self.sparse_idx_1d] = self.Y_target.numpy()
-        self.Y_target_2d = np.ma.array(data=y2d, mask=self.mask_2d)
+        y2d = np.zeros((ny, nx), dtype=np.float32)
+        y2d.flat[sparse_idx_1d] = Y_target.numpy()
+        Y_target_2d = np.ma.array(data=y2d, mask=mask_np)
 
         ds.close()
 
-    def _load_training_and_samples(self):
-        if self.verbose:
+        return TargetData(
+            ny=ny,
+            nx=nx,
+            mask_2d=mask_np,
+            sparse_idx_2d=sparse_idx_2d,
+            sparse_idx_1d=sparse_idx_1d,
+            Y_target=Y_target,
+            Y_target_2d=Y_target_2d,
+            Y_target_error=Y_target_error,
+            Y_target_error_2d=Y_target_error_2d,
+            Y_target_corr=Y_target_corr,
+            Y_target_corr_2d=Y_target_corr_2d,
+            grid_resolution=grid_resolution,
+        )
+
+    # ---------- training + samples ----------
+
+    def _load_training_and_samples(self) -> SamplesData:
+        cfg, tgt = self.cfg, self.target
+
+        if cfg.verbose:
             rank_zero_info("  Loading samples & training responses... (netCDF4 direct)")
 
-        # Map files to ids and align with samples
-        ids = [self._parse_id(p) for p in self.training_files]
-        files_by_id = {i: p for i, p in zip(ids, self.training_files)}
+        ids = [self._parse_id(p) for p in cfg.training_files]
+        files_by_id = {i: p for i, p in zip(ids, cfg.training_files)}
 
         samples = (
-            pd.read_csv(self.samples_file, delimiter=",", skipinitialspace=True)
+            pd.read_csv(cfg.samples_file, delimiter=",", skipinitialspace=True)
             .sort_values("id")
             .set_index("id", drop=True)
         )
 
         keep_ids = [i for i in sorted(files_by_id) if i in samples.index]
-        if self.verbose:
+        if cfg.verbose:
             missing = sorted(set(samples.index).difference(keep_ids))
             if missing:
                 rank_zero_info(f"  Missing runs (dropping from samples): {missing}")
 
         samples = samples.loc[keep_ids]
 
-        # Preallocate response: (n_runs, n_nodes)
         n_runs = len(keep_ids)
-        n_nodes = self.sparse_idx_1d.size
+        n_nodes = tgt.sparse_idx_1d.size
         response = np.empty((n_runs, n_nodes), dtype=np.float32)
 
-        step = self.thin
-        idx1d = self.sparse_idx_1d
-
-        # --- parallel fill, replacing the old for-loop ---
-        files_iter = (files_by_id[i] for i in keep_ids)
-        vars_iter = repeat(self.training_var)
-        steps_iter = repeat(step)
-        idx_iter = repeat(idx1d)
-        eps_iter = repeat(self.epsilon)
+        step = cfg.thin
+        idx1d = tgt.sparse_idx_1d
 
         start_time = time()
-
         total = len(keep_ids)
-        workers: int = min(8, os.cpu_count() or 1)
 
-        with ProcessPoolExecutor(max_workers=workers) as ex:
-            future_to_row = {
-                ex.submit(
-                    _read_one_nc4,
-                    files_by_id[i],
-                    self.training_var,
-                    step,
-                    idx1d,
-                    self.epsilon,
-                ): row
-                for row, i in enumerate(keep_ids)
-            }
-            for fut in tqdm_rank0(
-                as_completed(future_to_row),
-                total=total,
-                desc="Reading training files",
-                unit="file",
+        if cfg.parallel:
+            workers: int = min(8, os.cpu_count() or 1)
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                future_to_row = {
+                    ex.submit(
+                        _read_one_nc4,
+                        files_by_id[i],
+                        cfg.training_var,
+                        step,
+                        idx1d,
+                        cfg.epsilon,
+                    ): row
+                    for row, i in enumerate(keep_ids)
+                }
+                for fut in tqdm_rank0(
+                    as_completed(future_to_row),
+                    total=total,
+                    desc="Reading training files",
+                    unit="file",
+                ):
+                    row = future_to_row[fut]
+                    response[row] = fut.result()
+        else:
+            for row, i in enumerate(
+                tqdm_rank0(keep_ids, desc="Reading training files", unit="file")
             ):
-                row = future_to_row[fut]
-                response[row] = fut.result()
+                response[row] = _read_one_nc4(
+                    files_by_id[i], cfg.training_var, step, idx1d, cfg.epsilon
+                )
+
         end_time = time()
-        rank_zero_info(f"Reading training data took {(end_time-start_time):.0f}s")
+        rank_zero_info(f"Reading training data took {(end_time - start_time):.0f}s")
 
-        # Filter by threshold (same as old code: on linear scale)
-        good = response.max(axis=1) < float(self.threshold)
+        good = response.max(axis=1) < float(cfg.threshold)
 
-        # Log10 transform EXACTLY like the old code
-        if self.log_y:
+        if cfg.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0  # -inf -> 0
 
-        # Torch conversion + clamp negatives to 0 (old code behavior)
         X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
         Y = torch.from_numpy(response.astype(np.float32)[good])
-        Y[Y < 0] = 0  # clamp negative logs (values < 1) to 0
+        Y[Y < 0] = 0  # clamp negatives post-log
 
-        self.X_keys = list(samples.columns)
-        self.X_mean = X.mean(dim=0)
-        self.X_std = X.std(dim=0)
-        self.X = (X - self.X_mean) / (self.X_std) if self.normalize_x else X
-        self.Y = Y
+        X_keys = list(samples.columns)
+        X_mean = X.mean(dim=0)
+        X_std = X.std(dim=0)
+        Xn = (X - X_mean) / X_std if cfg.normalize_x else X
 
-        self.n_parameters = self.X.shape[1]
-        self.n_samples = self.Y.shape[0]
-        self.n_grid_points = self.Y.shape[1]
+        n_parameters = Xn.shape[1]
+        n_samples = Y.shape[0]
+        n_grid_points = Y.shape[1]
 
-        self.normed_area = torch.ones(self.n_grid_points, dtype=torch.float32)
-        self.normed_area /= self.normed_area.sum()
+        normed_area = torch.ones(n_grid_points, dtype=torch.float32)
+        normed_area /= normed_area.sum()
+
+        return SamplesData(
+            X=Xn,
+            Y=Y,
+            X_keys=X_keys,
+            X_mean=X_mean,
+            X_std=X_std,
+            n_parameters=n_parameters,
+            n_samples=n_samples,
+            n_grid_points=n_grid_points,
+            normed_area=normed_area,
+        )
