@@ -197,7 +197,7 @@ class DNNEmulator(pl.LightningModule):
         parser.add_argument(
             "--activation", type=str, default="relu", choices=["relu", "silu", "gelu"]
         )
-        parser.add_argument("--learning_rate", type=float, default=1e-3)
+        parser.add_argument("--learning_rate", type=float, default=1e-2)
         parser.add_argument(
             "--compile", action="store_true", help="Use torch.compile if available"
         )
@@ -290,10 +290,10 @@ class NNEmulator(pl.LightningModule):
                 "area": area.detach().cpu(),
             }
         )
-        n_hidden_1 = self.hparams.get("n_hidden_1")
-        n_hidden_2 = self.hparams.get("n_hidden_2")
-        n_hidden_3 = self.hparams.get("n_hidden_3")
-        n_hidden_4 = self.hparams.get("n_hidden_4")
+        n_hidden_1 = self.hparams.get("n_hidden_1", 128)
+        n_hidden_2 = self.hparams.get("n_hidden_2", 128)
+        n_hidden_3 = self.hparams.get("n_hidden_3", 128)
+        n_hidden_4 = self.hparams.get("n_hidden_4", 128)
 
         # Inputs to hidden layer linear transformation
         self.l_1 = nn.Linear(n_parameters, n_hidden_1)
@@ -308,8 +308,7 @@ class NNEmulator(pl.LightningModule):
         self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
         self.norm_4 = nn.LayerNorm(n_hidden_4)
         self.dropout_4 = nn.Dropout(p=0.5)
-        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers, bias=False)
-        self.dropout_5 = nn.Dropout(p=0.3)
+        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
 
         self.register_buffer("V_hat", V_hat, persistent=True)
         self.register_buffer("F_mean", F_mean, persistent=True)
@@ -342,13 +341,11 @@ class NNEmulator(pl.LightningModule):
         z_4 = torch.relu(a_4) + z_3
 
         z_5 = self.l_5(z_4)
-        z_5 = self.l_5(z_4)
-        z_5 = self.dropout_5(z_5)
-        z_6 = self.V_hat(z_5)
+
         if add_mean:
-            F_pred = z_6 + self.F_mean
+            F_pred = z_5 @ self.V_hat.T + self.F_mean
         else:
-            F_pred = z_6
+            F_pred = z_5 @ self.V_hat.T
         return F_pred
 
     @staticmethod

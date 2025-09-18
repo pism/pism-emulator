@@ -31,7 +31,7 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
 
 from pism_emulator.datasets import PISMDataset
-from pism_emulator.emulators.nnemulator import NNEmulator
+from pism_emulator.emulators.nnemulator import NNEmulator, DNNEmulator
 from pism_emulator.utils import param_keys_dict as keys_dict
 
 
@@ -49,6 +49,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
@@ -68,7 +69,16 @@ if __name__ == "__main__":
     parser.add_argument("--sample_size", type=int, default=80)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    parser = NNEmulator.add_model_specific_args(parser)
+    tmp, _ = parser.parse_known_args()
+
+    # let the chosen model extend the parser
+    if tmp.emulator == "NN":
+        NNEmulator.add_model_specific_args(parser)
+        Emulator = NNEmulator
+    elif tmp.emulator == "DNN":
+        DNNEmulator.add_model_specific_args(parser)
+        Emulator = DNNEmulator
+
     args = parser.parse_args()
     hparams = vars(args)
 
@@ -122,29 +132,35 @@ if __name__ == "__main__":
     )
 
     k = 0
+    l = 1
     for m in tqdm(glaciers):
-        print(f"{k+1} of {len(glaciers)}: Loading ensemble member {m}")
+        print(f"{l} of {len(glaciers)}: Loading ensemble member {m}")
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
         for model_index in tqdm(range(0, num_models)):
-            emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
-            state_dict = torch.load(emulator_file)
-            e = NNEmulator(
-                state_dict["l_1.weight"].shape[1],
-                state_dict["V_hat"].shape[1],
-                state_dict["V_hat"],
-                state_dict["F_mean"],
-                state_dict["area"],
-                hparams,
+            emulator_file = join(
+                emulator_dir, "emulator", f"emulator_{model_index}.ckpt"
             )
-            e.load_state_dict(state_dict)
+            e = Emulator.load_from_checkpoint(
+                emulator_file,
+                map_location="cpu",
+            )
             e.eval()
 
             X_val = X[m]
-            F_v = F[m].detach().numpy()
-            F_p = e(X_val, add_mean=True).detach().numpy()
-            F_val[:] = F_v
-            F_pred[:] = F_p
+            if isinstance(X_val, np.ndarray):
+                X_val = torch.as_tensor(X_val)
+            if X_val.dim() == 1:
+                X_val = X_val.unsqueeze(0)  # (1, n_parameters)
+
+            with torch.no_grad():
+                F_v = F[m].detach().cpu().numpy()  # (n_nodes,)
+                F_p = e(X_val, add_mean=True).detach().cpu().numpy()  # (1, n_nodes)
+
+            # store per-model predictions; we'll ensemble by mean later
+            F_val[model_index, :] = F_v
+            F_pred[model_index, :] = F_p.squeeze(0)
+
         rmse = np.sqrt(
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
@@ -162,7 +178,7 @@ if __name__ == "__main__":
         )
 
         if m in plot_glaciers:
-            X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
+            X_val_unscaled = X_val.squeeze() * dataset.X_std + dataset.X_mean
 
             F_val_2d = np.zeros((dataset.ny, dataset.nx))
             F_val_2d.put(dataset.sparse_idx_1d, 10**F_val)
@@ -231,6 +247,7 @@ if __name__ == "__main__":
             axs[-1, k].set_axis_off()
 
             k += 1
+        l += 1
 
     rmse_mean = np.array(rmses).mean()
     mae_mean = np.array(maes).mean()
