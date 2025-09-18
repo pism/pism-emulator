@@ -268,8 +268,7 @@ def main():
         emulator_file,
         map_location="cpu",
     )
-
-    if dataset.target.target_has_error:
+    if dataset.target.Y_target_error is not None:
         sigma = dataset.target.Y_target_error
         sigma[sigma < 10] = 10
     else:

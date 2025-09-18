@@ -20,19 +20,19 @@ Dataset Module
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from torch.utils.data import Dataset
+
 import os
 import re
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from glob import glob
 from itertools import repeat
 from os import PathLike
 from os.path import join
 from pathlib import Path
 from time import time
-from typing import Any, Final, cast
+from typing import Any, Final, Sequence, cast
 
 import dask
 
@@ -44,7 +44,7 @@ import torch
 import xarray as xr
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from numpy.typing import NDArray
-from torch.utils.data import get_worker_info
+from torch.utils.data import Dataset, get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
@@ -349,11 +349,11 @@ class DatasetConfig:
     threshold: float = 100e3
     epsilon: float = 0.0
     verbose: bool = False
-    target_engine: Optional[str] = None
-    training_engine: Optional[str] = None
+    target_engine: str | None = None
+    training_engine: str | None = None
     parallel: bool = True
-    chunks_after: Optional[dict[str, int]] = None
-    dask_scheduler: Optional[str] = None
+    chunks_after: dict[str, int] | None = None
+    dask_scheduler: str | None = None
 
 
 @dataclass
@@ -367,10 +367,10 @@ class TargetData:
     sparse_idx_1d: np.ndarray  # intp      (nnodes,)
     Y_target: torch.Tensor  # (nnodes,)
     Y_target_2d: np.ma.MaskedArray  # (ny, nx)
-    Y_target_error: Optional[torch.Tensor] = None
-    Y_target_error_2d: Optional[np.ndarray] = None
-    Y_target_corr: Optional[torch.Tensor] = None
-    Y_target_corr_2d: Optional[np.ndarray] = None
+    Y_target_error: torch.Tensor | None = None
+    Y_target_error_2d: np.ndarray | None = None
+    Y_target_corr: torch.Tensor | None = None
+    Y_target_corr_2d: np.ndarray | None = None
     grid_resolution: float = 0.0
 
 
@@ -465,21 +465,24 @@ class PISMDataset(Dataset):
         threshold: float = 100e3,
         epsilon: float = 0.0,
         verbose: bool = False,
-        target_engine: Optional[str] = None,
-        training_engine: Optional[str] = None,
+        target_engine: str | None = None,
+        training_engine: str | None = None,
         parallel: bool = True,
-        chunks_after: Optional[dict[str, int]] = None,
-        dask_scheduler: Optional[str] = None,
+        chunks_after: dict[str, int] | None = None,
+        dask_scheduler: str | None = None,
     ) -> None:
-        # normalize/collect file list
+
         if isinstance(training_files, (list, tuple)):
             tfiles = [str(p) for p in training_files]
+        elif isinstance(training_files, (str, os.PathLike)):
+            pattern = os.fspath(training_files)
+            tfiles = [str(p) for p in Path().glob(pattern)]
         else:
-            tfiles = [str(p) for p in Path().glob(training_files)]
-        tfiles = sorted(tfiles)
+            raise TypeError(
+                "training_files must be a str/glob pattern or a sequence of str"
+            )
 
         if dask_scheduler:
-            import dask
 
             dask.config.set(scheduler=dask_scheduler)
 
