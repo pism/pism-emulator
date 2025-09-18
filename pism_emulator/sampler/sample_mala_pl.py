@@ -17,28 +17,30 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import datetime
+import datetime as dt
 import os
 import time
+import warnings
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Sequence
-import time, datetime as dt
+
 import arviz as az
+import lightning as pl
 import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
-import lightning as pl
 import torch
 from joblib import Parallel, delayed
 from lightning import LightningModule
 from lightning.pytorch.callbacks import BasePredictionWriter, Timer
+from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from scipy.stats import beta
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
-import warnings
 
 from pism_emulator.datasets import PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator

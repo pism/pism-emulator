@@ -30,7 +30,7 @@ from threading import Lock
 import lightning.pytorch as pl
 import numpy as np
 import torch
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from sklearn.model_selection import train_test_split
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset

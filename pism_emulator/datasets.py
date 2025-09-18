@@ -1,3 +1,24 @@
+# Copyright (C) 2021-25 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+"""
+Dataset Module
+"""
+
 from __future__ import annotations
 
 import os
@@ -10,7 +31,7 @@ from os import PathLike
 from os.path import join
 from pathlib import Path
 from time import time
-from typing import Any, Final, Union, cast
+from typing import Any, Final, cast
 
 import dask
 
@@ -26,11 +47,27 @@ from torch.utils.data import get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
-from torch.utils.data import get_worker_info
 
 
 def _is_global_zero() -> bool:
-    # works with torchrun and Lightning
+    """
+    Check whether the current process is global rank 0.
+
+    Works with both Torch distributed (`torchrun`) and Lightning by inspecting
+    the ``RANK`` or ``GLOBAL_RANK`` environment variables.
+
+    Returns
+    -------
+    bool
+        ``True`` if the parsed rank is 0 or the variables are unset/invalid,
+        ``False`` otherwise.
+
+    Notes
+    -----
+    If the environment variable cannot be parsed as an integer, this function
+    returns ``True`` (permissive default) so that progress output does not get
+    unintentionally suppressed in non-distributed contexts.
+    """
     r = os.environ.get("RANK", os.environ.get("GLOBAL_RANK", "0"))
     try:
         return int(r) == 0
@@ -39,12 +76,47 @@ def _is_global_zero() -> bool:
 
 
 def _is_worker_zero() -> bool:
+    """
+    Check whether the current DataLoader worker is worker 0.
+
+    Uses :func:`torch.utils.data.get_worker_info` to detect the worker ID.
+
+    Returns
+    -------
+    bool
+        ``True`` if running in the main process (no worker) or in worker ``id == 0``,
+        ``False`` otherwise.
+    """
     wi = get_worker_info()
     return (wi is None) or (wi.id == 0)
 
 
 def tqdm_rank0(*args, **kwargs):
-    """tqdm that only shows on global rank 0 and worker 0."""
+    """
+    Create a ``tqdm`` progress bar that only renders on global rank 0, worker 0.
+
+    Parameters
+    ----------
+    *args
+        Positional arguments forwarded to :class:`tqdm.tqdm`.
+    **kwargs
+        Keyword arguments forwarded to :class:`tqdm.tqdm`. The following defaults
+        are set if not provided:
+        - ``dynamic_ncols=True`` for auto column width.
+        - ``leave=False`` so bars do not persist after completion.
+        Additionally, ``disable=True`` is injected automatically unless both
+        the global rank is 0 and the worker ID is 0.
+
+    Returns
+    -------
+    tqdm.tqdm
+        A tqdm instance that is disabled on non-zero ranks/workers.
+
+    Notes
+    -----
+    This helper prevents duplicate progress bars under DDP/multiprocessing by
+    showing the bar only once (rank 0, worker 0).
+    """
     kwargs.setdefault("dynamic_ncols", True)
     kwargs.setdefault("leave", False)
     # disable everywhere except global rank 0 + worker 0
@@ -53,8 +125,32 @@ def tqdm_rank0(*args, **kwargs):
     return _tqdm(*args, **kwargs)
 
 
-def id_key(path: str | os.PathLike[str]) -> int:
-    """Return the integer id from a filename like '*id_123_*'. Raises if missing."""
+def id_key(path: str | Path) -> int:
+    """
+    Extract the integer ``id`` embedded in a filename.
+
+    The filename is expected to contain a substring like ``id_<number>`` and the
+    search is performed against :data:`ID_RE` on the basename.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path whose basename will be searched for the ``id`` pattern.
+
+    Returns
+    -------
+    int
+        The parsed integer ID.
+
+    Raises
+    ------
+    ValueError
+        If the pattern is not found in the basename.
+
+    See Also
+    --------
+    parse_id_from_path : Alias with the same behavior and signature.
+    """
     m = ID_RE.search(Path(path).name)
     if m is None:
         raise ValueError(
@@ -64,7 +160,28 @@ def id_key(path: str | os.PathLike[str]) -> int:
 
 
 def parse_id_from_path(p: str | Path) -> int:
-    """Extract integer id from a filename like '...id_123_...'. Raises on failure."""
+    """
+    Extract the integer ``id`` embedded in a filename.
+
+    This is equivalent to :func:`id_key`. The filename is expected to contain
+    a substring like ``id_<number>`` and the search is performed against
+    :data:`ID_RE` on the basename.
+
+    Parameters
+    ----------
+    p : str or pathlib.Path
+        Path whose basename will be searched for the ``id`` pattern.
+
+    Returns
+    -------
+    int
+        The parsed integer ID.
+
+    Raises
+    ------
+    ValueError
+        If the pattern is not found in the basename.
+    """
     m = ID_RE.search(Path(p).name)
     if not m:
         raise ValueError(
@@ -81,13 +198,54 @@ def _read_one_nc4(
     eps: float,
 ) -> NDArray[np.float32]:
     """
-    CF-compatible fast reader: auto mask/scale ON, masked->NaN, then NaN->eps.
-    Matches xarray ``open_dataset(..., decode_cf=True)`` semantics used in PISMDataset.
+    Read a CF-compliant NetCDF variable and return a sparsified, downsampled 1-D view.
+
+    This fast reader:
+    1) opens the file with :mod:`netCDF4`,
+    2) enables CF-style mask/scale application (matching ``xarray.open_dataset(..., decode_cf=True)``),
+    3) converts masked values to ``NaN`` and then replaces ``NaN`` with ``eps``,
+    4) strides the ``y`` and ``x`` dimensions by ``step``, squeezes any leading singleton,
+    5) gathers values at linear indices ``idx1d`` from the flattened array.
+
+    Parameters
+    ----------
+    path : str or os.PathLike[str]
+        Path to a NetCDF file.
+    var : str
+        Name of the variable to read from ``path``.
+    step : int
+        Spatial stride for the ``y`` and ``x`` dimensions. Must be ``>= 1``.
+    idx1d : numpy.ndarray (dtype=intp, 1-D)
+        Linear indices (C-order) used to gather a sparse subset from the flattened
+        downsampled array.
+    eps : float
+        Epsilon used to replace ``NaN`` values after mask/scale decoding.
+
+    Returns
+    -------
+    numpy.ndarray (dtype=float32, shape=(len(idx1d),))
+        Gathered values from the flattened (``y``, ``x``) array at positions
+        ``idx1d``, with masked/NaN values replaced by ``eps``.
+
+    Raises
+    ------
+    ValueError
+        If ``step < 1``.
+    KeyError
+        If the variable does not have both ``"y"`` and ``"x"`` dimensions.
+
+    Notes
+    -----
+    - Non-(``y``, ``x``) leading dimensions are reduced by selecting the first
+      entry when the size is greater than 1 (or kept if exactly 1).
+    - The return uses C-order flattening (row-major), consistent with
+      ``arr.ravel(order='C')`` and ``xarray`` default memory layout for NumPy
+      backends.
     """
     if step < 1:
         raise ValueError(f"'step' must be >= 1, got {step}")
 
-    ds = nc.Dataset(path, "r")
+    ds = nc.Dataset(path, "r")  # pylint: disable=no-member
     try:
         v = ds.variables[var]
         # Match xarray CF decode: enable both masking and scale/offset application
@@ -131,21 +289,6 @@ def _read_one_nc4(
     # Gather sparse nodes in C-order (same as data[self.sparse_idx_2d].flatten())
     out = np.take(arr.ravel(), idx1d)
     return cast(NDArray[np.float32], out)
-
-
-def _sniff_engine(path: str) -> str:
-    """Choose an xarray engine from the file signature."""
-    # HDF5 magic: \x89HDF\r\n\x1a\n ; NetCDF3: b"CDF\001" or b"CDF\002"
-    with open(path, "rb") as f:
-        sig = f.read(8)
-    if sig.startswith(b"\x89HDF") or sig.startswith(b"HDF"):
-        return (
-            "h5netcdf"  # NetCDF-4/HDF5 -> open with h5netcdf over netcdf4 for stability
-        )
-    if sig.startswith(b"CDF"):
-        return "scipy"  # NetCDF-3 -> scipy engine
-    # fallback: try h5netcdf first
-    return "h5netcdf"
 
 
 class PISMDataset(torch.utils.data.Dataset):
