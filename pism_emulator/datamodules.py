@@ -64,6 +64,30 @@ g.manual_seed(0)
 
 @dataclass
 class DataConfig:
+    """
+    Configuration bundle for dataset and DataLoader parameters.
+
+    Attributes
+    ----------
+    X : torch.Tensor
+        Input feature matrix with shape ``(N_samples, N_features)``.
+    F : torch.Tensor
+        Response matrix with shape ``(N_samples, N_nodes)`` (e.g., fields to be
+        compressed/expanded).
+    omegas : torch.Tensor
+        Per-sample weights with shape ``(N_samples,)`` or ``(N_samples, 1)`` used
+        in mean/variance weighting and loss aggregation.
+    omegas_0 : torch.Tensor
+        Optional auxiliary per-sample weights with same length as ``omegas``.
+    batch_size : int, default=128
+        Batch size used by train/validation DataLoaders.
+    train_size : float, default=0.9
+        Fraction of samples assigned to the training split (remainder to validation).
+    num_workers : int, default=0
+        Number of worker processes for DataLoaders. On macOS/MPS, ``0`` is often
+        fastest due to process spawn overhead.
+    """
+
     X: Tensor
     F: Tensor
     omegas: Tensor
@@ -75,6 +99,28 @@ class DataConfig:
 
 @dataclass
 class EigCache:
+    """
+    In-memory cache for eigenglacier/eigenbasis computation.
+
+    Attributes
+    ----------
+    ready : bool, default=False
+        Flag indicating whether the cache is populated and can be reused without
+        recomputation.
+    V_hat : torch.Tensor or None, default=None
+        Basis matrix of shape ``(N_nodes, q)`` whose columns are scaled by
+        ``sqrt(lambda)`` (truncated eigenvectors / right singular vectors).
+    F_bar : torch.Tensor or None, default=None
+        Mean-centered responses with shape ``(N_samples, N_nodes)``.
+    F_mean : torch.Tensor or None, default=None
+        Per-node mean over samples with shape ``(N_nodes,)``.
+    eigs_vals : torch.Tensor or None, default=None
+        Vector of eigenvalues (or squared singular values) with length ``q``.
+    lock : threading.Lock
+        Mutual-exclusion lock used to guard one-time computation in concurrent
+        contexts (e.g., multiple workers or ranks).
+    """
+
     ready: bool = False
     V_hat: Tensor | None = None
     F_bar: Tensor | None = None
@@ -228,7 +274,7 @@ class PISMDataModule(pl.LightningDataModule):
                 lamda = S**2 / (n_grid_points)
             else:
                 S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar
-                lamda, V = torch.linalg.eig(S)
+                lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
                 lamda = lamda[:, 0].squeeze()
 
             rank_zero_info(f"    using the first {q} eigen values")
@@ -249,116 +295,133 @@ class PISMDataModule(pl.LightningDataModule):
             return V_hat, F_bar, F_mean, lamda
 
 
-class PDDDataModule(pl.LightningDataModule):
+@dataclass
+class PDDConfig:
     """
-    Lightning DataModule for PDD-style emulator training/evaluation.
+    Configuration bundle for PDD data and DataLoaders.
 
-    Wraps feature/target tensors and provides train/val DataLoaders.
-
-    Parameters
+    Attributes
     ----------
     X : torch.Tensor
-        Input feature matrix of shape ``(N_samples, N_features)``.
+        Input features of shape ``(N_samples, N_features)``.
     Y : torch.Tensor
-        Target matrix or vector of shape ``(N_samples, ...)`` (e.g., scalars or fields).
+        Targets of shape ``(N_samples, ...)`` (scalars or fields).
     omegas : torch.Tensor
-        Per-sample weights of shape ``(N_samples,)`` or ``(N_samples, 1)``.
+        Per-sample weights, shape ``(N_samples,)`` or ``(N_samples, 1)``.
     omegas_0 : torch.Tensor
         Optional auxiliary weights per sample (same length as ``omegas``).
     batch_size : int, default=128
-        Batch size for the train and validation DataLoaders.
+        Batch size for train/val.
     train_size : float, default=0.9
-        Fraction of samples used for training (the rest are used for validation).
+        Fraction of samples for training (remainder for validation).
     num_workers : int, default=0
-        DataLoader worker count. On macOS/MPS, ``0`` is often fastest.
-
-    Notes
-    -----
-    After :meth:`setup`, the following attributes are available:
-
-    - ``all_data``: complete dataset (``TensorDataset(X, Y, omegas, omegas_0)``)
-    - ``training_data``, ``val_data``: dataset splits
-    - ``train_loader``, ``val_loader``: DataLoaders for training/validation
+        DataLoader worker processes (``0`` is often fastest on macOS/MPS).
     """
+
+    X: Tensor
+    Y: Tensor
+    omegas: Tensor
+    omegas_0: Tensor
+    batch_size: int = 128
+    train_size: float = 0.9
+    num_workers: int = 0
+
+
+class PDDDataModule(pl.LightningDataModule):
+    """
+    Lightning DataModule for PDD-style training/evaluation (refactored).
+
+    This version:
+    - Stores inputs in a small `PDDConfig` (fewer instance attributes).
+    - Builds train/val DataLoaders lazily via a helper.
+    - Keeps Lightning hook signatures (`prepare_data`, `setup`, loaders) clean.
+    - Uses keyword-only parameters on internal helpers to avoid `R0917`.
+
+    Parameters
+    ----------
+    X, Y, omegas, omegas_0 : torch.Tensor
+        See `PDDConfig` for shapes.
+    batch_size : int, default=128
+        Batch size for all DataLoaders.
+    train_size : float, default=0.9
+        Train split fraction.
+    num_workers : int, default=0
+        DataLoader workers.
+    """
+
+    # pylint: disable=too-many-instance-attributes  # trimmed; but safe to remove if below threshold
 
     def __init__(
         self,
-        X,
-        Y,
-        omegas,
-        omegas_0,
+        X: Tensor,
+        Y: Tensor,
+        omegas: Tensor,
+        omegas_0: Tensor,
+        *,
         batch_size: int = 128,
         train_size: float = 0.9,
         num_workers: int = 0,
-    ):
+    ) -> None:
         super().__init__()
-        self.X = X
-        self.Y = Y
-        self.omegas = omegas
-        self.omegas_0 = omegas_0
-        self.batch_size = batch_size
-        self.train_size = train_size
-        self.num_workers = num_workers
+        self.cfg = PDDConfig(
+            X=X,
+            Y=Y,
+            omegas=omegas,
+            omegas_0=omegas_0,
+            batch_size=batch_size,
+            train_size=train_size,
+            num_workers=num_workers,
+        )
+        # dataset splits; loaders built on demand
+        self._all: TensorDataset | None = None
+        self._train: TensorDataset | None = None
+        self._val: TensorDataset | None = None
 
-    def setup(self, stage: str | None = None):
+    # -------------------- Lightning hooks --------------------
+
+    def prepare_data(self) -> None:
         """
-        Split data and construct DataLoaders.
+        One-time data preparation hook (no-op here).
+
+        Notes
+        -----
+        Kept for API symmetry with other modules; nothing to precompute.
+        """
+        return
+
+    def setup(self, stage: str | None = None) -> None:
+        """
+        Split into train/val and stage datasets.
 
         Parameters
         ----------
         stage : str or None, optional
             Lightning stage hint (``'fit'``, ``'validate'``, etc.). Unused here.
-
-        Notes
-        -----
-        Exposes the attributes:
-        ``all_data``, ``training_data``, ``val_data``, ``train_loader``, ``val_loader``.
         """
-        all_data = TensorDataset(self.X, self.Y, self.omegas, self.omegas_0)
-        self.all_data = all_data
-
-        training_data, val_data = train_test_split(
-            all_data, train_size=self.train_size, random_state=0
+        all_data = TensorDataset(
+            self.cfg.X, self.cfg.Y, self.cfg.omegas, self.cfg.omegas_0
         )
-        self.training_data = training_data
-        self.val_data = val_data
+        self._all = all_data
 
-        train_loader = DataLoader(
-            dataset=training_data,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
+        train_ds, val_ds = train_test_split(
+            all_data, train_size=self.cfg.train_size, random_state=0
+        )
+        self._train, self._val = train_ds, val_ds
+
+    # -------------------- DataLoaders (lazy) --------------------
+
+    def _build_loader(self, ds: TensorDataset, *, shuffle: bool) -> DataLoader:
+        """Create a DataLoader with consistent seeding/worker config."""
+        return DataLoader(
+            dataset=ds,
+            batch_size=self.cfg.batch_size,
+            shuffle=shuffle,
+            num_workers=self.cfg.num_workers,
             worker_init_fn=seed_worker,
             generator=g,
         )
-        self.train_loader = train_loader
 
-        val_loader = DataLoader(
-            dataset=val_data,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            worker_init_fn=seed_worker,
-            generator=g,
-        )
-        self.val_loader = val_loader
-
-    def prepare_data(self, **kwargs):
-        """
-        Placeholder for one-time data preparation.
-
-        Parameters
-        ----------
-        **kwargs
-            Ignored. Included for API symmetry with other DataModules.
-
-        Notes
-        -----
-        This DataModule does not require any precomputation in ``prepare_data``.
-        """
-        pass
-
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
         """
         Training DataLoader.
 
@@ -367,9 +430,11 @@ class PDDDataModule(pl.LightningDataModule):
         torch.utils.data.DataLoader
             DataLoader over the training split.
         """
-        return self.train_loader
+        if self._train is None:  # defensive, in case setup hasn't run
+            self.setup("fit")
+        return self._build_loader(self._train, shuffle=True)
 
-    def validation_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
         """
         Validation DataLoader.
 
@@ -378,4 +443,6 @@ class PDDDataModule(pl.LightningDataModule):
         torch.utils.data.DataLoader
             DataLoader over the validation split.
         """
-        return self.val_loader
+        if self._val is None:
+            self.setup("validate")
+        return self._build_loader(self._val, shuffle=False)

@@ -28,15 +28,16 @@ import arviz as az
 import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from joblib import Parallel, delayed
 from lightning import LightningModule
-from pytorch_lightning.callbacks import BasePredictionWriter
+from pytorch_lightning.callbacks import BasePredictionWriter, Timer
 from scipy.stats import beta
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 
 from pism_emulator.datasets import PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
@@ -118,6 +119,12 @@ def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
     )
 
 
+import time, datetime as dt
+import lightning.pytorch as pl
+from lightning.pytorch.callbacks import Timer
+from torch.utils.data import DataLoader
+
+
 def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
     # Dataset should yield (chain_id, init_vector)
     dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False, num_workers=0)
@@ -126,21 +133,27 @@ def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
     multi_cpu = accelerator == "cpu" and n_chains > 1
 
     if multi_cpu:
-        # DDP spawn/fork: must NOT use return_predictions=True
+        # ── DDP spawn: use wall-clock timer in the parent process ─────────────
+        wall_start = time.perf_counter()
         trainer = pl.Trainer(
             accelerator="cpu",
             devices=n_chains,
             strategy="ddp_spawn",
             logger=False,
             enable_checkpointing=False,
-            inference_mode=False,  # you need autograd
+            inference_mode=False,
             num_sanity_val_steps=0,
-            enable_progress_bar=False,  # use your own per-rank tqdm
+            enable_progress_bar=False,
             callbacks=[DiskPredictionWriter(tmp_dir, write_interval="batch")],
         )
         _ = trainer.predict(sampler, dl, return_predictions=False)
+        wall_secs = time.perf_counter() - wall_start
+        print(
+            f"[predict/ddp_spawn] Elapsed: {wall_secs:.2f}s "
+            f"({str(dt.timedelta(seconds=int(wall_secs)))})"
+        )
 
-        # Load everything that each rank just wrote:
+        # Load per-rank outputs
         from pathlib import Path
 
         files = sorted(Path(tmp_dir).glob("rank*_chain*.pt"))
@@ -149,8 +162,10 @@ def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
         records = [torch.load(f) for f in files]
         records.sort(key=lambda r: r["chain"])
         chains = torch.stack([r["samples"] for r in records])  # (C, S, D)
+
     else:
-        # single GPU or single CPU process
+        # ── Single process (CPU or GPU): use Lightning's Timer callback ───────
+        timer = Timer()  # <-- create explicitly so we can read it after
         trainer = pl.Trainer(
             accelerator=accelerator,
             devices=1,
@@ -159,8 +174,14 @@ def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
             inference_mode=False,
             num_sanity_val_steps=0,
             enable_progress_bar=False,
+            callbacks=[timer],
         )
         outs = trainer.predict(sampler, dl, return_predictions=True)
+        secs = timer.time_elapsed("predict") or 0.0
+        print(
+            f"[predict] Elapsed: {secs:.2f}s ({str(dt.timedelta(seconds=int(secs)))})"
+        )
+
         outs = [o for o in outs if o is not None]
         outs.sort(key=lambda d: int(d["chain"]))
         chains = torch.stack([d["samples"] for d in outs])
@@ -269,7 +290,6 @@ def main():
     # Initial condition for MAP. Note that using 0 yields similar results
     X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float)
 
-    start = time.process_time()
     sampler = MALASamplerModule(
         e,
         X_min,
@@ -296,7 +316,7 @@ def main():
 
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     chains = run_sampling(sampler, inits, accelerator=accelerator)
-    print(time.process_time() - start)
+    rank_zero_info("\n\n\n\n\n\n\n\n\n\n\n\n")
 
     chains_np = [np.asarray(c) for c in chains]  # each (S, D)
     arr = np.stack(chains_np, axis=0)  # (C, S, D)
@@ -319,7 +339,9 @@ def main():
     )
 
     # (Optional) sanity check
-    print("posterior dims:", idata.posterior.sizes)  # should show chain=C, draw=S
+    rank_zero_info(
+        "posterior dims:", idata.posterior.sizes
+    )  # should show chain=C, draw=S
 
     # Save to Zarr (overwrite)
     out_dir = Path(posterior_dir)
@@ -342,7 +364,7 @@ def main():
             plt.savefig(out_png, dpi=150, bbox_inches="tight")
             plt.close("all")
         else:
-            print("All parameters are (near) constant; skipping trace plot.")
+            rank_zero_info("All parameters are (near) constant; skipping trace plot.")
 
 
 if __name__ == "__main__":

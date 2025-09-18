@@ -113,6 +113,7 @@ class MALASamplerModule(pl.LightningModule):
         samples: int = 2000,
         show_progress: bool = True,
         pbar_update_every: int = 10,
+        q: int = 100,
         seed: int | None = None,
         **kwargs,
     ):
@@ -160,6 +161,11 @@ class MALASamplerModule(pl.LightningModule):
         self.register_buffer(
             "_two_pi",
             torch.tensor(2.0 * math.pi, dtype=torch.float32),
+            persistent=False,
+        )
+        self.register_buffer(
+            "q",
+            torch.tensor(q, dtype=torch.int),
             persistent=False,
         )
 
@@ -224,17 +230,32 @@ class MALASamplerModule(pl.LightningModule):
         H = torch.autograd.functional.hessian(
             self.V, X, vectorize=False, create_graph=False
         )
+
         H = 0.5 * (H + H.T)
+        # Choose rank. For an exact decomposition use q=min(H.shape), but you can pick
+        # a smaller q for a low-rank approximation.
+        q = min(H.shape)  # or your chosen truncation
 
-        _, S, V = torch.svd_lowrank(H, q=q)
-        lamda = S**2 / (n_grid_points)
+        # Low-rank SVD: H ≈ U @ diag(S) @ V.T
+        # For symmetric H, U ≈ V (up to signs)
+        U, S, V = torch.svd_lowrank(H, q=q)
 
-        lam, Q = torch.linalg.eig(H)
-        lam = lam.real
-        Q = Q.real
-        lam_p = torch.sqrt(lam * lam + self._eps_eig)
-        Hpos = Q @ torch.diag(lam_p) @ Q.T
-        Hinv = Q @ torch.diag(1.0 / lam_p) @ Q.T
+        # S are singular values (>=0). For symmetric H, S = |λ|.
+        # Your λ_p = sqrt(λ^2 + eps) equals sqrt(S^2 + eps) here.
+        eps = self._eps_eig
+        lam_p = torch.sqrt(S * S + eps)
+
+        # Build Hpos ≈ V diag(lam_p) V^T  and Hinv ≈ V diag(1/lam_p) V^T
+        # (use broadcasting instead of forming explicit diags)
+        Hpos = (V * lam_p) @ V.T
+        Hinv = (V * (1.0 / lam_p.clamp_min(1e-12))) @ V.T
+
+        # lam, Q = torch.linalg.eigh(H)
+        # lam = lam.real
+        # Q = Q.real
+        # lam_p = torch.sqrt(lam * lam + self._eps_eig)
+        # Hpos = Q @ torch.diag(lam_p) @ Q.T
+        # Hinv = Q @ torch.diag(1.0 / lam_p) @ Q.T
         log_det_Hinv = torch.sum(torch.log(1.0 / lam_p))
         return log_pi, g, Hpos, Hinv, log_det_Hinv
 
