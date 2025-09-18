@@ -70,7 +70,6 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--devices", default="auto")
     parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
@@ -105,22 +104,21 @@ def main():
     parser.add_argument("--thin", type=int, default=1)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    _args = parser.parse_args()
-    emulator = _args.emulator
-    if emulator == "DNN":
-        Emulator = DNNEmulator
-    elif emulator == "NN":
-        Emulator = NNEmulator
-    else:
-        print(f"Emulator {emulator} not supported")
+    tmp, _ = parser.parse_known_args()
 
-    parser = Emulator.add_model_specific_args(parser)
+    # let the chosen model extend the parser
+    if tmp.emulator == "NN":
+        NNEmulator.add_model_specific_args(parser)
+        Emulator = NNEmulator
+    elif tmp.emulator == "DNN":
+        DNNEmulator.add_model_specific_args(parser)
+        Emulator = DNNEmulator
+
     args = parser.parse_args()
     hparams = vars(args)
 
     accelerator = args.accelerator
     batch_size = args.batch_size
-    checkpoint = args.checkpoint
     devices = args.devices
     emulator_dir = args.emulator_dir
     model_index = args.model_index
@@ -191,15 +189,14 @@ def main():
 
     plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, q=q)
 
-    if checkpoint:
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=f"{emulator_dir}/emulator",
-            filename="emulator_{model_index}",
-            every_n_epochs=0,
-            save_last=True,
-        )
-        checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
-        callbacks.append(checkpoint_callback)
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=f"{emulator_dir}/emulator",
+        filename="emulator_{model_index}",
+        every_n_epochs=0,
+        save_last=True,
+    )
+    checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
+    callbacks.append(checkpoint_callback)
 
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
 
@@ -212,7 +209,7 @@ def main():
         V_hat,
         F_mean,
         area,
-        hparams,
+        **hparams,
     )
 
     trainer = pl.Trainer(
@@ -235,7 +232,6 @@ def main():
 
     trainer.fit(e, train_loader, val_loader)
     print(f"Training took {timer.time_elapsed():.0f}s")
-    torch.save(e.state_dict(), f"{emulator_dir}/emulator/emulator_{model_index}.h5")
 
 
 if __name__ == "__main__":

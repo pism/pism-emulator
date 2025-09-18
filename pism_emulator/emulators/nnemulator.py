@@ -101,18 +101,20 @@ class DNNEmulator(pl.LightningModule):
         V_hat,
         F_mean: Tensor,
         area,
-        hparams,
+        **hparams,
     ) -> None:
         super().__init__()
+        flat = vars(hparams) if hasattr(hparams, "__dict__") else dict(hparams)
         self.save_hyperparameters(
-            ignore=["n_parameters", "n_eigenglaciers", "V_hat", "F_mean", "area"]
+            {
+                **flat,
+                "n_parameters": int(n_parameters),
+                "n_eigenglaciers": int(n_eigenglaciers),
+                "V_hat": V_hat.detach().cpu(),
+                "F_mean": F_mean.detach().cpu(),
+                "area": area.detach().cpu(),
+            }
         )
-
-        hp = self.hparams["hparams"]
-        if isinstance(hp, dict):
-            self.hparams.update(hp)
-        elif hasattr(hp, "__dict__"):
-            self.hparams.update(vars(hp))
 
         width: int = int(self.hparams.get("width", 256))
         depth: int = int(self.hparams.get("depth", 4))
@@ -186,7 +188,7 @@ class DNNEmulator(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser: ArgumentParser) -> ArgumentParser:
         parser = parent_parser.add_argument_group("DNNEmulator")
-        parser.add_argument("--width", type=int, default=256)
+        parser.add_argument("--width", type=int, default=128)
         parser.add_argument("--depth", type=int, default=4)
         parser.add_argument("--dropout", type=float, default=0.1)
         parser.add_argument(
@@ -274,18 +276,20 @@ class NNEmulator(pl.LightningModule):
         V_hat,
         F_mean,
         area,
-        hparams,
+        **hparams,
     ):
         super().__init__()
+        flat = vars(hparams) if hasattr(hparams, "__dict__") else dict(hparams)
         self.save_hyperparameters(
-            ignore=["n_parameters", "n_eigenglaciers", "V_hat", "F_mean", "area"]
+            {
+                **flat,
+                "n_parameters": int(n_parameters),
+                "n_eigenglaciers": int(n_eigenglaciers),
+                "V_hat": V_hat.detach().cpu(),
+                "F_mean": F_mean.detach().cpu(),
+                "area": area.detach().cpu(),
+            }
         )
-        hp = self.hparams["hparams"]
-        if isinstance(hp, dict):
-            self.hparams.update(hp)
-        elif hasattr(hp, "__dict__"):
-            self.hparams.update(vars(hp))
-
         n_hidden_1 = self.hparams.get("n_hidden_1")
         n_hidden_2 = self.hparams.get("n_hidden_2")
         n_hidden_3 = self.hparams.get("n_hidden_3")
@@ -302,9 +306,10 @@ class NNEmulator(pl.LightningModule):
         self.norm_3 = nn.LayerNorm(n_hidden_3)
         self.dropout_3 = nn.Dropout(p=0.5)
         self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
-        self.norm_4 = nn.LayerNorm(n_hidden_3)
-        self.dropout_4 = nn.Dropout(p=0.3)
+        self.norm_4 = nn.LayerNorm(n_hidden_4)
+        self.dropout_4 = nn.Dropout(p=0.5)
         self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers, bias=False)
+        self.dropout_5 = nn.Dropout(p=0.3)
 
         self.register_buffer("V_hat", V_hat, persistent=True)
         self.register_buffer("F_mean", F_mean, persistent=True)
@@ -337,11 +342,13 @@ class NNEmulator(pl.LightningModule):
         z_4 = torch.relu(a_4) + z_3
 
         z_5 = self.l_5(z_4)
+        z_5 = self.l_5(z_4)
+        z_5 = self.dropout_5(z_5)
+        z_6 = self.V_hat(z_5)
         if add_mean:
-            F_pred = z_5 @ self.V_hat.T + self.F_mean
+            F_pred = z_6 + self.F_mean
         else:
-            F_pred = z_5 @ self.V_hat.T
-
+            F_pred = z_6
         return F_pred
 
     @staticmethod
