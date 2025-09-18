@@ -22,7 +22,7 @@ import time
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Callable, Literal, Mapping, Sequence
 
 import arviz as az
 import matplotlib.pylab as plt
@@ -39,8 +39,13 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from pism_emulator.datasets import PISMDataset
-from pism_emulator.emulators.nnemulator import NNEmulator
+from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 from pism_emulator.sampler.mala import ChainInitDataset, MALASamplerModule
+
+EMULATORS: Mapping[str, type[pl.LightningModule]] = {
+    "NN": NNEmulator,
+    "DNN": DNNEmulator,
+}
 
 
 class DiskPredictionWriter(BasePredictionWriter):
@@ -165,6 +170,8 @@ def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
 
 def main():
     parser = ArgumentParser()
+    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
+    tmp, _ = parser.parse_known_args()
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--chains", type=int, default=1)
@@ -185,7 +192,15 @@ def main():
     parser.add_argument("--thin", type=int, default=1)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    parser = NNEmulator.add_model_specific_args(parser)
+    cls = EMULATORS[tmp.emulator]
+    cls.add_model_specific_args(parser)
+    Emulator = cls  # type: type[pl.LightningModule]
+    # let the chosen model extend the parser
+    if tmp.emulator == "NN":
+        Emulator = NNEmulator
+    elif tmp.emulator == "DNN":
+        Emulator = DNNEmulator
+
     args = parser.parse_args()
     hparams = vars(args)
 
@@ -225,18 +240,12 @@ def main():
 
     torch.manual_seed(0)
     np.random.seed(0)
-    emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
+    emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.ckpt")
 
-    state_dict = torch.load(emulator_file, weights_only=True)
-    e = NNEmulator(
-        state_dict["l_1.weight"].shape[1],
-        state_dict["V_hat"].shape[1],
-        state_dict["V_hat"],
-        state_dict["F_mean"],
-        state_dict["area"],
-        hparams,
+    e = Emulator.load_from_checkpoint(
+        emulator_file,
+        map_location="cpu",
     )
-    e.load_state_dict(state_dict)
 
     if dataset.target_has_error:
         sigma = dataset.Y_target_error

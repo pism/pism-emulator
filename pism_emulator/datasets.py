@@ -11,7 +11,6 @@ from os.path import join
 from pathlib import Path
 from time import time
 from typing import Any, Final, Union, cast
-from torch.utils.data import get_worker_info
 
 import dask
 
@@ -21,11 +20,10 @@ import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
-from numpy.typing import NDArray
-from tqdm.auto import tqdm as _tqdm
-
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
-
+from numpy.typing import NDArray
+from torch.utils.data import get_worker_info
+from tqdm.auto import tqdm as _tqdm
 
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
 from torch.utils.data import get_worker_info

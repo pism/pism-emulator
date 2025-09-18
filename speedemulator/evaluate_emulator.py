@@ -21,7 +21,9 @@
 from argparse import ArgumentParser
 from os import mkdir
 from os.path import abspath, dirname, isdir, join, realpath
+from typing import Mapping
 
+import lightning as pl
 import numpy as np
 import pylab as plt
 import torch
@@ -31,8 +33,13 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
 
 from pism_emulator.datasets import PISMDataset
-from pism_emulator.emulators.nnemulator import NNEmulator, DNNEmulator
+from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 from pism_emulator.utils import param_keys_dict as keys_dict
+
+EMULATORS: Mapping[str, type[pl.LightningModule]] = {
+    "NN": NNEmulator,
+    "DNN": DNNEmulator,
+}
 
 
 def current_script_directory():
@@ -48,8 +55,9 @@ if __name__ == "__main__":
     __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
-    parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
+    tmp, _ = parser.parse_known_args()
+    parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--num_models", type=int, default=1)
     parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
@@ -69,14 +77,13 @@ if __name__ == "__main__":
     parser.add_argument("--sample_size", type=int, default=80)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    tmp, _ = parser.parse_known_args()
-
+    cls = EMULATORS[tmp.emulator]
+    cls.add_model_specific_args(parser)
+    Emulator = cls  # type: type[pl.LightningModule]
     # let the chosen model extend the parser
     if tmp.emulator == "NN":
-        NNEmulator.add_model_specific_args(parser)
         Emulator = NNEmulator
     elif tmp.emulator == "DNN":
-        DNNEmulator.add_model_specific_args(parser)
         Emulator = DNNEmulator
 
     args = parser.parse_args()

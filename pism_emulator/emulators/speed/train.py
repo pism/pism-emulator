@@ -22,20 +22,27 @@ import os
 import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
+from typing import Mapping
 
 import lightning as pl
 import numpy as np
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint, Timer
+from lightning.pytorch.callbacks import ModelCheckpoint, Timer, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.callbacks import TQDMProgressBar
+from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from scipy.stats import dirichlet
 from tqdm import tqdm
 
 from pism_emulator.datamodules import PISMDataModule
 from pism_emulator.datasets import PISMDataset
-from pism_emulator.emulators.nnemulator import NNEmulator, DNNEmulator
+from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 from pism_emulator.utils import plot_eigenglaciers
+
+EMULATORS: Mapping[str, type[pl.LightningModule]] = {
+    "NN": NNEmulator,
+    "DNN": DNNEmulator,
+}
+
 
 torch.set_float32_matmul_precision("medium")
 
@@ -57,9 +64,6 @@ class NoValBar(TQDMProgressBar):
         return tqdm(
             total=0,  # avoids "0/?"
             disable=True,  # fully hidden
-            leave=False,
-            dynamic_ncols=True,
-            position=self.process_position + 1,
         )
 
     # also silence the sanity-check progress (which reuses validation bar)
@@ -70,10 +74,12 @@ class NoValBar(TQDMProgressBar):
 
 def main():
     parser = ArgumentParser()
+    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
+    tmp, _ = parser.parse_known_args()
+
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--devices", default="auto")
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
@@ -105,14 +111,13 @@ def main():
     parser.add_argument("--thin", type=int, default=1)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    tmp, _ = parser.parse_known_args()
-
+    cls = EMULATORS[tmp.emulator]
+    cls.add_model_specific_args(parser)
+    Emulator = cls  # type: type[pl.LightningModule]
     # let the chosen model extend the parser
     if tmp.emulator == "NN":
-        NNEmulator.add_model_specific_args(parser)
         Emulator = NNEmulator
     elif tmp.emulator == "DNN":
-        DNNEmulator.add_model_specific_args(parser)
         Emulator = DNNEmulator
 
     args = parser.parse_args()
@@ -161,7 +166,7 @@ def main():
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
 
-    print(f"Training model {model_index}")
+    rank_zero_info(f"Training model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
@@ -214,7 +219,7 @@ def main():
     val_loader = data_loader.val_all_loader
 
     trainer.fit(e, train_loader, val_loader)
-    print(f"Training took {timer.time_elapsed():.0f}s")
+    rank_zero_info(f"Training took {timer.time_elapsed():.0f}s")
 
 
 if __name__ == "__main__":

@@ -1,14 +1,13 @@
 import random
+from pathlib import Path
+from threading import Lock
 
 import lightning as pl
 import numpy as np
 import torch
+from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
-from threading import Lock
-from pathlib import Path
-
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 
 
 def seed_worker(worker_id: int) -> None:

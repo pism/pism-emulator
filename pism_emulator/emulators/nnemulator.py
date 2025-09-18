@@ -16,10 +16,10 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import math
 from argparse import ArgumentParser
 from collections import OrderedDict
 from typing import Any
-import math
 
 import lightning as pl
 import numpy as np
@@ -154,7 +154,7 @@ class DNNEmulator(pl.LightningModule):
         self._compiled = False
         if bool(self.hparams.get("compile", False)) and hasattr(torch, "compile"):
             try:
-                self.forward = torch.compile(self.forward, dynamic=True)  # type: ignore[assignment]
+                self.forward = torch.compile(self.forward, dynamic=True)  # type: ignore[method-assign]
                 self._compiled = True
             except Exception:
                 # Fall back silently if not supported on the current platform
