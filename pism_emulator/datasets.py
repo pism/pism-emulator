@@ -15,24 +15,21 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+# pylint: disable=too-many-instance-attributes
 """
-Dataset Module
+Dataset Module.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from glob import glob
-from itertools import repeat
-from os import PathLike
-from os.path import join
 from pathlib import Path
 from time import time
-from typing import Any, Final, Sequence, cast
+from typing import Final, Sequence, cast
 
 import dask
 
@@ -42,7 +39,7 @@ import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from numpy.typing import NDArray
 from torch.utils.data import Dataset, get_worker_info
 from tqdm.auto import tqdm as _tqdm
@@ -187,9 +184,6 @@ def id_key(path: str | Path) -> int:
     ValueError
         If the pattern is not found in the basename.
 
-    See Also
-    --------
-    parse_id_from_path : Alias with the same behavior and signature.
     """
     m = ID_RE.search(Path(path).name)
     if m is None:
@@ -231,7 +225,7 @@ def parse_id_from_path(p: str | Path) -> int:
 
 
 def _read_one_nc4(
-    path: str | PathLike[str],
+    path: str | Path,
     var: str,
     step: int,
     idx1d: NDArray[np.intp],
@@ -249,7 +243,7 @@ def _read_one_nc4(
 
     Parameters
     ----------
-    path : str or os.PathLike[str]
+    path : str or Path
         Path to a NetCDF file.
     var : str
         Name of the variable to read from ``path``.
@@ -332,8 +326,144 @@ def _read_one_nc4(
 
 
 @dataclass
+class TargetData:
+    """
+    Target field, mask, and grid metadata derived from the target NetCDF.
+
+    Attributes
+    ----------
+    ny : int
+        Number of grid points in the ``y`` dimension after thinning.
+    nx : int
+        Number of grid points in the ``x`` dimension after thinning.
+    mask_2d : numpy.ndarray
+        Boolean mask of shape ``(ny, nx)`` where ``True`` indicates masked cells
+        (NaN or below correlation threshold).
+    sparse_idx_2d : tuple[numpy.ndarray, numpy.ndarray]
+        Tuple of 1-D index arrays giving unmasked ``(y, x)`` coordinates.
+    sparse_idx_1d : numpy.ndarray
+        Linear (C-order) indices of unmasked nodes with shape ``(nnodes,)``.
+    Y_target : torch.Tensor
+        Target values stacked over unmasked nodes with shape ``(nnodes,)``.
+    Y_target_2d : numpy.ma.MaskedArray
+        2-D masked array view of the target with shape ``(ny, nx)``.
+    Y_target_error : torch.Tensor or None, default=None
+        Per-node uncertainty (if available) stacked over unmasked nodes.
+    Y_target_error_2d : numpy.ndarray or None, default=None
+        2-D array of per-node uncertainties aligned with ``Y_target_2d``.
+    Y_target_corr : torch.Tensor or None, default=None
+        Correlation variable values stacked over unmasked nodes (if available).
+    Y_target_corr_2d : numpy.ndarray or None, default=None
+        2-D array of correlation values aligned with ``Y_target_2d``.
+    grid_resolution : float, default=0.0
+        Grid spacing in the ``x`` direction (absolute difference between the
+        first two coordinates), units match the input dataset.
+    """
+
+    ny: int
+    nx: int
+    mask_2d: np.ndarray  # bool      (ny, nx)
+    sparse_idx_2d: tuple[np.ndarray, np.ndarray]
+    sparse_idx_1d: np.ndarray  # intp      (nnodes,)
+    Y_target: torch.Tensor  # (nnodes,)
+    Y_target_2d: np.ma.MaskedArray  # (ny, nx)
+    Y_target_error: torch.Tensor | None = None
+    Y_target_error_2d: np.ndarray | None = None
+    Y_target_corr: torch.Tensor | None = None
+    Y_target_corr_2d: np.ndarray | None = None
+    grid_resolution: float = 0.0
+
+
+@dataclass
+class SamplesData:
+    """
+    Prepared features and responses aligned across training runs.
+
+    Attributes
+    ----------
+    X : torch.Tensor
+        Feature matrix of shape ``(n_runs, n_params)``. If
+        :data:`DatasetConfig.normalize_x` is ``True``, features are z-scored.
+    Y : torch.Tensor
+        Response matrix of shape ``(n_runs, n_nodes)`` (sparse-node ordering).
+    X_keys : list[str]
+        Column names from the samples CSV corresponding to ``X`` columns.
+    X_mean : torch.Tensor
+        Per-column mean used for normalization (or the raw mean if disabled).
+    X_std : torch.Tensor
+        Per-column standard deviation used for normalization
+        (or the raw std if normalization disabled).
+    n_parameters : int
+        Number of feature columns (``X.shape[1]``).
+    n_samples : int
+        Number of retained runs after filtering (``X.shape[0]`` / ``Y.shape[0]``).
+    n_grid_points : int
+        Number of unmasked nodes per response (``Y.shape[1]``).
+    normed_area : torch.Tensor
+        Normalized per-node area weights of shape ``(n_nodes,)`` that sum to 1.
+    """
+
+    X: torch.Tensor  # (nruns, nparams) (normalized if requested)
+    Y: torch.Tensor  # (nruns, nnodes)
+    X_keys: list[str]
+    X_mean: torch.Tensor
+    X_std: torch.Tensor
+    n_parameters: int
+    n_samples: int
+    n_grid_points: int
+    normed_area: torch.Tensor  # (nnodes,)
+
+
+@dataclass
 class DatasetConfig:
-    """Immutable input/configuration for the dataset."""
+    """
+    Immutable configuration for building a :class:`PISMDataset`.
+
+    Attributes
+    ----------
+    training_files : list[str]
+        Sorted list of paths to training NetCDF files. Each filename must
+        contain an ``id_<N>`` token used to align with the samples CSV.
+    samples_file : str
+        Path to the CSV containing parameter samples. Must include an ``id``
+        column matching the training file IDs.
+    target_file : str
+        Path to the target (observational) NetCDF file.
+    training_var : str, default="velsurf_mag"
+        Variable name to read from each training file.
+    target_var : str, default="velsurf_mag"
+        Variable name to read from the target file.
+    target_corr_var : str, default="thickness"
+        Optional correlation variable used to mask low-confidence grid cells.
+    target_error_var : str, default="velsurf_mag_error"
+        Optional per-node uncertainty variable in the target file.
+    target_corr_threshold : float, default=25.0
+        Threshold applied to ``target_corr_var``; values below this are masked.
+    thin : int, default=1
+        Spatial stride for downsampling along ``y`` and ``x`` when reading arrays.
+    normalize_x : bool, default=True
+        If ``True``, z-score normalize feature columns (per column mean/std).
+    log_y : bool, default=True
+        If ``True``, apply ``log10`` to responses after reading; ``-inf`` values
+        are set to 0 to match legacy behavior.
+    threshold : float, default=1e5
+        Run-level filter on the **max** response (in linear scale). Runs exceeding
+        this value are dropped.
+    epsilon : float, default=0.0
+        Value used to replace NaNs after CF decode and masking.
+    verbose : bool, default=False
+        If ``True``, emit rank-0 progress messages.
+    target_engine : str or None, default=None
+        xarray engine for ``target_file``. If ``None``, detected via file signature.
+    training_engine : str or None, default=None
+        Engine hint for training files. Defaults to ``"h5netcdf"`` for stability.
+    parallel : bool, default=True
+        If ``True``, read training files in parallel via a process pool.
+    chunks_after : dict[str, int] or None, default=None
+        Placeholder for chunking controls kept for API compatibility.
+    dask_scheduler : str or None, default=None
+        If provided, sets the Dask scheduler (e.g., ``"threads"``, ``"processes"``).
+    """
 
     training_files: list[str]
     samples_file: str
@@ -354,39 +484,6 @@ class DatasetConfig:
     parallel: bool = True
     chunks_after: dict[str, int] | None = None
     dask_scheduler: str | None = None
-
-
-@dataclass
-class TargetData:
-    """Computed target/mask/grid info."""
-
-    ny: int
-    nx: int
-    mask_2d: np.ndarray  # bool      (ny, nx)
-    sparse_idx_2d: tuple[np.ndarray, np.ndarray]
-    sparse_idx_1d: np.ndarray  # intp      (nnodes,)
-    Y_target: torch.Tensor  # (nnodes,)
-    Y_target_2d: np.ma.MaskedArray  # (ny, nx)
-    Y_target_error: torch.Tensor | None = None
-    Y_target_error_2d: np.ndarray | None = None
-    Y_target_corr: torch.Tensor | None = None
-    Y_target_corr_2d: np.ndarray | None = None
-    grid_resolution: float = 0.0
-
-
-@dataclass
-class SamplesData:
-    """Prepared samples/features/responses."""
-
-    X: torch.Tensor  # (nruns, nparams) (normalized if requested)
-    Y: torch.Tensor  # (nruns, nnodes)
-    X_keys: list[str]
-    X_mean: torch.Tensor
-    X_std: torch.Tensor
-    n_parameters: int
-    n_samples: int
-    n_grid_points: int
-    normed_area: torch.Tensor  # (nnodes,)
 
 
 class PISMDataset(Dataset):
@@ -474,7 +571,7 @@ class PISMDataset(Dataset):
 
         if isinstance(training_files, (list, tuple)):
             tfiles = [str(p) for p in training_files]
-        elif isinstance(training_files, (str, os.PathLike)):
+        elif isinstance(training_files, (str, Path)):
             pattern = os.fspath(training_files)
             tfiles = [str(p) for p in Path().glob(pattern)]
         else:
@@ -653,7 +750,7 @@ class PISMDataset(Dataset):
             rank_zero_info("  Loading samples & training responses... (netCDF4 direct)")
 
         ids = [self._parse_id(p) for p in cfg.training_files]
-        files_by_id = {i: p for i, p in zip(ids, cfg.training_files)}
+        files_by_id = dict(zip(ids, cfg.training_files))
 
         samples = (
             pd.read_csv(cfg.samples_file, delimiter=",", skipinitialspace=True)
