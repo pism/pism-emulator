@@ -102,7 +102,6 @@ def main():
     )
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
-    parser.add_argument("--train_size", type=float, default=1.0)
     parser.add_argument("--thin", type=int, default=1)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
@@ -132,7 +131,6 @@ def main():
     target_file = args.target_file
     target_var = args.target_var
     target_error_var = args.target_error_var
-    train_size = args.train_size
     thin = args.thin
     tb_logs_dir = f"{emulator_dir}/tb_logs"
     training_files = args.TRAINING_FILES
@@ -168,29 +166,16 @@ def main():
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    if train_size == 1.0:
-        data_loader = PISMDataModule(
-            X, F, omegas, omegas_0, num_workers=num_workers, batch_size=batch_size
-        )
-    else:
-        data_loader = PISMDataModule(
-            X,
-            F,
-            omegas,
-            omegas_0,
-            train_size=train_size,
-            num_workers=num_workers,
-            batch_size=batch_size,
-        )
+    data_loader = PISMDataModule(
+        X, F, omegas, omegas_0, num_workers=num_workers, batch_size=batch_size
+    )
 
     data_loader.prepare_data(q=q)
     data_loader.setup(stage="fit")
     n_eigenglaciers = data_loader.n_eigenglaciers
     V_hat = data_loader.V_hat
     F_mean = data_loader.F_mean
-
     plot_eigenglaciers(dataset, data_loader, model_index, emulator_dir, q=q)
-
     checkpoint_callback = ModelCheckpoint(
         dirpath=f"{emulator_dir}/emulator",
         filename="emulator_{model_index}",
@@ -225,12 +210,8 @@ def main():
         devices=devices,
         strategy=strategy,
     )
-    if train_size == 1.0:
-        train_loader = data_loader.train_all_loader
-        val_loader = data_loader.val_all_loader
-    else:
-        train_loader = data_loader.train_loader
-        val_loader = data_loader.val_loader
+    train_loader = data_loader.train_all_loader
+    val_loader = data_loader.val_all_loader
 
     trainer.fit(e, train_loader, val_loader)
     print(f"Training took {timer.time_elapsed():.0f}s")

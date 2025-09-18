@@ -5,6 +5,10 @@ import numpy as np
 import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
+from threading import Lock
+from pathlib import Path
+
+from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 
 
 def seed_worker(worker_id: int) -> None:
@@ -52,6 +56,12 @@ class PISMDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.train_size = train_size
         self.num_workers = num_workers
+        self._eigs_lock = Lock()
+        self._eigs_ready = False
+        self.V_hat = None
+        self.F_bar = None
+        self.F_mean = None
+        self.eigs_vals = None
 
     def setup(self, stage: str | None = None):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
@@ -103,52 +113,82 @@ class PISMDataModule(pl.LightningDataModule):
         self.val_loader = val_loader
 
     def prepare_data(self, **kwargs):
-        V_hat, F_bar, F_mean = self.get_eigenglaciers(**kwargs)
+        V_hat, F_bar, F_mean, eigs_vals = self.get_eigenglaciers(**kwargs)
         n_eigenglaciers = V_hat.shape[1]
         self.V_hat = V_hat
         self.F_bar = F_bar
         self.F_mean = F_mean
+        self.eigs_vals = eigs_vals
         self.n_eigenglaciers = n_eigenglaciers
 
-    def get_eigenglaciers(self, **kwargs):
-        print("Generating eigenglaciers")
-        defaultKwargs = {
-            "cutoff": 1.0,
-            "q": 10,
-            "svd_lowrank": True,
-            "eigenvalues": False,
-        }
-        if len(kwargs) > 0:
-            kwargs = {**defaultKwargs, **kwargs}
-        else:
-            kwargs = defaultKwargs
+    def get_eigenglaciers(
+        self,
+        cutoff: float = 1.0,
+        q: int = 10,
+        svd_lowrank: bool = True,
+        cache_path: str | Path | None = None,
+    ):
+        if self._eigs_ready:
+            return self.V_hat, self.F_bar, self.F_mean, self.eigs_vals
 
-        q = kwargs["q"]
+        if cache_path is not None:
+            cache_path = Path(cache_path)
+            if cache_path.exists():
+                pack = torch.load(cache_path, map_location="cpu")
+                self.V_hat, self.F_bar, self.F_mean, self.eigs_vals = (
+                    pack["V_hat"],
+                    pack["F_bar"],
+                    pack["F_mean"],
+                    pack["eigs_vals"],
+                )
+                self._eigs_ready = True
 
-        F = self.F
-        omegas = self.omegas
-        n_grid_points = F.shape[1]
-        F_mean = (F * omegas).sum(axis=0)
-        F_bar = F - F_mean  # Eq. 28
-        if kwargs["svd_lowrank"]:
-            Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-            U, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
-            lamda = S**2 / (n_grid_points)
-        else:
-            S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
+                return self.V_hat, self.F_bar, self.F_mean, self.eigs_vals
 
-            lamda, V = torch.linalg.eig(S)  # Eq. 26
-            lamda = lamda[:, 0].squeeze()
+        rank_zero_info("Generating eigenglaciers")
+        # Only one caller does the compute
+        with self._eigs_lock:
+            # another thread may have finished while we waited
+            if self._eigs_ready:
+                return self.V_hat, self.F_bar, self.F_mean, self.eigs_vals
 
-        print(f"    using the first {q} eigen values")
-        lamda_truncated = lamda.detach()
-        V = V.detach()
-        V_hat = V @ torch.diag(torch.sqrt(lamda))
+            F = self.F
+            omegas = self.omegas
+            n_grid_points = F.shape[1]
+            F_mean = (F * omegas).sum(axis=0)
+            F_bar = F - F_mean  # Eq. 28
+            if svd_lowrank:
+                Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
+                U, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
+                lamda = S**2 / (n_grid_points)
+            else:
+                S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
-        if kwargs["eigenvalues"]:
+                lamda, V = torch.linalg.eig(S)  # Eq. 26
+                lamda = lamda[:, 0].squeeze()
+
+            rank_zero_info(f"    using the first {q} eigen values")
+            lamda_truncated = lamda.detach()
+            V = V.detach()
+            V_hat = V @ torch.diag(torch.sqrt(lamda))
+
+            if cache_path is not None:
+                torch.save(
+                    {
+                        "V_hat": V_hat.cpu(),
+                        "F_bar": F_bar.cpu(),
+                        "F_mean": F_mean.cpu(),
+                        "eigs_vals": lamda.cpu(),
+                    },
+                    cache_path,
+                )
+
+            self.V_hat = V_hat
+            self.F_bar = F_bar
+            self.F_mean = F_mean
+            self._eigs_ready = True
+
             return V_hat, F_bar, F_mean, lamda
-        else:
-            return V_hat, F_bar, F_mean
 
     def train_dataloader(self):
         return self.train_loader

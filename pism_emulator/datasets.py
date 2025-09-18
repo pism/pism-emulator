@@ -11,6 +11,7 @@ from os.path import join
 from pathlib import Path
 from time import time
 from typing import Any, Final, Union, cast
+from torch.utils.data import get_worker_info
 
 import dask
 
@@ -21,12 +22,37 @@ import pandas as pd
 import torch
 import xarray as xr
 from numpy.typing import NDArray
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm as _tqdm
 
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 
 
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
+from torch.utils.data import get_worker_info
+
+
+def _is_global_zero() -> bool:
+    # works with torchrun and Lightning
+    r = os.environ.get("RANK", os.environ.get("GLOBAL_RANK", "0"))
+    try:
+        return int(r) == 0
+    except ValueError:
+        return True  # be permissive if unset
+
+
+def _is_worker_zero() -> bool:
+    wi = get_worker_info()
+    return (wi is None) or (wi.id == 0)
+
+
+def tqdm_rank0(*args, **kwargs):
+    """tqdm that only shows on global rank 0 and worker 0."""
+    kwargs.setdefault("dynamic_ncols", True)
+    kwargs.setdefault("leave", False)
+    # disable everywhere except global rank 0 + worker 0
+    if not (_is_global_zero() and _is_worker_zero()):
+        kwargs["disable"] = True
+    return _tqdm(*args, **kwargs)
 
 
 def id_key(path: str | os.PathLike[str]) -> int:
@@ -361,7 +387,7 @@ class PISMDataset(torch.utils.data.Dataset):
                 ): row
                 for row, i in enumerate(keep_ids)
             }
-            for fut in tqdm(
+            for fut in tqdm_rank0(
                 as_completed(future_to_row),
                 total=total,
                 desc="Reading training files",

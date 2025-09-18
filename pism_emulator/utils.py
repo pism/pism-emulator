@@ -470,7 +470,7 @@ def plot_eigenglaciers(
     figsize=(3.2, 3.6),
     q: int = 6,
 ):
-    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True, q=q)
+    V_hat, _, _, lamda = data_loader.get_eigenglaciers(q=q)
 
     lamda_scaled = lamda / lamda.sum() * 100
     fig, axs = plt.subplots(
