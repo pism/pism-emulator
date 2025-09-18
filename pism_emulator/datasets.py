@@ -23,6 +23,9 @@ import xarray as xr
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
+from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+
+
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
 
 
@@ -211,7 +214,9 @@ class PISMDataset(torch.utils.data.Dataset):
     # ---------------------------
     def _load_target_and_mask(self):
         if self.verbose:
-            print(f"Loading target {self.target_file} (engine={self.target_engine})")
+            rank_zero_info(
+                f"Loading target {self.target_file} (engine={self.target_engine})"
+            )
 
         # open without forcing chunks to avoid “separate stored chunks” warnings
         ds = xr.open_dataset(
@@ -304,7 +309,7 @@ class PISMDataset(torch.utils.data.Dataset):
 
     def _load_training_and_samples(self):
         if self.verbose:
-            print("  Loading samples & training responses... (netCDF4 direct)")
+            rank_zero_info("  Loading samples & training responses... (netCDF4 direct)")
 
         # Map files to ids and align with samples
         ids = [self._parse_id(p) for p in self.training_files]
@@ -320,7 +325,7 @@ class PISMDataset(torch.utils.data.Dataset):
         if self.verbose:
             missing = sorted(set(samples.index).difference(keep_ids))
             if missing:
-                print(f"  Missing runs (dropping from samples): {missing}")
+                rank_zero_info(f"  Missing runs (dropping from samples): {missing}")
 
         samples = samples.loc[keep_ids]
 
@@ -365,7 +370,7 @@ class PISMDataset(torch.utils.data.Dataset):
                 row = future_to_row[fut]
                 response[row] = fut.result()
         end_time = time()
-        print(f"Reading training data took {(end_time-start_time):.0f}s")
+        rank_zero_info(f"Reading training data took {(end_time-start_time):.0f}s")
 
         # Filter by threshold (same as old code: on linear scale)
         good = response.max(axis=1) < float(self.threshold)

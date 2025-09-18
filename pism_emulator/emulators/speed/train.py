@@ -37,6 +37,8 @@ from pism_emulator.datasets import PISMDataset
 from pism_emulator.emulators.nnemulator import NNEmulator, DNNEmulator
 from pism_emulator.utils import plot_eigenglaciers
 
+torch.set_float32_matmul_precision("medium")
+
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
 

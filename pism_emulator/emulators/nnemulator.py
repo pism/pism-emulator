@@ -1,4 +1,4 @@
-# Copyright (C) 2021-23 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-25 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -18,7 +18,7 @@
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from typing import Dict, List, Tuple, Any
+from typing import Any
 import math
 
 import lightning as pl
@@ -48,7 +48,7 @@ class MLPBlock(nn.Module):
         in_features: int,
         out_features: int,
         p_dropout: float = 0.0,
-        norm: str = "batch",
+        norm: str = "layer",
         activation: str = "relu",
     ) -> None:
         super().__init__()
@@ -205,7 +205,7 @@ class DNNEmulator(pl.LightningModule):
 
     def configure_optimizers(
         self,
-    ) -> Tuple[List[Optimizer], List[Dict[str, _LRScheduler]]]:
+    ) -> tuple[list[Optimizer], list[dict[str, _LRScheduler]]]:
         opt = torch.optim.Adam(
             self.parameters(), lr=float(self.hparams.learning_rate), weight_decay=0.0
         )
@@ -213,8 +213,8 @@ class DNNEmulator(pl.LightningModule):
         return [opt], [sch]
 
     def _shared_step(
-        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor]
-    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        self, batch: tuple[Tensor, Tensor, Tensor, Tensor]
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         x, f, o, _ = batch
         f_pred = self.forward(x)
         # o has shape (..., 2) with (t0, t1); area_absolute_error wants o_0
@@ -223,7 +223,7 @@ class DNNEmulator(pl.LightningModule):
         return x, f, f_pred, o, loss
 
     def training_step(
-        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
+        self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
     ) -> Tensor:
         x, f, f_pred, o, loss = (*self._shared_step(batch),)
         o_0 = o[..., 0]
@@ -238,8 +238,8 @@ class DNNEmulator(pl.LightningModule):
         return loss
 
     def validation_step(
-        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
-    ) -> Dict[str, Tensor]:
+        self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
+    ) -> dict[str, Tensor]:
         x, f, f_pred, o, loss = (*self._shared_step(batch),)
         o_0 = o[..., 0]
         self.log(
@@ -253,8 +253,8 @@ class DNNEmulator(pl.LightningModule):
         return {"loss": loss}
 
     def test_step(
-        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
-    ) -> Dict[str, Tensor]:
+        self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
+    ) -> dict[str, Tensor]:
         x, f, f_pred, o, loss = (*self._shared_step(batch),)
         o_0 = o[..., 0]
         self.log(
@@ -383,8 +383,16 @@ class NNEmulator(pl.LightningModule):
         f_pred = self.forward(x)
         area = self.area
 
-        self.log("train_loss", self.train_ae(f_pred, f, o, area))
-        self.log("test_loss", self.test_ae(f_pred, f, o_0, area))
+        self.log(
+            "train_loss",
+            self.train_ae(f_pred, f, o, area),
+            sync_dist=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae(f_pred, f, o_0, area),
+            sync_dist=True,
+        )
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
