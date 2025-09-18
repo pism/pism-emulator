@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Literal, Optional, Sequence, Tuple
 
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
@@ -232,30 +232,31 @@ class MALASamplerModule(pl.LightningModule):
         )
 
         H = 0.5 * (H + H.T)
-        # Choose rank. For an exact decomposition use q=min(H.shape), but you can pick
-        # a smaller q for a low-rank approximation.
-        q = min(H.shape)  # or your chosen truncation
+        # Fun fact: performance is about the same.
+        # # Choose rank. For an exact decomposition use q=min(H.shape), but you can pick
+        # # a smaller q for a low-rank approximation.
+        # q = min(H.shape)  # or your chosen truncation
 
-        # Low-rank SVD: H ≈ U @ diag(S) @ V.T
-        # For symmetric H, U ≈ V (up to signs)
-        U, S, V = torch.svd_lowrank(H, q=q)
+        # # Low-rank SVD: H ≈ U @ diag(S) @ V.T
+        # # For symmetric H, U ≈ V (up to signs)
+        # U, S, V = torch.svd_lowrank(H, q=q)
 
-        # S are singular values (>=0). For symmetric H, S = |λ|.
-        # Your λ_p = sqrt(λ^2 + eps) equals sqrt(S^2 + eps) here.
-        eps = self._eps_eig
-        lam_p = torch.sqrt(S * S + eps)
+        # # S are singular values (>=0). For symmetric H, S = |λ|.
+        # # Your λ_p = sqrt(λ^2 + eps) equals sqrt(S^2 + eps) here.
+        # eps = self._eps_eig
+        # lam_p = torch.sqrt(S * S + eps)
 
-        # Build Hpos ≈ V diag(lam_p) V^T  and Hinv ≈ V diag(1/lam_p) V^T
-        # (use broadcasting instead of forming explicit diags)
-        Hpos = (V * lam_p) @ V.T
-        Hinv = (V * (1.0 / lam_p.clamp_min(1e-12))) @ V.T
+        # # Build Hpos ≈ V diag(lam_p) V^T  and Hinv ≈ V diag(1/lam_p) V^T
+        # # (use broadcasting instead of forming explicit diags)
+        # Hpos = (V * lam_p) @ V.T
+        # Hinv = (V * (1.0 / lam_p.clamp_min(1e-12))) @ V.T
 
-        # lam, Q = torch.linalg.eigh(H)
-        # lam = lam.real
-        # Q = Q.real
-        # lam_p = torch.sqrt(lam * lam + self._eps_eig)
-        # Hpos = Q @ torch.diag(lam_p) @ Q.T
-        # Hinv = Q @ torch.diag(1.0 / lam_p) @ Q.T
+        lam, Q = torch.linalg.eigh(H)
+        lam = lam.real
+        Q = Q.real
+        lam_p = torch.sqrt(lam * lam + self._eps_eig)
+        Hpos = Q @ torch.diag(lam_p) @ Q.T
+        Hinv = Q @ torch.diag(1.0 / lam_p) @ Q.T
         log_det_Hinv = torch.sum(torch.log(1.0 / lam_p))
         return log_pi, g, Hpos, Hinv, log_det_Hinv
 

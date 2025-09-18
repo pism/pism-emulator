@@ -23,7 +23,7 @@ from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Sequence
-
+import time, datetime as dt
 import arviz as az
 import matplotlib.pylab as plt
 import numpy as np
@@ -32,12 +32,13 @@ import lightning as pl
 import torch
 from joblib import Parallel, delayed
 from lightning import LightningModule
-from pytorch_lightning.callbacks import BasePredictionWriter, Timer
+from lightning.pytorch.callbacks import BasePredictionWriter, Timer
 from scipy.stats import beta
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+import warnings
 
 from pism_emulator.datasets import PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
@@ -47,6 +48,13 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "NN": NNEmulator,
     "DNN": DNNEmulator,
 }
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*'predict_dataloader' does not have many workers.*",
+    category=UserWarning,
+    module=r"lightning\.pytorch",
+)
 
 
 class DiskPredictionWriter(BasePredictionWriter):
@@ -119,12 +127,6 @@ def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
     )
 
 
-import time, datetime as dt
-import lightning.pytorch as pl
-from lightning.pytorch.callbacks import Timer
-from torch.utils.data import DataLoader
-
-
 def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
     # Dataset should yield (chain_id, init_vector)
     dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False, num_workers=0)
@@ -152,9 +154,6 @@ def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
             f"[predict/ddp_spawn] Elapsed: {wall_secs:.2f}s "
             f"({str(dt.timedelta(seconds=int(wall_secs)))})"
         )
-
-        # Load per-rank outputs
-        from pathlib import Path
 
         files = sorted(Path(tmp_dir).glob("rank*_chain*.pt"))
         if not files:
