@@ -190,10 +190,10 @@ if __name__ == "__main__":
             )
 
             F_val_2d = np.zeros((dataset.target.ny, dataset.target.nx))
-            F_val_2d.put(dataset.sparse_idx_1d, 10**F_val)
+            F_val_2d.put(dataset.target.sparse_idx_1d, 10**F_val)
 
             F_pred_2d = np.zeros((dataset.target.ny, dataset.target.nx))
-            F_pred_2d.put(dataset.sparse_idx_1d, 10**F_pred)
+            F_pred_2d.put(dataset.target.sparse_idx_1d, 10**F_pred)
 
             mask = np.logical_or(F_val_2d < 0.01, F_pred_2d < 0.01)
             F_val_2d = np.ma.array(data=F_val_2d, mask=mask)

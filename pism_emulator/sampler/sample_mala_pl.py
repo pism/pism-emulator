@@ -254,11 +254,11 @@ def main():
         target_var="velsurf_mag",
     )
 
-    X = dataset.X
+    X = dataset.samples.X
     X_min = X.cpu().numpy().min(axis=0) - 1e-3
     X_max = X.cpu().numpy().max(axis=0) + 1e-3
-    n_parameters = dataset.n_parameters
-    Y_target = dataset.Y_target
+    n_parameters = dataset.samples.n_parameters
+    Y_target = dataset.target.Y_target
 
     torch.manual_seed(0)
     np.random.seed(0)
@@ -269,14 +269,14 @@ def main():
         map_location="cpu",
     )
 
-    if dataset.target_has_error:
-        sigma = dataset.Y_target_error
+    if dataset.target.target_has_error:
+        sigma = dataset.target.Y_target_error
         sigma[sigma < 10] = 10
     else:
         sigma = 10
 
     rho = 1.0 / (1e4**2)
-    point_area = (dataset.grid_resolution * thin) ** 2
+    point_area = (dataset.target.grid_resolution * thin) ** 2
     K = point_area * rho
     sigma_hat = np.sqrt(sigma**2 / K**2)
 
@@ -312,8 +312,8 @@ def main():
         lr=0.1,
     )
     X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
-    X_mean = np.asarray(dataset.X_mean.cpu().numpy(), dtype=np.float32)
-    X_std = np.asarray(dataset.X_std.cpu().numpy(), dtype=np.float32)
+    X_mean = np.asarray(dataset.samples.X_mean.cpu().numpy(), dtype=np.float32)
+    X_std = np.asarray(dataset.samples.X_std.cpu().numpy(), dtype=np.float32)
 
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     chains = run_sampling(sampler, inits, accelerator=accelerator)
@@ -323,15 +323,17 @@ def main():
     arr = np.stack(chains_np, axis=0)  # (C, S, D)
 
     # Denorm once
-    X_mean = np.asarray(dataset.X_mean.cpu().numpy(), dtype=np.float32)
-    X_std = np.asarray(dataset.X_std.cpu().numpy(), dtype=np.float32)
+    X_mean = np.asarray(dataset.samples.X_mean.cpu().numpy(), dtype=np.float32)
+    X_std = np.asarray(dataset.samples.X_std.cpu().numpy(), dtype=np.float32)
     arr_denorm = arr * X_std[None, None, :] + X_mean[None, None, :]
 
     C, S, D = arr_denorm.shape
     coords = {"chain": np.arange(C), "draw": np.arange(S)}
-    dims = {name: ["chain", "draw"] for name in dataset.X_keys}
+    dims = {name: ["chain", "draw"] for name in dataset.samples.X_keys}
 
-    posterior = {name: arr_denorm[:, :, i] for i, name in enumerate(dataset.X_keys)}
+    posterior = {
+        name: arr_denorm[:, :, i] for i, name in enumerate(dataset.samples.X_keys)
+    }
 
     idata = az.from_dict(
         posterior=posterior,
@@ -357,7 +359,7 @@ def main():
         var_all = np.nanvar(arr_denorm, axis=(0, 1))
         keep = var_all > 1e-12
         if np.any(keep):
-            var_names = [dataset.X_keys[i] for i in np.flatnonzero(keep)]
+            var_names = [dataset.samples.X_keys[i] for i in np.flatnonzero(keep)]
             az.plot_trace(
                 idata, var_names=var_names, hist_kwargs={"bins": 50}
             )  # <-- key fix: kind/hist_kwargs at top level
