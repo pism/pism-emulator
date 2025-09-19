@@ -15,20 +15,25 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+"""
+Utils.
+"""
 
-# utils.py contains generic functions to read data or perform statistical analyses.
+from __future__ import annotations
 
 import sys
 from math import sqrt
 from os import mkdir
 from os.path import isdir, join
-from typing import Union
+from pathlib import Path
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 import pylab as plt
 import xarray as xr
 from matplotlib.colors import LogNorm
+from numpy.typing import NDArray
 from pyDOE2 import lhs
 from SALib.sample import saltelli
 from scipy.stats.distributions import gamma, randint, truncnorm, uniform
@@ -42,55 +47,107 @@ param_keys_dict = {
     "GCM": "GCM (1)",
     "FICE": "$f_i$ (mm K$^{-1}$ day$^{-1}$)",
     "FSNOW": "$f_s$ (mm K$^{-1}$ day$^{-1}$)",
-    "RFR": "$\psi (1)$",
-    "PRS": "$\omega$ (% K$^{-1}$)",
+    "RFR": r"$\psi (1)$",
+    "PRS": r"$\omega$ (% K$^{-1}$)",
     "OCM": "$m_{t}$ (1)",
     "OCS": "$m_{x}$ (1)",
-    "TCT": "$h_{\mathrm{min}}$ (1)",
-    "VCM": "$\sigma_{\mathrm{max}}$ (MPa)",
-    "SIAE": "$E_{\mathrm{SIA}}$ (1)",
-    "SSAN": "$n_{\mathrm{SSA}}$ (1)",
-    "TEFO": "$\delta$ (1)",
+    "TCT": r"$h_{\mathrm{min}}$ (1)",
+    "VCM": r"$\sigma_{\mathrm{max}}$ (MPa)",
+    "SIAE": r"$E_{\mathrm{SIA}}$ (1)",
+    "SSAN": r"$n_{\mathrm{SSA}}$ (1)",
+    "TEFO": r"$\delta$ (1)",
     "PPQ": "$q$ (1)",
-    "PHIMIN": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
-    "PHIMAX": "$\phi_{\mathrm{max}}$ ($^{\circ}$)",
-    "ZMIN": "$z_{\mathrm{min}}$ (m)",
-    "ZMAX": "$z_{\mathrm{max}}$ (m)",
+    "PHIMIN": r"$\phi_{\mathrm{min}}$ ($^{\circ}$)",
+    "PHIMAX": r"$\phi_{\mathrm{max}}$ ($^{\circ}$)",
+    "ZMIN": r"$z_{\mathrm{min}}$ (m)",
+    "ZMAX": r"$z_{\mathrm{max}}$ (m)",
     "a_glen": "A (Pa^{-n} s^{-1})",
-    "sia_e": "$E_{\mathrm{SIA}}$ (1)",
-    "ssa_e": "$E_{\mathrm{SSA}}$ (1)",
-    "ssa_n": "$n_{\mathrm{SSA}}$ (1)",
+    "sia_e": r"$E_{\mathrm{SIA}}$ (1)",
+    "ssa_e": r"$E_{\mathrm{SSA}}$ (1)",
+    "ssa_n": r"$n_{\mathrm{SSA}}$ (1)",
     "ppq": "$q$ (1)",
-    "tefo": "$\delta$ (1)",
-    "till_effective_fraction_overburden": "$\delta$ (1)",
-    "pseudo_plastic_uthershold": "u_{\mathrm{thr} (m yr^{-1})}",
-    "phi_min": "$\phi_{\mathrm{min}}$ ($^{\circ}$)",
-    "z_min": "$z_{\mathrm{min}}$ (m)",
-    "z_max": "$z_{\mathrm{max}}$ (m)",
-    "pseudo_plastic_uthreshold": "$u_{\mathrm{th}}$ (m yr$^{-1}$)",
-    "SIAe": "$E_{\mathrm{SIA}}$ (1)",
-    "SSAe": "$E_{\mathrm{SSA}}$ (1)",
-    "topg_to_phi_base": "$b_{\mathrm{base}}$ (m)",
-    "topg_to_phi_range": "$b_{\mathrm{range}}$ (m)",
+    "tefo": r"$\delta$ (1)",
+    "till_effective_fraction_overburden": r"$\delta$ (1)",
+    "pseudo_plastic_uthershold": r"u_{\mathrm{thr} (m yr^{-1})}",
+    "phi_min": r"$\phi_{\mathrm{min}}$ ($^{\circ}$)",
+    "z_min": r"$z_{\mathrm{min}}$ (m)",
+    "z_max": r"$z_{\mathrm{max}}$ (m)",
+    "pseudo_plastic_uthreshold": r"$u_{\mathrm{th}}$ (m yr$^{-1}$)",
+    "SIAe": r"$E_{\mathrm{SIA}}$ (1)",
+    "SSAe": r"$E_{\mathrm{SSA}}$ (1)",
+    "topg_to_phi_base": r"$b_{\mathrm{base}}$ (m)",
+    "topg_to_phi_range": r"$b_{\mathrm{range}}$ (m)",
 }
 
 
-def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
+def load_hirham_climate(
+    file: str | Path = "DMI-HIRHAM5_1980_MM.nc",
+    thinning_factor: int = 1,
+) -> tuple[
+    NDArray[np.floating],
+    NDArray[np.floating],
+    NDArray[np.floating],
+    NDArray[np.floating],
+    NDArray[np.floating],
+    NDArray[np.floating],
+    NDArray[np.floating],
+]:
     """
-    Read and return Obs
-    """
+    Load monthly HIRHAM5 climate fields and return thinned arrays.
 
+    The dataset is stacked over spatial dims (``rlat``, ``rlon``) into a 1-D
+    ``z`` dimension, NaNs are dropped along ``z`` (per time step), and simple
+    unit conversions are applied. Outputs are optionally thinned along the last
+    axis by ``thinning_factor``.
+
+    Parameters
+    ----------
+    file : str or pathlib.Path, default="DMI-HIRHAM5_1980_MM.nc"
+        Path to a HIRHAM5 monthly NetCDF file containing variables such as
+        ``tas``, ``rainfall``, ``snfall``, ``gld``, ``snmel``, ``rogl``, ``rfrz``.
+    thinning_factor : int, default=1
+        Subsampling stride applied to the last (stacked spatial) axis of the
+        returned arrays. Use ``1`` for no thinning.
+
+    Returns
+    -------
+    temp : ndarray
+        Air temperature in °C, shape ``(..., M)``.
+    precip : ndarray
+        Total precipitation (rain + snow) in m/yr, shape ``(..., M)``.
+    snowfall_sum : ndarray
+        Annual sum of snowfall in m/yr over the time axis, shape ``(M,)``.
+    melt_sum : ndarray
+        Annual sum of snowmelt in m/yr over the time axis, shape ``(M,)``.
+    runoff_sum : ndarray
+        Annual sum of runoff in m/yr over the time axis, shape ``(M,)``.
+    refreeze_sum : ndarray
+        Annual sum of refreeze in m/yr over the time axis, shape ``(M,)``.
+    smb_sum : ndarray
+        Annual sum of surface mass balance in m/yr over the time axis, shape ``(M,)``.
+
+    Notes
+    -----
+    - Conversions:
+      - Temperature: K → °C.
+      - Fluxes accumulated monthly: scaled to m/yr using 365.242198781 days/yr
+        and divided by 12 for monthly mean fluxes where applicable.
+    - The last dimension ``M`` corresponds to valid (non-NaN) stacked spatial
+      points after dropping missing values.
+    """
     with xr.open_dataset(file) as Obs:
         stacked = Obs.stack(z=("rlat", "rlon"))
         ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
 
         temp = stacked.tas.dropna(dim="z").values - 273.15
-        rainfall = stacked.rainfall.dropna(dim="z").values * 365.242198781 / 1000
-        snowfall = stacked.snfall.dropna(dim="z").values * 365.242198781 / 1000
-        smb = stacked.gld.dropna(dim="z").values * 365.242198781 / 1000 / 12
-        refreeze = ncl_stacked.rfrz.dropna(dim="z").values * 365.242198781 / 1000 / 12
-        melt = stacked.snmel.dropna(dim="z").values * 365.242198781 / 1000 / 12
-        runoff = stacked.rogl.dropna(dim="z").values * 365.242198781 / 1000 / 12
+        rainfall = stacked.rainfall.dropna(dim="z").values * 365.242198781 / 1000.0
+        snowfall = stacked.snfall.dropna(dim="z").values * 365.242198781 / 1000.0
+        smb = stacked.gld.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
+        refreeze = (
+            ncl_stacked.rfrz.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
+        )
+        melt = stacked.snmel.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
+        runoff = stacked.rogl.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
         precip = rainfall + snowfall
 
     return (
@@ -105,26 +162,56 @@ def load_hirham_climate(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
 
 
 def load_hirham_climate_w_std_dev(
-    file="DMI-HIRHAM5_1980_2020_MMS.nc", thinning_factor=1
-):
+    file: str | Path = "DMI-HIRHAM5_1980_2020_MMS.nc",
+    thinning_factor: int = 1,
+) -> tuple[
+    NDArray[np.floating],
+    NDArray[np.floating],
+    NDArray[np.floating],
+    dict[str, NDArray[np.floating]],
+]:
     """
-    Read and return HIRHAM5 data grouped by year
+    Load multi-year HIRHAM5 climate fields grouped by calendar year with std-dev.
 
-    n: monthly forcing (12
+    The dataset is thinned on spatial dims, stacked into a 1-D spatial axis,
+    grouped by ``time.year``, and concatenated (horizontally) across years.
+    Simple unit conversions are applied. An ``obs`` dictionary returns annual
+    aggregates of several components.
+
+    Parameters
+    ----------
+    file : str or Path, default="DMI-HIRHAM5_1980_2020_MMS.nc"
+        Path to a multi-year HIRHAM5 NetCDF file containing variables such as
+        ``tas``, ``tas_std_dev``, ``rainfall``, ``snfall``, ``gld``, ``snmel``,
+        ``rogl``, ``rfrz``, ``sn``.
+    thinning_factor : int, default=1
+        Subsampling stride applied to spatial dims (``rlat``, ``rlon``, ``ncl4``,
+        ``ncl5``) before stacking.
 
     Returns
+    -------
+    temp : ndarray
+        Air temperature in °C, concatenated by year along axis 1; shape ``(12, M)`` if
+        all months are present per year.
+    precip : ndarray
+        Total precipitation (rain + snow) in m/yr, concatenated by year; shape ``(12, M)``.
+    temp_std_dev : ndarray
+        Standard deviation of air temperature (same layout as ``temp``); shape ``(12, M)``.
+    obs : dict of {str: ndarray}
+        Annual aggregates over time for each spatial point:
+        - ``"snow_depth"``: snow depth anomaly relative to first entry (same units as input), shape ``(M,)``.
+        - ``"accumulation"``: annual snowfall sum in m/yr, shape ``(M,)``.
+        - ``"melt"``: annual snowmelt sum in m/yr, shape ``(M,)``.
+        - ``"runoff"``: annual runoff sum in m/yr, shape ``(M,)``.
+        - ``"refreeze"``: annual refreeze sum in m/yr, shape ``(M,)``.
+        - ``"smb"``: annual surface mass balance sum in m/yr, shape ``(M,)``.
 
-    temp (n, m) array
-    precip (n, m) array
-    std_dev (n, m) array
-    a (1, m) array
-    m (1, m) array
-    r (1, m) array
-    f (1, m) array
-    b (1, m) array
-
+    Notes
+    -----
+    - Conversions mirror :func:`load_hirham_climate`.
+    - Arrays are built by ``np.hstack`` over groups of ``time.year``, yielding a
+      block of 12 months per year concatenated along axis 1.
     """
-
     with xr.open_dataset(file) as Obs:
         nlat = len(Obs["rlat"])
         nlon = len(Obs["rlon"])
@@ -158,7 +245,7 @@ def load_hirham_climate_w_std_dev(
                 ]
             )
             * 365.242198781
-            / 1000
+            / 1000.0
         )
         snowfall = (
             np.hstack(
@@ -168,15 +255,15 @@ def load_hirham_climate_w_std_dev(
                 ]
             )
             * 365.242198781
-            / 1000
+            / 1000.0
         )
         smb = (
             np.hstack(
                 [d.dropna(dim="z").values for _, d in stacked.gld.groupby("time.year")]
             )
             * 365.242198781
-            / 1000
-            / 12
+            / 1000.0
+            / 12.0
         )
         refreeze = (
             np.hstack(
@@ -186,8 +273,8 @@ def load_hirham_climate_w_std_dev(
                 ]
             )
             * 365.242198781
-            / 1000
-            / 12
+            / 1000.0
+            / 12.0
         )
         snowmelt = (
             np.hstack(
@@ -197,8 +284,8 @@ def load_hirham_climate_w_std_dev(
                 ]
             )
             * 365.242198781
-            / 1000
-            / 12
+            / 1000.0
+            / 12.0
         )
         snowdepth = np.hstack(
             [d.dropna(dim="z").values for _, d in stacked.sn.groupby("time.year")]
@@ -208,12 +295,12 @@ def load_hirham_climate_w_std_dev(
                 [d.dropna(dim="z").values for _, d in stacked.rogl.groupby("time.year")]
             )
             * 365.242198781
-            / 1000
-            / 12
+            / 1000.0
+            / 12.0
         )
         precip = rainfall + snowfall
 
-        obs = {
+        obs: dict[str, NDArray[np.floating]] = {
             "snow_depth": snowdepth - snowdepth[0],
             "accumulation": snowfall.sum(axis=0),
             "melt": snowmelt.sum(axis=0),
@@ -222,12 +309,7 @@ def load_hirham_climate_w_std_dev(
             "smb": smb.sum(axis=0),
         }
 
-    return (
-        temp,
-        precip,
-        temp_std_dev,
-        obs,
-    )
+    return temp, precip, temp_std_dev, obs
 
 
 def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
@@ -259,106 +341,135 @@ def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1)
     )
 
 
-def load_imbie_csv(proj_start=2008):
-    df = pd.read_csv("imbie_greenland_2021_Gt.csv")
+def load_imbie_csv(
+    proj_start: int = 2008,
+    file: str | Path = "imbie_greenland_2021_Gt.csv",
+) -> pd.DataFrame:
+    """
+    Load IMBIE Greenland mass balance CSV and derive sea-level equivalents (SLE).
 
-    df = df.rename(
-        columns={
-            "Mass balance (Gt/yr)": "Mass change (Gt/yr)",
-            "Mass balance uncertainty (Gt/yr)": "Mass change uncertainty (Gt/yr)",
-            "Cumulative mass balance (Gt)": "Mass (Gt)",
-            "Cumulative mass balance uncertainty (Gt)": "Mass uncertainty (Gt)",
-        }
-    )
-    for v in [
-        "Mass (Gt)",
-    ]:
-        df[v] -= df[df["Year"] == proj_start][v].values
+    The CSV is expected to contain IMBIE columns for mass balance and cumulative
+    mass balance (with uncertainties). Columns are renamed to a consistent schema,
+    cumulative mass is re-referenced to ``proj_start``, and SLE quantities are
+    computed assuming ``1 cm SLE = 362.5 Gt``.
 
+    Parameters
+    ----------
+    proj_start : int, default=2008
+        Reference year. The cumulative mass time series ``"Mass (Gt)"`` is
+        shifted so that its value in this year becomes zero.
+    file : str or pathlib.Path, default="imbie_greenland_2021_Gt.csv"
+        Path to the IMBIE CSV file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with at least the following columns (after renaming and
+        augmentation):
+        - ``"Year"``
+        - ``"Mass change (Gt/yr)"``
+        - ``"Mass change uncertainty (Gt/yr)"``
+        - ``"Mass (Gt)"``  (re-referenced so value at ``proj_start`` is 0)
+        - ``"Mass uncertainty (Gt)"``
+        - ``"SLE (cm)"``  (computed as ``-Mass(Gt) / 362.5 / 10``)
+        - ``"SLE uncertainty (cm)"``  (propagated linearly from mass uncertainty)
+        - ``"SLE change uncertainty (cm/yr)"``  (from mass-change uncertainty)
+
+    Notes
+    -----
+    - The conversion used is ``cmSLE = 1 / 362.5 / 10`` (i.e., 362.5 Gt per cm SLE).
+    - SLE is defined with opposite sign to mass: increasing mass lowers sea level,
+      hence ``SLE = -Mass * cmSLE``.
+    - The function assumes the CSV includes IMBIE-standard columns:
+      ``"Mass balance (Gt/yr)"``, ``"Mass balance uncertainty (Gt/yr)"``,
+      ``"Cumulative mass balance (Gt)"``, and
+      ``"Cumulative mass balance uncertainty (Gt)"``. These are renamed to
+      ``"Mass change (Gt/yr)"``, ``"Mass change uncertainty (Gt/yr)"``,
+      ``"Mass (Gt)"``, and ``"Mass uncertainty (Gt)"``, respectively.
+
+    Raises
+    ------
+    KeyError
+        If expected IMBIE columns are missing.
+    ValueError
+        If ``proj_start`` is not present in the ``"Year"`` column.
+    """
+    df = pd.read_csv(file)
+
+    # Rename IMBIE columns to a consistent internal schema
+    rename_map = {
+        "Mass balance (Gt/yr)": "Mass change (Gt/yr)",
+        "Mass balance uncertainty (Gt/yr)": "Mass change uncertainty (Gt/yr)",
+        "Cumulative mass balance (Gt)": "Mass (Gt)",
+        "Cumulative mass balance uncertainty (Gt)": "Mass uncertainty (Gt)",
+    }
+    missing = [k for k in rename_map if k not in df.columns]
+    if missing:
+        raise KeyError(f"Missing expected IMBIE columns: {missing}")
+    df = df.rename(columns=rename_map)
+
+    # Re-reference cumulative mass to the project start year
+    if not (df["Year"] == proj_start).any():
+        raise ValueError(
+            f"'proj_start' year {proj_start} not found in CSV 'Year' column."
+        )
+    ref_val = df.loc[df["Year"] == proj_start, "Mass (Gt)"].values
+    # subtract the scalar reference from the mass time series
+    df["Mass (Gt)"] = df["Mass (Gt)"] - ref_val
+
+    # Sea-level equivalent conversions (362.5 Gt per cm SLE)
     cmSLE = 1.0 / 362.5 / 10.0
-    # df["Mass change uncertainty squared (Gt/yr)"] = (
-    #     df["Mass change uncertainty (Gt/yr)"] ** 2
-    # )
-    # df["Mass uncertainty (Gt)"] = np.sqrt(df["Mass change uncertainty squared (Gt/yr)"])
-    # df = df.drop(columns=["Mass change uncertainty squared (Gt/yr)"])
     df["SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
     df["SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
     df["SLE change uncertainty (cm/yr)"] = df["Mass change uncertainty (Gt/yr)"] * cmSLE
-    return df
-
-
-def load_imbie(proj_start=2008):
-    """
-    Loading the IMBIE Greenland data set downloaded from
-    http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx
-
-    """
-    try:
-        df_df = pd.read_excel(
-            "http://imbie.org/wp-content/uploads/2012/11/imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
-            sheet_name="Greenland Ice Mass",
-            engine="openpyxl",
-        )
-    except:
-        df_df = pd.read_excel(
-            "imbie_dataset_greenland_dynamics-2020_02_28.xlsx",
-            sheet_name="Greenland Ice Mass",
-            engine="openpyxl",
-        )
-    df = df_df[
-        [
-            "Year",
-            "Cumulative ice sheet mass change (Gt)",
-            "Cumulative ice sheet mass change uncertainty (Gt)",
-            "Cumulative surface mass balance anomaly (Gt)",
-            "Cumulative surface mass balance anomaly uncertainty (Gt)",
-            "Cumulative ice dynamics anomaly (Gt)",
-            "Cumulative ice dynamics anomaly uncertainty (Gt)",
-            "Rate of mass balance anomaly (Gt/yr)",
-            "Rate of ice dynamics anomaly (Gt/yr)",
-            "Rate of mass balance anomaly uncertainty (Gt/yr)",
-            "Rate of ice dyanamics anomaly uncertainty (Gt/yr)",
-        ]
-    ].rename(
-        columns={
-            "Cumulative ice sheet mass change (Gt)": "Mass (Gt)",
-            "Cumulative ice sheet mass change uncertainty (Gt)": "Mass uncertainty (Gt)",
-            "Rate of mass balance anomaly (Gt/yr)": "SMB (Gt/yr)",
-            "Rate of ice dynamics anomaly (Gt/yr)": "D (Gt/yr)",
-            "Rate of mass balance anomaly uncertainty (Gt/yr)": "SMB uncertainty (Gt/yr)",
-            "Rate of ice dyanamics anomaly uncertainty (Gt/yr)": "D uncertainty (Gt/yr)",
-        }
-    )
-
-    for v in [
-        "Mass (Gt)",
-        "Cumulative ice dynamics anomaly (Gt)",
-        "Cumulative surface mass balance anomaly (Gt)",
-    ]:
-        df[v] -= df[df["Year"] == proj_start][v].values
-
-    s = df[(df["Year"] >= 1980) & (df["Year"] < 1990)]
-    mass_mean = s["Mass (Gt)"].mean() / (1990 - 1980)
-    smb_mean = s["Cumulative surface mass balance anomaly (Gt)"].mean() / (1990 - 1980)
-    df["SMB (Gt/yr)"] += 2 * 1964 / 10
-    df["D (Gt/yr)"] -= 2 * 1964 / 10
-    cmSLE = 1.0 / 362.5 / 10.0
-    df["SLE (cm)"] = -df["Mass (Gt)"] * cmSLE
-    df["SLE uncertainty (cm)"] = df["Mass uncertainty (Gt)"] * cmSLE
 
     return df
 
 
 def plot_compare(
-    F_p,
-    F_v,
-    dataset,
-    X_val_unscaled,
-    validation=False,
-    return_fig=False,
-):
+    F_p: np.ndarray,
+    F_v: np.ndarray,
+    dataset: Any,
+    X_val_unscaled: Sequence[float],
+    return_fig: bool = False,
+) -> plt.Figure | None:
     """
-    Plot target (PISM) and predicted (Emulator) speeds for validation
+    Plot observed (PISM) vs. predicted (Emulator) surface speeds and their difference.
+
+    The figure contains three panels stacked vertically:
+    1) PISM target speeds,
+    2) Emulator-predicted speeds,
+    3) Difference (Emulator − PISM).
+
+    A log color scale is used for the speed panels. The Pearson correlation
+    between flattened arrays and the RMSE are annotated. The unscaled input
+    parameters for the sample are listed under the panels.
+
+    Parameters
+    ----------
+    F_p : numpy.ndarray
+        Predicted (Emulator) speed field, shape ``(ny, nx)``.
+    F_v : numpy.ndarray
+        Target (PISM) speed field, shape ``(ny, nx)``.
+    dataset : Any
+        Dataset-like object providing an attribute ``X_keys`` (sequence of
+        parameter names) used for the text annotation.
+    X_val_unscaled : Sequence[float]
+        Unscaled parameter values corresponding to ``dataset.X_keys`` for annotation.
+    return_fig : bool, default=False
+        If ``True``, return the created :class:`matplotlib.figure.Figure`.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+        The created figure if ``return_fig`` is ``True``, otherwise ``None``.
+
+    Notes
+    -----
+    - Speeds are shown with ``LogNorm(vmin=1, vmax=3000)``.
+    - Difference panel uses a symmetric linear colormap in ``[-50, 50]`` m/yr.
+    - Two colorbars are added on the right: one for speed and one for difference.
+    - The figure is saved as ``"test_comp.pdf"`` in the current working directory.
     """
     cmap = "viridis"
     fig, axs = plt.subplots(
@@ -367,55 +478,32 @@ def plot_compare(
 
     rmse = np.sqrt(((F_p - F_v) ** 2).mean())
     corr = np.corrcoef(F_v.flatten(), F_p.flatten())[0, 1]
+
     c1 = axs[0].imshow(F_v, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
     axs[1].imshow(F_p, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3))
     c2 = axs[2].imshow(F_p - F_v, origin="lower", vmin=-50, vmax=50, cmap="coolwarm")
-    axs[1].text(
-        0.01,
-        0.00,
-        f"r={corr:.3f}",
-        c="k",
-        size=7,
-        transform=axs[1].transAxes,
-    )
+
+    axs[1].text(0.01, 0.00, f"r={corr:.3f}", c="k", size=7, transform=axs[1].transAxes)
     axs[-1].text(
         0.01,
         -0.51,
-        "\n".join([f"{i}: {j:.3f}" for i, j in zip(dataset.X_keys, X_val_unscaled)]),
+        "\n".join([f"{k}: {v:.3f}" for k, v in zip(dataset.X_keys, X_val_unscaled)]),
         c="k",
         size=7,
         transform=axs[-1].transAxes,
     )
-
     axs[2].text(
-        0.01,
-        0.00,
-        f"RMSE: {rmse:.0f} m/yr",
-        c="k",
-        size=7,
-        transform=axs[2].transAxes,
+        0.01, 0.00, f"RMSE: {rmse:.0f} m/yr", c="k", size=7, transform=axs[2].transAxes
     )
 
-    axs[0].set_axis_off()
-    axs[1].set_axis_off()
-    axs[2].set_axis_off()
+    for ax in axs:
+        ax.set_axis_off()
+
     axs[0].text(
-        0.01,
-        0.98,
-        "PISM",
-        c="k",
-        size=7,
-        weight="bold",
-        transform=axs[0, 0].transAxes,
+        0.01, 0.98, "PISM", c="k", size=7, weight="bold", transform=axs[0].transAxes
     )
     axs[1].text(
-        0.01,
-        0.98,
-        "Emulator",
-        c="k",
-        size=7,
-        weight="bold",
-        transform=axs[1, 0].transAxes,
+        0.01, 0.98, "Emulator", c="k", size=7, weight="bold", transform=axs[1].transAxes
     )
     axs[2].text(
         0.01,
@@ -424,7 +512,7 @@ def plot_compare(
         c="k",
         size=7,
         weight="bold",
-        transform=axs[2, 0].transAxes,
+        transform=axs[2].transAxes,
     )
 
     cb_ax = fig.add_axes([0.88, 0.525, 0.025, 0.15])
@@ -448,16 +536,14 @@ def plot_compare(
     cb_ax.tick_params(labelsize=7)
     cb_ax.set_yticklabels([1, 10, 100, 1000])
     cb_ax2.tick_params(labelsize=7)
+
     fig.subplots_adjust(wspace=0.05, hspace=0.15)
-    if validation:
-        mode = "val"
-    else:
-        mode = "train"
 
     fig.savefig("test_comp.pdf")
 
     if return_fig:
         return fig
+    return None
 
 
 def plot_eigenglaciers(
@@ -502,8 +588,8 @@ def plot_eigenglaciers(
 
 
 def calc_bic(
-    X: Union[np.ndarray, pd.core.frame.DataFrame],
-    Y: Union[np.ndarray, pd.core.frame.DataFrame],
+    X: np.ndarray | pd.DataFrame,
+    Y: np.ndarray | pd.DataFrame,
 ) -> float:
     """
     Bayesian Information Criterion
@@ -547,7 +633,7 @@ def calc_bic(
 def stepwise_bic(
     X: np.ndarray,
     Y: np.ndarray,
-    varnames: Union[None, list] = None,
+    varnames: list | None = None,
     interactions: bool = True,
     **kwargs,
 ):
@@ -629,7 +715,7 @@ def stepwise_bic(
             bic_dict[m_str] = lm_bic
 
         # Lowest BIC and variable associated from variables left to test
-        min_key = min(bic_dict.keys(), key=(lambda k: bic_dict[k]))
+        min_key = min(bic_dict.keys(), key=lambda k: bic_dict[k])
         min_bic = bic_dict[min_key]
         if "*" in min_key:
             print(
@@ -650,8 +736,8 @@ def stepwise_bic(
                 names_dup = names
                 # Add interaction term to list of variables in model to become new baseline model
                 varlist.append(min_key)
-                print("  Added {}, BIC = {}".format(min_key, min_bic))
-                print("  Updated variable list: {}".format(varlist))
+                print(f"  Added {min_key}, BIC = {min_bic}")
+                print(f"  Updated variable list: {varlist}")
                 names_dup.remove(min_key)
                 print("  Removed {} from model-eligible variables".format(min_key))
 
@@ -662,7 +748,7 @@ def stepwise_bic(
                 for s in subnames:
                     if s in names_dup:
                         names_dup.remove(s)
-                        print("  Removed {} from model-eligible variables".format(s))
+                        print(f"  Removed {s} from model-eligible variables")
 
                 # Update X and BIC to reflect new baseline model
                 X = np.column_stack(
@@ -674,10 +760,10 @@ def stepwise_bic(
                 names_dup = names
                 # Remove main effect term from list of variables in model to update baseline model
                 varlist.remove(min_key)
-                print("  Removed {}, BIC = {:2.2f}".format(min_key, min_bic))
-                print("  Updated variable list: {}".format(varlist))
+                print(f"  Removed {min_key}, BIC = {min_bic:2.2f}")
+                print(f"  Updated variable list: {varlist}")
                 names_dup.remove(min_key)
-                print("  Removed {} from model-eligible variables".format(min_key))
+                print(f"  Removed {min_key} from model-eligible variables")
 
                 # Remove interaction terms that contain main effect
                 rem = []
@@ -699,15 +785,15 @@ def stepwise_bic(
                 params_to_check.remove(min_key)
 
             names = names_dup
-            print("  Remaining variables to test: {}".format(names))
+            print(f"  Remaining variables to test: {names}")
             step += 1
         else:
             # No lower BIC can be obtained by modifying model variables, so baseline model is final
             in_progress = False
             print("\n\nMinimum model BIC reached - completed stepwise regression")
             print("Final model:")
-            print("  Y ~ {}".format(" + ".join(varlist)))
-            print("Total number of steps: {}\n".format(step))
+            print(f"""  Y ~ {" + ".join(varlist)}""")
+            print(f"Total number of steps: {step}\n")
             return varlist
 
 
@@ -820,8 +906,6 @@ def draw_samples(distributions, n_samples=100000, method="lhs"):
     elif method == "saltelli":
         unif_sample = saltelli.sample(problem, n_samples, calc_second_order=False)
     else:
-        import sys
-
         sys.exit("How did I get here? Invalid sampling method")
 
     # To hold the transformed variables
@@ -839,7 +923,7 @@ def draw_samples(distributions, n_samples=100000, method="lhs"):
 
 
 def kl_divergence(p, q):
-    """
+    r"""
     Kullback-Leibler divergence
 
     From https://en.wikipedia.org/wiki/Kullback–Leibler_divergence:
@@ -860,7 +944,7 @@ def kl_divergence(p, q):
 
 
 def distributions_as19():
-    """
+    r"""
 
     Returns the distributions used by Aschwanden et al (2019):
 
@@ -921,7 +1005,7 @@ def set_size(w, h, ax=None):
 
 
 def gelman_rubin(p: np.ndarray, q: np.ndarray):
-    """
+    r"""
     Returns estimate of R for a set of two traces.
     The Gelman-Rubin diagnostic tests for lack of convergence by comparing
     the variance between multiple chains to the variance within each chain.

@@ -28,7 +28,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics.regression import MeanSquaredError
 
-from pism_emulator.nnemulator import DNNEmulator, NNEmulator
+from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 
 
 def seed_worker(worker_id):
@@ -69,7 +69,6 @@ def nn_setup(Emulator):
 
     e = Emulator(
         n_parameters,
-        n_eigenglaciers,
         V_hat,
         F_mean,
         area,
@@ -83,20 +82,7 @@ def nn_setup(Emulator):
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    dataset = TensorDataset(X, Y, omegas, omegas_0)
-    training_data, val_data = train_test_split(dataset, train_size=0.9, random_state=0)
-    train_loader = DataLoader(
-        dataset=training_data,
-        batch_size=hparams["batch_size"],
-        worker_init_fn=seed_worker,
-        generator=g,
-    )
-    val_loader = DataLoader(
-        dataset=val_data,
-        batch_size=hparams["batch_size"],
-        worker_init_fn=seed_worker,
-        generator=g,
-    )
+    dm = TensorDataset(X, Y, omegas, omegas_0)
 
     max_epochs = 20
 
@@ -106,7 +92,7 @@ def nn_setup(Emulator):
         num_sanity_val_steps=0,
         accelerator="cpu",
     )
-    trainer_e.fit(e, train_loader, val_loader)
+    trainer_e.fit(e, datamodule=dm)
 
     e.eval()
     Y_e = e(X, add_mean=True)

@@ -16,10 +16,9 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 """
-Data Module
+Data Module.
 """
 
-# datamodules.py
 from __future__ import annotations
 
 import random
@@ -159,7 +158,6 @@ class PISMDataModule(pl.LightningDataModule):
         num_workers: int = 0,
     ):
         super().__init__()
-        # collapse many primitives into two objects:
         self.cfg = DataConfig(
             X, F, omegas, omegas_0, batch_size, train_size, num_workers
         )
@@ -169,8 +167,6 @@ class PISMDataModule(pl.LightningDataModule):
         self._train = None
         self._val = None
         self._all = None
-
-    # -------------------- Lightning hooks --------------------
 
     def prepare_data(self, **kwargs) -> None:
         """Compute eigenglaciers once (or load from cache)."""
@@ -194,8 +190,6 @@ class PISMDataModule(pl.LightningDataModule):
             ds_all, train_size=self.cfg.train_size, random_state=0
         )
         self._train, self._val = train_ds, val_ds
-
-    # -------------------- DataLoaders (lazy) --------------------
 
     def _build_loader(self, ds: TensorDataset, *, shuffle: bool) -> DataLoader:
         return DataLoader(

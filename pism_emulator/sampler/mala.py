@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Callable, Iterable, Literal, Optional, Sequence, Tuple
+from typing import Callable, Iterable, Literal, Optional, Sequence
 
 import lightning as pl
 import numpy as np
@@ -12,18 +12,6 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-
-# -----------------------------
-# Small helper
-# -----------------------------
-
-
-def _to_tensor(x, device: str) -> Tensor:
-    return (
-        x
-        if isinstance(x, torch.Tensor)
-        else torch.tensor(x, dtype=torch.float32, device=device)
-    )
 
 
 class ChainInitDataset(Dataset):
@@ -38,9 +26,6 @@ class ChainInitDataset(Dataset):
         return i, self.inits[i]
 
 
-# -----------------------------
-# Lightning MALA Sampler Module
-# -----------------------------
 class MALASamplerModule(pl.LightningModule):
     """
     Manifold MALA (mMALA) implemented as a LightningModule suitable for multi-device
@@ -48,12 +33,12 @@ class MALASamplerModule(pl.LightningModule):
 
     Parameters
     ----------
-    emulator : pl.LightningModule
-        Model mapping X -> log10(Y_pred). The sampler evaluates `10**emulator(X, add_mean=True)`.
+    model : pl.LightningModule
+        Forward model.
     X_min, X_max : array-like or Tensor
         Element-wise bounds for Beta prior support.
     Y_target, sigma_hat : array-like or Tensor
-        Target vector and per-node std (same length as emulator output after masking).
+        Target vector and per-node std.
     alpha : float, default 0.01
         Likelihood weight in the negative log-posterior V(X).
     alpha_b, beta_b : float, default 3.0
@@ -86,7 +71,7 @@ class MALASamplerModule(pl.LightningModule):
 
     def __init__(
         self,
-        emulator: pl.LightningModule,
+        model: pl.LightningModule,
         X_min,
         X_max,
         Y_target,
@@ -119,14 +104,14 @@ class MALASamplerModule(pl.LightningModule):
     ):
 
         super().__init__()
-        self.save_hyperparameters(ignore=["emulator"])  # everything except the model
+        self.save_hyperparameters(ignore=["model"])  # everything except the model
 
         # Make sure emulator is a proper submodule so it moves with .to(device)
-        if isinstance(emulator, torch.nn.Module):
-            self.emulator = emulator.eval()
+        if isinstance(model, torch.nn.Module):
+            self.model = model.eval()
         else:
             # fall back; Lightning won’t move this automatically
-            raise TypeError("`emulator` must be an nn.Module / LightningModule")
+            raise TypeError("`model` must be an nn.Module / LightningModule")
 
         # Register everything that must live on the same device as the model
         self.register_buffer(
@@ -191,8 +176,8 @@ class MALASamplerModule(pl.LightningModule):
 
     # ------------- Core maths -------------
     def forward(self, X: Tensor) -> Tensor:
-        """Emulator wrapper; expects model(X, add_mean=True) -> log10(Y)."""
-        return 10.0 ** self.emulator(X, add_mean=True)
+        """Model wrapper; expects model(X, add_mean=True) -> log10(Y)."""
+        return 10.0 ** self.model(X, add_mean=True)
 
     def V(self, X: Tensor) -> Tensor:
         """Negative log-posterior (scalar)."""
