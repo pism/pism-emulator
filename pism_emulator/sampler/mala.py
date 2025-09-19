@@ -9,6 +9,7 @@ from typing import Callable, Iterable, Literal, Optional, Sequence
 import lightning as pl
 import numpy as np
 import torch
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -179,7 +180,7 @@ class MALASamplerModule(pl.LightningModule):
         """Model wrapper; expects model(X, add_mean=True) -> log10(Y)."""
         return 10.0 ** self.model(X, add_mean=True)
 
-    def V(self, X: Tensor) -> Tensor:
+    def neg_log_prob(self, X: Tensor) -> Tensor:
         """Negative log-posterior (scalar)."""
         Y_pred = self.forward(X)
         r = Y_pred - self.Y_target
@@ -208,7 +209,7 @@ class MALASamplerModule(pl.LightningModule):
 
     @torch.enable_grad()
     def _local_geometry(self, X: torch.Tensor):
-        log_pi = self.V(X)  # V is NEG log posterior
+        log_pi = self.neg_log_prob(X)
         self.hessian_counter += 1
 
         g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=False)[0]
@@ -271,7 +272,7 @@ class MALASamplerModule(pl.LightningModule):
         Xp.requires_grad_(True)
 
         # Target at proposal
-        log_pi_p = self.V(Xp)
+        log_pi_p = self.neg_log_prob(Xp)
 
         # forward q(x'|x) using H(x)
         logq_f = self._proposal_logpdf(Xp, X, H, log_det_Hinv, h, self._two_pi)
@@ -279,7 +280,7 @@ class MALASamplerModule(pl.LightningModule):
         if not self.delayed_accept or self.metric_mode == "current":
             # reverse q(x|x') also using H(x)  (CURRENT metric variant)
             logq_r = self._proposal_logpdf(X, Xp, H, log_det_Hinv, h, self._two_pi)
-            # log α = -V(x') + log q(x|x') + V(x) - log q(x'|x)
+            # log α = -log p(x') + log q(x|x') + log p(x) - log q(x'|x)
             log_alpha = -log_pi_p + logq_r + log_pi - logq_f
             alpha = (
                 torch.exp(torch.clamp(log_alpha, max=0.0))
@@ -343,7 +344,7 @@ class MALASamplerModule(pl.LightningModule):
 
         def closure():
             self.zero_grad(set_to_none=True)
-            loss = self.V(X)  # V is negative log posterior
+            loss = self.neg_log_prob(X)  # V is negative log posterior
             loss.backward()
             return loss
 
@@ -543,4 +544,4 @@ if __name__ == "__main__":
     all_chains = torch.stack(
         [o.squeeze(0) if o.ndim == 3 else o for o in outs]
     )  # (chains, samples, dim)
-    print(all_chains.shape)
+    rank_zero_info(all_chains.shape)

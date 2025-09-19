@@ -20,7 +20,7 @@
 import numpy as np
 from numpy.testing import assert_array_almost_equal, assert_equal
 
-from pism_emulator.datasets import PISMDataset, PISMConfigDataset
+from pism_emulator.datasets import PISMDataset
 
 
 def test_dataset():
@@ -29,37 +29,6 @@ def test_dataset():
     dataset = PISMDataset(
         training_files="tests/training_data/*.nc",
         samples_file="data/samples/velocity_calibration_samples_50.csv",
-        target_file="tests/test_data/test_vel_g9000m.nc",
-        thin=1,
-    )
-
-    X = dataset.samples.X.detach().numpy()
-    Y = dataset.samples.Y.detach().numpy()
-
-    with np.load("tests/test_samples.npz") as data:
-        X_true = data["arr_0"]
-    with np.load("tests/test_responses.npz") as data:
-        Y_true = data["arr_0"]
-    with np.load("tests/test_areas.npz") as data:
-        normed_area_true = data["arr_0"]
-    n_grid_points = dataset.samples.n_grid_points
-    n_parameters = dataset.samples.n_parameters
-    n_samples = dataset.samples.n_samples
-    normed_area = dataset.samples.normed_area
-
-    assert_equal(n_grid_points, 26237)
-    assert_equal(n_parameters, 8)
-    assert_equal(n_samples, 482)
-    assert_array_almost_equal(X, X_true, decimal=4)
-    assert_array_almost_equal(Y, Y_true, decimal=4)
-    assert_array_almost_equal(normed_area, normed_area_true, decimal=4)
-
-
-def test_config_dataset():
-    """"""
-
-    dataset = PISMConfigDataset(
-        training_files="tests/training_data/*.nc",
         target_file="tests/test_data/test_vel_g9000m.nc",
         thin=1,
     )

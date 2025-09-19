@@ -72,7 +72,7 @@ def nn_setup(Emulator):
         V_hat,
         F_mean,
         area,
-        hparams,
+        **hparams,
     )
 
     X = torch.rand(n_samples, n_parameters, dtype=torch.float32)

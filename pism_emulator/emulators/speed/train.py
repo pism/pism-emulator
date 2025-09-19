@@ -29,7 +29,7 @@ import numpy as np
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, Timer, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from scipy.stats import dirichlet
 from tqdm import tqdm
 
@@ -151,7 +151,6 @@ def main():
         thin=thin,
         verbose=True,
     )
-    print(dataset)
     X = dataset.samples.X
     F = dataset.samples.Y
     area = dataset.samples.normed_area
