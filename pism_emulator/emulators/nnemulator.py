@@ -112,7 +112,7 @@ class DNNEmulator(pl.LightningModule):
             }
         )
 
-        width: int = int(self.hparams.get("width", 256))
+        width: int = int(self.hparams.get("width", 128))
         depth: int = int(self.hparams.get("depth", 4))
         p_drop: float = float(self.hparams.get("dropout", 0.1))
         activation: str = str(self.hparams.get("activation", "relu"))
@@ -205,51 +205,29 @@ class DNNEmulator(pl.LightningModule):
         sch = {"scheduler": ExponentialLR(opt, gamma=0.9975)}
         return [opt], [sch]
 
-    def _shared_step(
-        self, batch: tuple[Tensor, Tensor, Tensor, Tensor]
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        x, f, o, _ = batch
-        f_pred = self.forward(x)
-        # o has shape (..., 2) with (t0, t1); area_absolute_error wants o_0
-        o_0 = o[..., 0]
-        loss = area_absolute_error(f_pred, f, o_0, self.area)
-        return x, f, f_pred, o, loss
-
     def training_step(
         self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
     ) -> Tensor:
-        x, f, f_pred, o, loss = (*self._shared_step(batch),)
-        o_0 = o[..., 0]
-        self.log(
-            "train_loss",
-            self.train_ae(f_pred, f, o_0, self.area),
-            sync_dist=True,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+        x, f, o, _ = batch
+        f_pred = self.forward(x)
+        area = self.area
+        loss = area_absolute_error(f_pred, f, o, area)
         return loss
 
     def validation_step(
         self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
     ) -> dict[str, Tensor]:
-        x, f, f_pred, o, loss = (*self._shared_step(batch),)
-        o_0 = o[..., 0]
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+
         self.log(
-            "val_loss",
-            self.test_ae(f_pred, f, o_0, self.area),
+            "train_loss",
+            self.train_ae(f_pred, f, o, self.area),
             sync_dist=True,
             prog_bar=True,
             on_step=False,
             on_epoch=True,
         )
-        return {"loss": loss}
-
-    def test_step(
-        self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
-    ) -> dict[str, Tensor]:
-        x, f, f_pred, o, loss = (*self._shared_step(batch),)
-        o_0 = o[..., 0]
         self.log(
             "test_loss",
             self.test_ae(f_pred, f, o_0, self.area),
@@ -258,7 +236,25 @@ class DNNEmulator(pl.LightningModule):
             on_step=False,
             on_epoch=True,
         )
-        return {"loss": loss}
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
+
+    def on_validation_epoch_end(self):
+        self.log(
+            "train_loss",
+            self.train_ae,
+            sync_dist=True,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            sync_dist=True,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 
 class NNEmulator(pl.LightningModule):

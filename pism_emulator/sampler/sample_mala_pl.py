@@ -213,6 +213,7 @@ def main():
     )
     parser.add_argument("--thin", type=int, default=1)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
+    parser.add_argument("MODEL_FILE", nargs=1, help="Emulator ckpt")
 
     cls = EMULATORS[tmp.emulator]
     cls.add_model_specific_args(parser)
@@ -239,6 +240,7 @@ def main():
     target_file = args.target_file
     thin = args.thin
     training_files = args.TRAINING_FILES
+    model_file = args.MODEL_FILE[0]
 
     posterior_dir = f"{emulator_dir}/posterior_samples/"
     if not os.path.isdir(posterior_dir):
@@ -262,10 +264,9 @@ def main():
 
     torch.manual_seed(0)
     np.random.seed(0)
-    emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.ckpt")
 
-    e = Emulator.load_from_checkpoint(
-        emulator_file,
+    model = Emulator.load_from_checkpoint(
+        model_file,
         map_location="cpu",
     )
     if dataset.target.Y_target_error is not None:
@@ -291,7 +292,7 @@ def main():
     X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float)
 
     sampler = MALASamplerModule(
-        e,
+        model,
         X_min,
         X_max,
         Y_target,
@@ -310,6 +311,8 @@ def main():
         n_iters=25,
         lr=0.1,
     )
+    rank_zero_info(X_map)
+
     X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
     X_mean = np.asarray(dataset.samples.X_mean.cpu().numpy(), dtype=np.float32)
     X_std = np.asarray(dataset.samples.X_std.cpu().numpy(), dtype=np.float32)
