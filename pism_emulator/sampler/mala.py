@@ -335,8 +335,8 @@ class MALASamplerModule(pl.LightningModule):
     def find_MAP(
         self,
         X: torch.Tensor,
-        n_iters: int = 25,
-        lr: float = 0.1,
+        max_iter: int = 100,
+        lr: float = 1.0,
     ) -> torch.Tensor:
         """Find a MAP estimate via L-BFGS on the negative log-posterior (X)."""
 
@@ -344,17 +344,19 @@ class MALASamplerModule(pl.LightningModule):
 
         def closure():
             self.zero_grad(set_to_none=True)
-            loss = self.neg_log_prob(X)  # V is negative log posterior
+            loss = self.neg_log_prob(X)
             loss.backward()
             return loss
 
-        opt = torch.optim.LBFGS([X], lr=lr, max_iter=25, line_search_fn="strong_wolfe")
+        opt = torch.optim.LBFGS(
+            [X], lr=lr, max_iter=max_iter, line_search_fn="strong_wolfe"
+        )
 
         last_val = float("nan")
-        for i in range(n_iters):
-            val = opt.step(closure)  # runs closure + line search internally
-            last_val = float(val.detach())
-            self.zero_grad(set_to_none=True)
+
+        val = opt.step(closure)
+        last_val = float(val.detach())
+        self.zero_grad(set_to_none=True)
 
         return X
 

@@ -817,7 +817,6 @@ class PISMDataset(Dataset):
 
         X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
         Y = torch.from_numpy(response.astype(np.float32)[good])
-        Y[Y < 0] = 0  # clamp negatives post-log
 
         X_keys = list(samples.columns)
         X_mean = X.mean(dim=0)

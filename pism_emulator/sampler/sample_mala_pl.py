@@ -308,14 +308,24 @@ def main():
 
     X_map = sampler.find_MAP(
         X_0,
-        n_iters=25,
-        lr=0.1,
     )
-    rank_zero_info(X_map)
 
     X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
     X_mean = np.asarray(dataset.samples.X_mean.cpu().numpy(), dtype=np.float32)
     X_std = np.asarray(dataset.samples.X_std.cpu().numpy(), dtype=np.float32)
+    rank_zero_info(
+        "".join(
+            [
+                f"{key}: {(val * std + mean):.3f}\n"
+                for key, val, std, mean in zip(
+                    dataset.samples.X_keys,
+                    X_map,
+                    X_std,
+                    X_mean,
+                )
+            ]
+        )
+    )
 
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     chains = run_sampling(sampler, inits, accelerator=accelerator)
