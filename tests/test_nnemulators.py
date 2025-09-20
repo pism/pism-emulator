@@ -50,8 +50,10 @@ def nn_setup(Emulator):
 
     n_parameters = 5
     n_eigenglaciers = 10
-    n_grid_points = 10000
+    n_grid_points = 1000
     n_samples = 1000
+    num_workers = 0
+
     V_hat = torch.rand(n_grid_points, n_eigenglaciers, dtype=torch.float32)
     F_mean = torch.rand(n_grid_points, dtype=torch.float32)
     area = torch.ones_like(F_mean, dtype=torch.float32) / n_grid_points
@@ -65,6 +67,8 @@ def nn_setup(Emulator):
         "n_hidden_4": 128,
         "n_layers": 4,
         "learning_rate": 0.1,
+        "width": 128,
+        "depth": 4,
     }
 
     e = Emulator(
@@ -82,7 +86,24 @@ def nn_setup(Emulator):
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    dm = TensorDataset(X, Y, omegas, omegas_0)
+    dataset = TensorDataset(
+        X,
+        Y,
+        omegas,
+        omegas_0,
+    )
+    train_loader = DataLoader(
+        dataset=dataset,
+        batch_size=hparams["batch_size"],
+        worker_init_fn=seed_worker,
+        generator=g,
+    )
+    val_loader = DataLoader(
+        dataset=dataset,
+        batch_size=hparams["batch_size"],
+        worker_init_fn=seed_worker,
+        generator=g,
+    )
 
     max_epochs = 20
 
@@ -92,7 +113,7 @@ def nn_setup(Emulator):
         num_sanity_val_steps=0,
         accelerator="cpu",
     )
-    trainer_e.fit(e, datamodule=dm)
+    trainer_e.fit(e, train_loader, val_loader)
 
     e.eval()
     Y_e = e(X, add_mean=True)
