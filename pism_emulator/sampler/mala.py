@@ -41,7 +41,7 @@ class MALASamplerModule(pl.LightningModule):
     Y_target, sigma_hat : array-like or Tensor
         Target vector and per-node std.
     alpha : float, default 0.01
-        Likelihood weight in the negative log-posterior V(X).
+        Likelihood weight in the negative log-posterior (X).
     alpha_b, beta_b : float, default 3.0
         Beta prior parameters applied to normalized parameters.
     nu : float, default 1.0
@@ -214,7 +214,7 @@ class MALASamplerModule(pl.LightningModule):
 
         g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=False)[0]
         H = torch.autograd.functional.hessian(
-            self.V, X, vectorize=False, create_graph=False
+            self.neg_log_prob, X, vectorize=False, create_graph=False
         )
 
         H = 0.5 * (H + H.T)
@@ -338,7 +338,7 @@ class MALASamplerModule(pl.LightningModule):
         n_iters: int = 25,
         lr: float = 0.1,
     ) -> torch.Tensor:
-        """Find a MAP estimate via L-BFGS on the negative log-posterior V(X)."""
+        """Find a MAP estimate via L-BFGS on the negative log-posterior (X)."""
 
         X = X.detach().to(self.device, dtype=torch.float32).requires_grad_(True)
 

@@ -48,20 +48,11 @@ class MLPBlock(nn.Module):
         in_features: int,
         out_features: int,
         p_dropout: float = 0.0,
-        norm: str = "layer",
         activation: str = "relu",
     ) -> None:
         super().__init__()
         self.lin = nn.Linear(in_features, out_features, bias=True)
-
-        if norm == "batch":
-            self.norm: nn.Module = nn.BatchNorm1d(out_features)
-        elif norm == "layer":
-            self.norm = nn.LayerNorm(out_features)
-        elif norm == "none":
-            self.norm = nn.Identity()
-        else:
-            raise ValueError(f"Unknown norm '{norm}'")
+        self.norm = nn.LayerNorm(out_features)
 
         if activation.lower() == "relu":
             self.act: nn.Module = nn.ReLU()
@@ -124,18 +115,15 @@ class DNNEmulator(pl.LightningModule):
         width: int = int(self.hparams.get("width", 256))
         depth: int = int(self.hparams.get("depth", 4))
         p_drop: float = float(self.hparams.get("dropout", 0.1))
-        norm: str = str(self.hparams.get("norm", "batch"))
         activation: str = str(self.hparams.get("activation", "relu"))
 
         # input projection
-        self.inp = MLPBlock(
-            n_parameters, width, p_drop, norm=norm, activation=activation
-        )
+        self.inp = MLPBlock(n_parameters, width, p_drop, activation=activation)
 
         # residual stack
         self.blocks = nn.ModuleList(
             [
-                MLPBlock(width, width, p_drop, norm=norm, activation=activation)
+                MLPBlock(width, width, p_drop, activation=activation)
                 for _ in range(depth)
             ]
         )
