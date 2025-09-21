@@ -448,9 +448,6 @@ class DatasetConfig:
     log_y : bool, default=True
         If ``True``, apply ``log10`` to responses after reading; ``-inf`` values
         are set to 0 to match legacy behavior.
-    threshold : float, default=1e5
-        Run-level filter on the **max** response (in linear scale). Runs exceeding
-        this value are dropped.
     epsilon : float, default=0.0
         Value used to replace NaNs after CF decode and masking.
     verbose : bool, default=False
@@ -478,7 +475,6 @@ class DatasetConfig:
     thin: int = 1
     normalize_x: bool = True
     log_y: bool = True
-    threshold: float = 100e3
     epsilon: float = 0.0
     verbose: bool = False
     target_engine: str | None = None
@@ -496,7 +492,7 @@ class PISMDataset(Dataset):
     - loads and masks the target field, building a sparse node index,
     - reads many training NetCDFs in parallel (downsampled on (y,x)),
     - aligns runs with a CSV of parameter samples,
-    - applies thresholding and optional log10 transform,
+    - applies optional log10 transform,
     - normalizes features if requested.
 
     Parameters
@@ -523,8 +519,6 @@ class PISMDataset(Dataset):
         If True, z-score normalize the features (per column).
     log_y : bool, default=True
         If True, apply ``log10`` to responses (match previous behavior).
-    threshold : float, default=100e3
-        Filter out runs whose **max** response (linear scale) exceeds this value.
     epsilon : float, default=0.0
         Replace NaNs with this epsilon when reading arrays.
     verbose : bool, default=False
@@ -561,7 +555,6 @@ class PISMDataset(Dataset):
         thin: int = 1,
         normalize_x: bool = True,
         log_y: bool = True,
-        threshold: float = 100e3,
         epsilon: float = 0.0,
         verbose: bool = False,
         target_engine: str | None = None,
@@ -597,7 +590,6 @@ class PISMDataset(Dataset):
             thin=int(thin),
             normalize_x=bool(normalize_x),
             log_y=bool(log_y),
-            threshold=float(threshold),
             epsilon=float(epsilon),
             verbose=bool(verbose),
             target_engine=target_engine or _sniff_engine(target_file),
@@ -860,10 +852,8 @@ class PISMDataset(Dataset):
         end_time = time()
         rank_zero_info(f"Reading training data took {(end_time - start_time):.0f}s")
 
-        good = response.max(axis=1) < float(cfg.threshold)
-
-        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
-        Y = torch.from_numpy(response.astype(np.float32)[good])
+        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))
+        Y = torch.from_numpy(response.astype(np.float32))
         if cfg.log_y:
             Y = torch.log10(torch.clamp(Y, min=1, max=100e3))
 
