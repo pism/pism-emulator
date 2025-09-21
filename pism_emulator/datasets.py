@@ -475,6 +475,7 @@ class DatasetConfig:
     thin: int = 1
     normalize_x: bool = True
     log_y: bool = True
+    y_limits: tuple = (1, 100e3)
     epsilon: float = 0.0
     verbose: bool = False
     target_engine: str | None = None
@@ -555,6 +556,7 @@ class PISMDataset(Dataset):
         thin: int = 1,
         normalize_x: bool = True,
         log_y: bool = True,
+        y_limits: tuple = (1, 100),
         epsilon: float = 0.0,
         verbose: bool = False,
         target_engine: str | None = None,
@@ -590,6 +592,7 @@ class PISMDataset(Dataset):
             thin=int(thin),
             normalize_x=bool(normalize_x),
             log_y=bool(log_y),
+            y_limits=tuple(y_limits),
             epsilon=float(epsilon),
             verbose=bool(verbose),
             target_engine=target_engine or _sniff_engine(target_file),
@@ -855,7 +858,7 @@ class PISMDataset(Dataset):
         X = torch.from_numpy(samples.to_numpy(dtype=np.float32))
         Y = torch.from_numpy(response.astype(np.float32))
         if cfg.log_y:
-            Y = torch.log10(torch.clamp(Y, min=1, max=100e3))
+            Y = torch.log10(torch.clamp(Y, *cfg.y_limits))
 
         X_keys = list(samples.columns)
         X_mean = X.mean(dim=0)
@@ -942,7 +945,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
     def load_target(self):
         epsilon = self.epsilon
         thinning_factor = self.thinning_factor
-        print(f"Loading target {self.target_file}")
+        rank_zero_only(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file, decode_times=False)
         ds = preprocess(ds, thinning_factor=thinning_factor)
         data = ds[self.target_var].squeeze()
@@ -1033,8 +1036,10 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         missing_ids = list(set(samples["id"]).difference(ids_df["id"]))
         if missing_ids:
             if self.verbose:
-                print(f"The following simulations are missing:\n   {missing_ids}")
-                print("  ... adjusting priors")
+                rank_zero_info(
+                    f"The following simulations are missing:\n   {missing_ids}"
+                )
+                rank_zero_info("  adjusting priors")
             # and remove the missing samples and responses
             samples_missing_removed = samples[~samples["id"].isin(missing_ids)]
             samples = samples_missing_removed
@@ -1052,7 +1057,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         self.ny = ny
         response = np.zeros((m_samples, len(self.sparse_idx_1d)))
 
-        print("  Loading data sets...")
+        rank_zero_info("  Loading data sets...")
         training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
         start_time = time()
         for idx, m_file in tqdm_rank0(
@@ -1070,7 +1075,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
             ds.close()
         end_time = time()
         self.training_files = training_files
-        print(f"Reading training data took {(end_time-start_time):.0f}s")
+        rank_zero_info(f"Reading training data took {(end_time-start_time):.0f}s")
 
         p = response.max(axis=1) < self.threshold
         if self.log_y:
