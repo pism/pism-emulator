@@ -143,7 +143,7 @@ if __name__ == "__main__":
         p_glaciers.update(1)
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
-        for model_index in range(num_models):
+        for model_index in range(n_models):
             p_models.update(1)
             emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
             state_dict = torch.load(emulator_file)

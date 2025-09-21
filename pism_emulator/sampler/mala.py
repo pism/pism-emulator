@@ -178,7 +178,7 @@ class MALASamplerModule(pl.LightningModule):
     # ------------- Core maths -------------
     def forward(self, X: Tensor) -> Tensor:
         """Model wrapper; expects model(X, add_mean=True) -> log10(Y)."""
-        return 10.0 ** self.model(X, add_mean=True)
+        return self.model(X, add_mean=True)
 
     def neg_log_prob(self, X: Tensor) -> Tensor:
         """Negative log-posterior (scalar)."""

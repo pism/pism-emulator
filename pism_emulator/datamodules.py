@@ -246,7 +246,7 @@ class PISMDataModule(pl.LightningDataModule):
                     self.eig.eigs_vals,
                 )
 
-        rank_zero_info("Generating eigenglaciers")
+        rank_zero_info(f"Generating eigenglaciers using the first {q} eigen values")
         with self.eig.lock:
             if self.eig.ready:
                 return (
@@ -271,7 +271,6 @@ class PISMDataModule(pl.LightningDataModule):
                 lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
                 lamda = lamda[:, 0].squeeze()
 
-            rank_zero_info(f"    using the first {q} eigen values")
             V_hat = V.detach() @ torch.diag(torch.sqrt(lamda.detach()))
 
             if cache_path is not None:

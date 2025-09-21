@@ -142,10 +142,26 @@ if __name__ == "__main__":
         nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 10)
     )
 
+    n_models = num_models
+    n_glaciers = len(glaciers)
+    p_models = tqdm(
+        total=n_models, position=0, leave=True, desc="Models", dynamic_ncols=True
+    )
+    p_glaciers = tqdm(
+        total=n_glaciers, position=1, leave=True, desc="Glaciers", dynamic_ncols=True
+    )
+
+    # text-only "bar" that stays as a single line
+    p_metrics = tqdm(
+        total=1, position=2, leave=True, bar_format="{desc}", dynamic_ncols=True
+    )
+    p_metrics.set_description_str("MAE=…, MBE=…, RMSE=…, r=…, r²=…")
+    p_metrics.refresh()
+
     k = 0
     l = 1
-    for m in tqdm(glaciers):
-        print(f"{l} of {len(glaciers)}: Loading ensemble member {m}")
+    for m in range(n_glaciers):
+        p_glaciers.update(1)
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
         for model_index in tqdm(range(0, num_models)):
@@ -174,16 +190,18 @@ if __name__ == "__main__":
         )
         mae = mean_absolute_error(10 ** F_pred.mean(axis=0), 10 ** F_val.mean(axis=0))
         mbe = (10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)).mean()
-        r = pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0))
+        r = pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0))[0]
         r2 = r2_score(F_pred.mean(axis=0), F_val.mean(axis=0))
         rmses.append(rmse)
         maes.append(mae)
         mbes.append(mbe)
-        pearson_rs.append(r[0])
+        pearson_rs.append(r)
         r2s.append(r2)
-        print(
-            f"MAE={mae:.2f} m/yr, MBE={mbe:.2f} m/yr, RMSE={rmse:.0f} m/yr, Pearson r={r[0]:.4f}, r2={r2:.4f}"
+        p_metrics.set_description_str(
+            f"MAE={mae:.2f} m/yr, MBE={mbe:.2f} m/yr, RMSE={rmse:.0f} m/yr, "
+            f"Pearson r={r:.4f}, r²={r2:.4f}"
         )
+        p_metrics.refresh()
 
         if m in plot_glaciers:
             X_val_unscaled = (
