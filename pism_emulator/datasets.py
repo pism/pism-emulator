@@ -862,13 +862,10 @@ class PISMDataset(Dataset):
 
         good = response.max(axis=1) < float(cfg.threshold)
 
-        if cfg.log_y:
-            response = np.log10(response)
-            response[np.isneginf(response)] = 0  # -inf -> 0
-
         X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
         Y = torch.from_numpy(response.astype(np.float32)[good])
-        Y[Y < 0] = 0
+        if cfg.log_y:
+            Y = torch.log10(torch.clamp(Y, min=1, max=100e3))
 
         X_keys = list(samples.columns)
         X_mean = X.mean(dim=0)
