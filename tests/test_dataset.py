@@ -35,21 +35,33 @@ def test_dataset():
 
     X = dataset.samples.X.detach().numpy()
     Y = dataset.samples.Y.detach().numpy()
-
-    with np.load("tests/test_samples.npz") as data:
-        X_true = data["arr_0"]
-    with np.load("tests/test_responses.npz") as data:
-        Y_true = data["arr_0"]
-    with np.load("tests/test_areas.npz") as data:
-        normed_area_true = data["arr_0"]
     n_grid_points = dataset.samples.n_grid_points
     n_parameters = dataset.samples.n_parameters
     n_samples = dataset.samples.n_samples
     normed_area = dataset.samples.normed_area
 
-    assert_equal(n_grid_points, 26237)
-    assert_equal(n_parameters, 8)
-    assert_equal(n_samples, 482)
+    # np.savez_compressed(
+    #     "tests/test_dataset.npz",
+    #     X=X,
+    #     Y=Y,
+    #     normed_area=normed_area,
+    #     n_samples=n_samples,
+    #     n_parameters=n_parameters,
+    #     n_grid_points=n_grid_points,
+    #     allow_pickle=False,
+    # )
+
+    with np.load("tests/test_dataset.npz") as data:
+        X_true = data["X"]
+        Y_true = data["Y"]
+        normed_area_true = data["normed_area"]
+        n_grid_points_true = data["n_grid_points"]
+        n_samples_true = data["n_samples"]
+        n_parameters_true = data["n_parameters"]
+
+    assert_equal(n_grid_points, n_grid_points_true)
+    assert_equal(n_parameters, n_parameters_true)
+    assert_equal(n_samples, n_samples_true)
     assert_array_almost_equal(X, X_true, decimal=4)
     assert_array_almost_equal(Y, Y_true, decimal=4)
     assert_array_almost_equal(normed_area, normed_area_true, decimal=4)

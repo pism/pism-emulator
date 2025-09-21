@@ -33,7 +33,7 @@ import pandas as pd
 import pylab as plt
 import torch
 from joblib import Parallel, delayed
-from pyDOE2 import lhs
+from pyDOE3 import lhs
 from scipy.stats import beta
 from scipy.stats.distributions import uniform
 from tqdm.auto import tqdm

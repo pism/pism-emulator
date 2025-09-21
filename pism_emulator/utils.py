@@ -34,7 +34,7 @@ import pylab as plt
 import xarray as xr
 from matplotlib.colors import LogNorm
 from numpy.typing import NDArray
-from pyDOE2 import lhs
+from pyDOE3 import lhs
 from SALib.sample import saltelli
 from scipy.stats.distributions import gamma, randint, truncnorm, uniform
 from sklearn.linear_model import LinearRegression

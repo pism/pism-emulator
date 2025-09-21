@@ -17,15 +17,11 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-"""
-Evaluate emulators
-"""
+
 from argparse import ArgumentParser
 from os import mkdir
 from os.path import abspath, dirname, isdir, join, realpath
-from typing import Mapping
 
-import lightning as pl
 import numpy as np
 import pylab as plt
 import torch
@@ -34,14 +30,9 @@ from scipy.stats import pearsonr
 from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
 
-from pism_emulator.datasets import PISMDataset
-from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
+from pism_emulator.datasets import LegacyPISMDataset as PISMDataset
+from pism_emulator.emulators.nnemulator import LegacyNNEmulator as NNEmulator
 from pism_emulator.utils import param_keys_dict as keys_dict
-
-EMULATORS: Mapping[str, type[pl.LightningModule]] = {
-    "NN": NNEmulator,
-    "DNN": DNNEmulator,
-}
 
 
 def current_script_directory():
@@ -54,13 +45,12 @@ def current_script_directory():
 script_directory = current_script_directory()
 
 if __name__ == "__main__":
-    __spec__ = None  # type: ignore
+    __spec__ = None
 
     parser = ArgumentParser()
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
-    tmp, _ = parser.parse_known_args()
+    parser.add_argument("--data_dir", default="../tests/training_data")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
+    parser.add_argument("--num_models", type=int, default=50)
     parser.add_argument("--mode", choices=["train", "validation"], default="validation")
     parser.add_argument(
         "--samples_file",
@@ -77,21 +67,12 @@ if __name__ == "__main__":
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--sample_size", type=int, default=80)
-    parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
-    parser.add_argument("MODEL_FILE", nargs=1, help="Emulator ckpt")
 
-    cls = EMULATORS[tmp.emulator]
-    cls.add_model_specific_args(parser)
-    Emulator = cls  # type: type[pl.LightningModule]
-    # let the chosen model extend the parser
-    if tmp.emulator == "NN":
-        Emulator = NNEmulator
-    elif tmp.emulator == "DNN":
-        Emulator = DNNEmulator
-
+    parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
     hparams = vars(args)
 
+    data_dir = args.data_dir
     emulator_dir = args.emulator_dir
     num_models = args.num_models
     samples_file = args.samples_file
@@ -104,23 +85,21 @@ if __name__ == "__main__":
         validation = False
     else:
         validation = True
-    training_files = args.TRAINING_FILES
-    model_file = args.MODEL_FILE[0]
 
     torch.manual_seed(0)
     rng = np.random.default_rng(2021)
 
     dataset = PISMDataset(
-        training_files=training_files,
+        data_dir=data_dir,
         samples_file=samples_file,
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        thin=1,
+        thinning_factor=1,
         threshold=1e7,
     )
-    X = dataset.samples.X
-    F = dataset.samples.Y
+    X = dataset.X
+    F = dataset.Y
     n_members = len(F)
     if sample_size <= n_members:
         glaciers = rng.choice(range(n_members), size=sample_size, replace=False)
@@ -143,32 +122,29 @@ if __name__ == "__main__":
     )
 
     k = 0
-    l = 1
     for m in tqdm(glaciers):
-        print(f"{l} of {len(glaciers)}: Loading ensemble member {m}")
+        print(f"{k+1} of {len(glaciers)}: Loading ensemble member {m}")
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
         for model_index in tqdm(range(0, num_models)):
-            e = Emulator.load_from_checkpoint(
-                model_file,
-                map_location="cpu",
+            emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
+            state_dict = torch.load(emulator_file)
+            e = NNEmulator(
+                state_dict["l_1.weight"].shape[1],
+                state_dict["V_hat"].shape[1],
+                state_dict["V_hat"],
+                state_dict["F_mean"],
+                state_dict["area"],
+                hparams,
             )
+            e.load_state_dict(state_dict)
             e.eval()
 
             X_val = X[m]
-            if isinstance(X_val, np.ndarray):
-                X_val = torch.as_tensor(X_val)
-            if X_val.dim() == 1:
-                X_val = X_val.unsqueeze(0)  # (1, n_parameters)
-
-            with torch.no_grad():
-                F_v = F[m].detach().cpu().numpy()  # (n_nodes,)
-                F_p = e(X_val, add_mean=True).detach().cpu().numpy()  # (1, n_nodes)
-
-            # store per-model predictions; we'll ensemble by mean later
-            F_val[model_index, :] = F_v
-            F_pred[model_index, :] = F_p.squeeze(0)
-
+            F_v = F[m].detach().numpy()
+            F_p = e(X_val, add_mean=True).detach().numpy()
+            F_val[:] = F_v
+            F_pred[:] = F_p
         rmse = np.sqrt(
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
@@ -186,25 +162,23 @@ if __name__ == "__main__":
         )
 
         if m in plot_glaciers:
-            X_val_unscaled = (
-                X_val.squeeze() * dataset.samples.X_std + dataset.samples.X_mean
-            )
+            X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
 
-            F_val_2d = np.zeros((dataset.target.ny, dataset.target.nx))
-            F_val_2d.put(dataset.target.sparse_idx_1d, 10**F_val)
+            F_val_2d = np.zeros((dataset.ny, dataset.nx))
+            F_val_2d.put(dataset.sparse_idx_1d, 10**F_val)
 
-            F_pred_2d = np.zeros((dataset.target.ny, dataset.target.nx))
-            F_pred_2d.put(dataset.target.sparse_idx_1d, 10**F_pred)
+            F_pred_2d = np.zeros((dataset.ny, dataset.nx))
+            F_pred_2d.put(dataset.sparse_idx_1d, 10**F_pred)
 
             mask = np.logical_or(F_val_2d < 0.01, F_pred_2d < 0.01)
             F_val_2d = np.ma.array(data=F_val_2d, mask=mask)
             F_pred_2d = np.ma.array(data=F_pred_2d, mask=mask)
 
             c1 = axs[0, k].imshow(
-                F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
+                F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
             )
             axs[1, k].imshow(
-                F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
+                F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
             )
             c2 = axs[2, k].imshow(
                 F_pred_2d - F_val_2d,
@@ -220,7 +194,7 @@ if __name__ == "__main__":
                     "\n".join(
                         [
                             f"{keys_dict[i]}: {j:.3f}"
-                            for i, j in zip(dataset.samples.X_keys, X_val_unscaled)
+                            for i, j in zip(dataset.X_keys, X_val_unscaled)
                         ]
                     ),
                     c="k",
@@ -234,7 +208,7 @@ if __name__ == "__main__":
                     "\n".join(
                         [
                             f"{i}: {j:.3f}"
-                            for i, j in zip(dataset.samples.X_keys, X_val_unscaled)
+                            for i, j in zip(dataset.X_keys, X_val_unscaled)
                         ]
                     ),
                     c="k",
@@ -257,7 +231,6 @@ if __name__ == "__main__":
             axs[-1, k].set_axis_off()
 
             k += 1
-        l += 1
 
     rmse_mean = np.array(rmses).mean()
     mae_mean = np.array(maes).mean()

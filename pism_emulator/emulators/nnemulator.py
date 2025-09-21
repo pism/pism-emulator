@@ -421,5 +421,135 @@ class NNEmulator(pl.LightningModule):
                 print(
                     "UNUSED PARAMS THIS STEP:",
                     unused[:10],
-                    "..." if len(unused) > 10 else "",
+                    "   " if len(unused) > 10 else "",
                 )
+
+
+class LegacyNNEmulator(pl.LightningModule):
+    def __init__(
+        self,
+        n_parameters,
+        n_eigenglaciers,
+        V_hat,
+        F_mean,
+        area,
+        hparams,
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.save_hyperparameters(hparams)
+        n_hidden_1 = self.hparams.n_hidden_1
+        n_hidden_2 = self.hparams.n_hidden_2
+        n_hidden_3 = self.hparams.n_hidden_3
+        n_hidden_4 = self.hparams.n_hidden_4
+
+        # Inputs to hidden layer linear transformation
+        self.l_1 = nn.Linear(n_parameters, n_hidden_1)
+        self.norm_1 = nn.LayerNorm(n_hidden_1)
+        self.dropout_1 = nn.Dropout(p=0.0)
+        self.l_2 = nn.Linear(n_hidden_1, n_hidden_2)
+        self.norm_2 = nn.LayerNorm(n_hidden_2)
+        self.dropout_2 = nn.Dropout(p=0.5)
+        self.l_3 = nn.Linear(n_hidden_2, n_hidden_3)
+        self.norm_3 = nn.LayerNorm(n_hidden_3)
+        self.dropout_3 = nn.Dropout(p=0.5)
+        self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
+        self.norm_4 = nn.LayerNorm(n_hidden_3)
+        self.dropout_4 = nn.Dropout(p=0.5)
+        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
+
+        self.V_hat = torch.nn.Parameter(V_hat, requires_grad=False)
+        self.F_mean = torch.nn.Parameter(F_mean, requires_grad=False)
+
+        self.register_buffer("area", area)
+
+        self.train_ae = AreaAbsoluteError()
+        self.test_ae = AreaAbsoluteError()
+
+    def forward(self, x, add_mean=False):
+        # Pass the input tensor through each of our operations
+
+        a_1 = self.l_1(x)
+        a_1 = self.norm_1(a_1)
+        a_1 = self.dropout_1(a_1)
+        z_1 = torch.relu(a_1)
+
+        a_2 = self.l_2(z_1)
+        a_2 = self.norm_2(a_2)
+        a_2 = self.dropout_2(a_2)
+        z_2 = torch.relu(a_2) + z_1
+
+        a_3 = self.l_3(z_2)
+        a_3 = self.norm_3(a_3)
+        a_3 = self.dropout_3(a_3)
+        z_3 = torch.relu(a_3) + z_2
+
+        a_4 = self.l_4(z_3)
+        a_4 = self.norm_3(a_4)
+        a_4 = self.dropout_3(a_4)
+        z_4 = torch.relu(a_4) + z_3
+
+        z_5 = self.l_5(z_4)
+        if add_mean:
+            F_pred = z_5 @ self.V_hat.T + self.F_mean
+        else:
+            F_pred = z_5 @ self.V_hat.T
+
+        return F_pred
+
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group("NNEmulator")
+        parser.add_argument("--batch_size", type=int, default=128)
+        parser.add_argument("--n_hidden_1", type=int, default=128)
+        parser.add_argument("--n_hidden_2", type=int, default=128)
+        parser.add_argument("--n_hidden_3", type=int, default=128)
+        parser.add_argument("--n_hidden_4", type=int, default=128)
+        parser.add_argument("--learning_rate", type=float, default=0.01)
+
+        return parent_parser
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
+        # This is an approximation to Doug's version:
+        scheduler = {
+            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+        }
+
+        return [optimizer], [scheduler]
+
+    def training_step(self, batch, batch_idx):
+        x, f, o, _ = batch
+        f_pred = self.forward(x)
+        loss = area_absolute_error(f_pred, f, o, self.area)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+
+        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
+        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
+
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
+
+    def validation_epoch_end(self, outputs):
+
+        self.log(
+            "train_loss",
+            self.train_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
