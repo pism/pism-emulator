@@ -117,7 +117,6 @@ if __name__ == "__main__":
         target_var=target_var,
         target_error_var=target_error_var,
         thin=1,
-        threshold=1e7,
     )
     X = dataset.samples.X
     F = dataset.samples.Y
