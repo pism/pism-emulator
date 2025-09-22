@@ -719,6 +719,8 @@ class PISMDataset(Dataset):
             .values
         )
         Y_target = torch.from_numpy(targ_vec.astype(np.float32))
+        if cfg.log_y:
+            Y_target = torch.log10(torch.clamp(Y_target, *cfg.y_limits))
 
         Y_target_error = Y_target_error_2d = None
         if has_err:
