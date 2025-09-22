@@ -34,7 +34,7 @@ from scipy.stats import dirichlet
 from tqdm import tqdm
 
 from pism_emulator.datamodules import PISMDataModule
-from pism_emulator.datasets import PISMDataset
+from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 from pism_emulator.utils import plot_eigenglaciers
 

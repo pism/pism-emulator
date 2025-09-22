@@ -37,7 +37,7 @@ from scipy.stats import pearsonr
 from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
 
-from pism_emulator.datasets import PISMDataset
+from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 from pism_emulator.utils import param_keys_dict as keys_dict
 

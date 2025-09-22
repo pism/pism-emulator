@@ -34,7 +34,7 @@ from pathlib import Path
 from re import Pattern
 from time import time
 from typing import Final, Sequence, cast
-
+import rioxarray
 import dask
 
 # add at top-level
@@ -49,6 +49,11 @@ from torch.utils.data import Dataset, get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
+
+
+def _thin_sel(self) -> dict[str, slice]:
+    s = self.cfg.thin
+    return {"x": slice(None, None, s), "y": slice(None, None, s)}
 
 
 def _sniff_engine(path: str) -> str:
@@ -228,6 +233,25 @@ def parse_id_from_path(p: str | Path) -> int:
     return int(m.group("id"))
 
 
+def build_config_arrays(var) -> tuple[np.ndarray, np.ndarray]:
+    """Read attrs from variable 'pism_config' and return sorted (keys, values) arrays."""
+    suffixes_to_exclude = ("_doc", "_type", "_units", "_option", "_choices")
+
+    attrs = {k: getattr(var, k) for k in var.ncattrs()}
+    config = {
+        k: v
+        for k, v in attrs.items()
+        if not any(k.endswith(suf) for suf in suffixes_to_exclude)
+    }
+    # default if missing
+    config.setdefault("geometry.front_retreat.prescribed.file", "false")
+
+    config_sorted = OrderedDict(sorted(config.items()))
+    pc_keys = np.array(list(config_sorted.keys()), dtype="U")  # Unicode strings
+    pc_vals = np.array(list(config_sorted.values()), dtype="U")
+    return pc_keys, pc_vals
+
+
 def _read_one_nc4(
     path: str | Path,
     var: str,
@@ -323,7 +347,6 @@ def _read_one_nc4(
 
     # Replace NaNs with epsilon, exactly like your old code
     np.nan_to_num(arr, nan=eps, copy=False)
-
     # Gather sparse nodes in C-order (same as data[self.sparse_idx_2d].flatten())
     out = np.take(arr.ravel(), idx1d)
     return cast(NDArray[np.float32], out)
@@ -668,10 +691,6 @@ class PISMDataset(Dataset):
             ")"
         )
 
-    def _thin_sel(self) -> dict[str, slice]:
-        s = self.cfg.thin
-        return {"x": slice(None, None, s), "y": slice(None, None, s)}
-
     @staticmethod
     def _parse_id(path: str) -> int:
         m = re.search(r"id_(\d+)_", Path(path).name)
@@ -825,7 +844,6 @@ class PISMDataset(Dataset):
 
         start_time = time()
         total = len(keep_ids)
-
         if cfg.parallel:
             workers: int = min(8, os.cpu_count() or 1)
             with ProcessPoolExecutor(max_workers=workers) as ex:
@@ -1132,3 +1150,354 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
             return self.X * self.X_std + self.X_mean
         else:
             return self.X
+
+
+class PISMInterpolatedDataset(Dataset):
+    """
+    Like PISMDataset, but interpolates the target onto the first training file's grid
+    (after thinning) using xarray.interp_like, then builds the sparse node index
+    from the interpolated target.
+
+    Behavior mirrors PISMDataset for:
+      - y_lim-based filtering (upper limit for run filtering; clamped for log),
+      - log_y transform (safe log10 with clamp to y_lim),
+      - feature normalization,
+      - DatasetConfig/TargetData/SamplesData usage.
+    """
+
+    def __init__(
+        self,
+        *,
+        training_files: Sequence[str] | str,
+        samples_file: str,
+        target_file: str,
+        training_var: str = "velsurf_mag",
+        target_var: str = "velsurf_mag",
+        target_corr_var: str = "thickness",
+        target_error_var: str = "velsurf_mag_error",
+        target_corr_threshold: float = 25.0,
+        thin: int = 1,
+        normalize_x: bool = True,
+        log_y: bool = True,
+        y_lim: tuple = (1, 100e3),
+        epsilon: float = 0.0,
+        verbose: bool = False,
+        target_engine: str | None = None,
+        training_engine: str | None = None,
+        parallel: bool = True,
+        chunks_after: dict[str, int] | None = None,
+        dask_scheduler: str | None = None,
+    ) -> None:
+        # Resolve training files (same logic as PISMDataset)
+        if isinstance(training_files, (list, tuple)):
+            tfiles = [str(p) for p in training_files]
+        elif isinstance(training_files, (str, Path)):
+            pattern = os.fspath(training_files)
+            tfiles = [str(p) for p in Path().glob(pattern)]
+        else:
+            raise TypeError(
+                "training_files must be a str/glob pattern or a sequence of str"
+            )
+
+        if dask_scheduler:
+            dask.config.set(scheduler=dask_scheduler)
+
+        cfg = DatasetConfig(
+            training_files=tfiles,
+            samples_file=samples_file,
+            target_file=target_file,
+            training_var=training_var,
+            target_var=target_var,
+            target_corr_var=target_corr_var,
+            target_error_var=target_error_var,
+            target_corr_threshold=float(target_corr_threshold),
+            thin=int(thin),
+            normalize_x=bool(normalize_x),
+            log_y=bool(log_y),
+            y_lim=tuple(y_lim),
+            epsilon=float(epsilon),
+            verbose=bool(verbose),
+            target_engine=target_engine or _sniff_engine(target_file),
+            training_engine=training_engine or "h5netcdf",
+            parallel=bool(parallel),
+            chunks_after=chunks_after or {},
+            dask_scheduler=dask_scheduler,
+        )
+        self.cfg = cfg
+
+        # Build target (interpolated) & samples blocks
+        self.target: TargetData = self._load_target_interp_and_mask()
+        self.samples: SamplesData = self._load_training_and_samples()
+
+    # -------------------- Dataset API --------------------
+    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.samples.X[i], self.samples.Y[i]
+
+    def __len__(self) -> int:
+        return min(self.samples.n_samples, self.samples.Y.shape[0])
+
+    def __str__(self) -> str:
+        cfg = self.cfg
+        tgt = self.target
+        smp = self.samples
+        return (
+            "PISMInterpolatedDataset("
+            f"n_samples={smp.n_samples}, n_parameters={smp.n_parameters}, "
+            f"grid={tgt.ny}x{tgt.nx}, observed_nodes={tgt.sparse_idx_1d.size}, "
+            f"thin={cfg.thin}, normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, "
+            f"training_var='{cfg.training_var}', target_var='{cfg.target_var}', "
+            f"engines=(target='{cfg.target_engine}', training='{cfg.training_engine}'))"
+        )
+
+    # -------------------- Internals --------------------
+    def _thin_sel(self) -> dict[str, slice]:
+        s = self.cfg.thin
+        return {"x": slice(None, None, s), "y": slice(None, None, s)}
+
+    @staticmethod
+    def _parse_id(path: str) -> int:
+        m = re.search(r"id_(\d+)_", Path(path).name)
+        if not m:
+            raise ValueError(f"Could not parse id from filename: {path}")
+        return int(m.group(1))
+
+    # ---------- target / mask (with interpolation) ----------
+    def _load_target_interp_and_mask(self) -> TargetData:
+        cfg = self.cfg
+        if cfg.verbose:
+            rank_zero_info(
+                f"Loading target {cfg.target_file} (engine={cfg.target_engine})"
+            )
+            rank_zero_info("  Establishing reference grid from first training file")
+
+        if not cfg.training_files:
+            raise FileNotFoundError("No training files provided")
+
+        # 1) Open first training file -> reference grid (after thinning)
+        ref_path = cfg.training_files[0]
+        dref = xr.open_dataset(ref_path, decode_times=False, engine=cfg.training_engine)
+        if cfg.training_var not in dref:
+            dref.close()
+            raise KeyError(f"'{cfg.training_var}' not found in {ref_path}")
+        ref_da = dref[cfg.training_var].isel(
+            **self._thin_sel()
+        )  # may be (y,x) or (..., y, x)
+
+        # Determine y/x dims robustly using last two dims
+        ref_y_dim, ref_x_dim = ref_da.dims[-2], ref_da.dims[-1]
+        ny = int(ref_da.sizes[ref_y_dim])
+        nx = int(ref_da.sizes[ref_x_dim])
+
+        # 2) Load target and interp_like onto ref grid
+        dtgt = xr.open_dataset(
+            cfg.target_file, decode_times=False, engine=cfg.target_engine
+        )
+        if cfg.target_var not in dtgt:
+            dref.close()
+            dtgt.close()
+            raise KeyError(f"'{cfg.target_var}' not found in target file")
+
+        targ_da = dtgt[cfg.target_var].squeeze()
+
+        # Rename last two dims to match ref if needed
+        tgt_y_dim, tgt_x_dim = targ_da.dims[-2], targ_da.dims[-1]
+        if (tgt_y_dim, tgt_x_dim) != (ref_y_dim, ref_x_dim):
+            targ_da = targ_da.rename({tgt_y_dim: ref_y_dim, tgt_x_dim: ref_x_dim})
+
+        # Interpolate (linear) onto the *thinned* ref grid
+        targ_interp = targ_da.interp_like(ref_da.squeeze())
+        # Optional extra masking via correlation field (interp it too, if present)
+        mask = targ_interp.isnull()
+        has_err = cfg.target_error_var in dtgt
+        has_corr = cfg.target_corr_var in dtgt
+
+        if has_corr:
+            corr_da = dtgt[cfg.target_corr_var].squeeze(drop=True)
+            cy, cx = corr_da.dims[-2], corr_da.dims[-1]
+            if (cy, cx) != (ref_y_dim, ref_x_dim):
+                corr_da = corr_da.rename({cy: ref_y_dim, cx: ref_x_dim})
+            corr_interp = corr_da.interp_like(ref_da, method="nearest")
+            mask = xr.where(corr_interp < cfg.target_corr_threshold, True, mask)
+
+        mask_np = mask.compute().values.astype(bool)
+
+        # 3) Vectorize the interpolated target on observed nodes
+        sparse_idx_2d = np.where(~mask_np)
+        sparse_idx_1d = np.ravel_multi_index(sparse_idx_2d, (ny, nx))
+
+        targ_vec = (
+            targ_interp.transpose(..., ref_y_dim, ref_x_dim)
+            .fillna(cfg.epsilon)
+            .astype("float32")
+            .compute()
+            .values.reshape(ny * nx)
+        )
+        targ_vec = targ_vec[sparse_idx_1d]
+        Y_target = torch.from_numpy(targ_vec.astype(np.float32))
+
+        # Apply same log scaling policy as PISMDataset
+        if cfg.log_y:
+            # Clamp to y_lim then log10, identical to PISMDataset
+            Y_target = torch.log10(torch.clamp(Y_target, cfg.y_lim[0], cfg.y_lim[1]))
+
+        # Optional error/corr 2D fields (already on ref grid)
+        Y_target_error = Y_target_error_2d = None
+        if has_err:
+            err_interp = (
+                dtgt[cfg.target_error_var]
+                .squeeze(drop=True)
+                .rename({tgt_y_dim: ref_y_dim, tgt_x_dim: ref_x_dim})
+                .interp_like(ref_da, method="nearest")
+                .fillna(cfg.epsilon)
+                .astype("float32")
+                .compute()
+                .values
+            )
+            Y_target_error_2d = err_interp
+            err_vec = err_interp.reshape(ny * nx)[sparse_idx_1d]
+            Y_target_error = torch.from_numpy(err_vec.astype(np.float32))
+
+        Y_target_corr = Y_target_corr_2d = None
+        if has_corr:
+            corr_arr = (
+                corr_interp.fillna(cfg.epsilon).astype("float32").compute().values
+            )
+            Y_target_corr_2d = corr_arr
+            corr_vec = corr_arr.reshape(ny * nx)[sparse_idx_1d]
+            Y_target_corr = torch.from_numpy(corr_vec.astype(np.float32))
+
+        # Grid resolution (assumes uniform x spacing on ref grid)
+        try:
+            xcoord = dref[ref_x_dim].isel({ref_x_dim: slice(None, None, 1)})
+            grid_resolution = float(abs(xcoord[1] - xcoord[0]))
+        except Exception:
+            grid_resolution = float("nan")
+
+        # Build a masked 2D view of Y_target for convenience
+        y2d = np.zeros((ny, nx), dtype=np.float32)
+        y2d.flat[sparse_idx_1d] = Y_target.numpy()
+        Y_target_2d = np.ma.array(data=y2d, mask=mask_np)
+
+        # Close datasets
+        dref.close()
+        dtgt.close()
+
+        return TargetData(
+            ny=ny,
+            nx=nx,
+            mask_2d=mask_np,
+            sparse_idx_2d=sparse_idx_2d,
+            sparse_idx_1d=sparse_idx_1d,
+            Y_target=Y_target,
+            Y_target_2d=Y_target_2d,
+            Y_target_error=Y_target_error,
+            Y_target_error_2d=Y_target_error_2d,
+            Y_target_corr=Y_target_corr,
+            Y_target_corr_2d=Y_target_corr_2d,
+            grid_resolution=grid_resolution,
+        )
+
+    # ---------- training + samples (same policy as PISMDataset) ----------
+    def _load_training_and_samples(self) -> SamplesData:
+        cfg, tgt = self.cfg, self.target
+        if cfg.verbose:
+            rank_zero_info("  Loading samples & training responses (netCDF4 direct)")
+
+        ids = [self._parse_id(p) for p in cfg.training_files]
+        files_by_id = dict(zip(ids, cfg.training_files))
+
+        samples = (
+            pd.read_csv(cfg.samples_file, delimiter=",", skipinitialspace=True)
+            .sort_values("id")
+            .set_index("id", drop=True)
+        )
+
+        keep_ids = [i for i in sorted(files_by_id) if i in samples.index]
+        if cfg.verbose:
+            missing = sorted(set(samples.index).difference(keep_ids))
+            if missing:
+                rank_zero_info(f"  Missing runs (dropping from samples): {missing}")
+
+        samples = samples.loc[keep_ids]
+
+        n_runs = len(keep_ids)
+        n_nodes = tgt.sparse_idx_1d.size
+        response = np.empty((n_runs, n_nodes), dtype=np.float32)
+
+        step = cfg.thin
+        idx1d = tgt.sparse_idx_1d
+
+        start_time = time()
+        total = len(keep_ids)
+
+        if cfg.parallel:
+            workers: int = min(8, os.cpu_count() or 1)
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                future_to_row = {
+                    ex.submit(
+                        _read_one_nc4,  # <-- same helper you already use
+                        files_by_id[i],
+                        cfg.training_var,
+                        step,
+                        idx1d,
+                        cfg.epsilon,
+                    ): row
+                    for row, i in enumerate(keep_ids)
+                }
+                for fut in tqdm_rank0(
+                    as_completed(future_to_row),
+                    total=total,
+                    desc="Reading training files",
+                    unit="file",
+                ):
+                    row = future_to_row[fut]
+                    response[row] = fut.result()
+        else:
+            for row, i in enumerate(
+                tqdm_rank0(keep_ids, desc="Reading training files", unit="file")
+            ):
+                response[row] = _read_one_nc4(
+                    files_by_id[i], cfg.training_var, step, idx1d, cfg.epsilon
+                )
+
+        end_time = time()
+        rank_zero_info(f"Reading training data took {(end_time - start_time):.0f}s")
+
+        # Same run filtering policy: use upper y_lim bound in *physical* space proxy.
+        good = response.max(axis=1) < cfg.y_lim[1]
+
+        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
+        Y = torch.from_numpy(response.astype(np.float32)[good])
+
+        # Same scaling policy: clamp to y_lim and log10 if requested
+        if cfg.log_y:
+            Y = torch.log10(torch.clamp(Y, cfg.y_lim[0], cfg.y_lim[1]))
+
+        X_keys = list(samples.columns)
+        X_mean = X.mean(dim=0)
+        X_std = X.std(dim=0)
+        Xn = (X - X_mean) / X_std if cfg.normalize_x else X
+
+        n_parameters = Xn.shape[1]
+        n_samples = Y.shape[0]
+        n_grid_points = Y.shape[1]
+
+        normed_area = torch.ones(n_grid_points, dtype=torch.float32)
+        normed_area /= normed_area.sum()
+
+        if self.cfg.verbose:
+            rank_zero_info(f"X: {X.shape}")
+            rank_zero_info(f"Y {Y.shape}")
+            rank_zero_info(f"normed_area: {normed_area.shape}")
+
+        return SamplesData(
+            X=Xn,
+            Y=Y,
+            X_keys=X_keys,
+            X_mean=X_mean,
+            X_std=X_std,
+            n_parameters=n_parameters,
+            n_samples=n_samples,
+            n_grid_points=n_grid_points,
+            normed_area=normed_area,
+        )
