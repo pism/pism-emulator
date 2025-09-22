@@ -20,14 +20,17 @@
 """
 Evaluate emulators
 """
+import random
 from argparse import ArgumentParser
+from glob import glob
 from os import mkdir
 from os.path import abspath, dirname, isdir, join, realpath
 from typing import Mapping
 
 import lightning as pl
+import matplotlib as mpl
+import matplotlib.pylab as plt
 import numpy as np
-import pylab as plt
 import torch
 from matplotlib.colors import LogNorm
 from scipy.stats import pearsonr
@@ -43,6 +46,18 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "DNN": DNNEmulator,
 }
 
+rcparams = {
+    "axes.linewidth": 0.15,
+    "xtick.major.size": 2.0,
+    "xtick.major.width": 0.15,
+    "ytick.major.size": 2.0,
+    "ytick.major.width": 0.15,
+    "hatch.linewidth": 0.15,
+    "font.size": 6,
+}
+
+mpl.rcParams.update(rcparams)
+
 
 def current_script_directory():
     import inspect
@@ -53,15 +68,14 @@ def current_script_directory():
 
 script_directory = current_script_directory()
 
-if __name__ == "__main__":
-    __spec__ = None  # type: ignore
+
+def main():
 
     parser = ArgumentParser()
     parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
     tmp, _ = parser.parse_known_args()
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--num_models", type=int, default=1)
-    parser.add_argument("--mode", choices=["train", "validation"], default="validation")
+    parser.add_argument("--mode", choices=["train", "validation"], default="train")
     parser.add_argument(
         "--samples_file",
         default=abspath(
@@ -77,8 +91,10 @@ if __name__ == "__main__":
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--sample_size", type=int, default=80)
-    parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
-    parser.add_argument("MODEL_FILE", nargs=1, help="Emulator ckpt")
+    parser.add_argument(
+        "--training_files", nargs="+", help="PISM netCDF files", default=None
+    )
+    parser.add_argument("EMULATOR_FILES", nargs="*", help="Emulator ckpt")
 
     cls = EMULATORS[tmp.emulator]
     cls.add_model_specific_args(parser)
@@ -93,7 +109,8 @@ if __name__ == "__main__":
     hparams = vars(args)
 
     emulator_dir = args.emulator_dir
-    num_models = args.num_models
+    emulator_files = args.EMULATOR_FILES
+
     samples_file = args.samples_file
     target_file = args.target_file
     target_var = args.target_var
@@ -104,9 +121,7 @@ if __name__ == "__main__":
         validation = False
     else:
         validation = True
-    training_files = args.TRAINING_FILES
-    model_file = args.MODEL_FILE[0]
-
+    training_files = args.training_files
     torch.manual_seed(0)
     rng = np.random.default_rng(2021)
 
@@ -122,9 +137,9 @@ if __name__ == "__main__":
     F = dataset.samples.Y
     n_members = len(F)
     if sample_size <= n_members:
-        glaciers = rng.choice(range(n_members), size=sample_size, replace=False)
+        glaciers = sorted(random.sample(range(n_members), k=sample_size))
     else:
-        glaciers = range(n_members)
+        glaciers = list(range(n_members))
     print(f"Glaciers selected: {glaciers}")
 
     # Calculate the mean by looping over emulators
@@ -134,17 +149,17 @@ if __name__ == "__main__":
     pearson_rs = []
     r2s = []
 
-    plot_glaciers = rng.choice(glaciers, size=4, replace=False)
-
+    plot_glaciers = sorted(rng.choice(glaciers, size=4, replace=False))
     cmap = "viridis"
     fig, axs = plt.subplots(
-        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 10)
+        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
     )
 
-    n_models = num_models
+    n_emulators = len(emulator_files)
+
     n_glaciers = len(glaciers)
-    p_models = tqdm(
-        total=n_models, position=0, leave=True, desc="Models", dynamic_ncols=True
+    p_emulators = tqdm(
+        total=n_emulators, position=0, leave=True, desc="Emulators", dynamic_ncols=True
     )
     p_glaciers = tqdm(
         total=n_glaciers, position=1, leave=True, desc="Glaciers", dynamic_ncols=True
@@ -159,13 +174,13 @@ if __name__ == "__main__":
 
     k = 0
     l = 1
-    for m in range(n_glaciers):
+    for m in glaciers:
         p_glaciers.update(1)
-        F_val = np.zeros((num_models, F.shape[1]))
-        F_pred = np.zeros((num_models, F.shape[1]))
-        for model_index in tqdm(range(0, num_models)):
+        F_val = np.zeros((n_emulators, F.shape[1]))
+        F_pred = np.zeros((n_emulators, F.shape[1]))
+        for emulator_index, emulator_file in tqdm(enumerate(emulator_files)):
             e = Emulator.load_from_checkpoint(
-                model_file,
+                emulator_file,
                 map_location="cpu",
             )
             e.eval()
@@ -180,9 +195,9 @@ if __name__ == "__main__":
                 F_v = F[m].detach().cpu().numpy()  # (n_nodes,)
                 F_p = e(X_val, add_mean=True).detach().cpu().numpy()  # (1, n_nodes)
 
-            # store per-model predictions; we'll ensemble by mean later
-            F_val[model_index, :] = F_v
-            F_pred[model_index, :] = F_p.squeeze(0)
+            # store per-emulator predictions; we'll ensemble by mean later
+            F_val[emulator_index, :] = F_v
+            F_pred[emulator_index, :] = F_p.squeeze(0)
 
         rmse = np.sqrt(
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
@@ -233,7 +248,7 @@ if __name__ == "__main__":
             try:
                 axs[-1, k].text(
                     0.01,
-                    0.0,
+                    0.05,
                     "\n".join(
                         [
                             f"{keys_dict[i]}: {j:.3f}"
@@ -241,13 +256,12 @@ if __name__ == "__main__":
                         ]
                     ),
                     c="k",
-                    size=7,
                     transform=axs[-1, k].transAxes,
                 )
             except:
                 axs[-1, k].text(
                     0.01,
-                    0.0,
+                    0.05,
                     "\n".join(
                         [
                             f"{i}: {j:.3f}"
@@ -255,7 +269,6 @@ if __name__ == "__main__":
                         ]
                     ),
                     c="k",
-                    size=7,
                     transform=axs[-1, k].transAxes,
                 )
 
@@ -264,7 +277,6 @@ if __name__ == "__main__":
                 0.75,
                 f"MAE = {mae:.1f} m/yr\nMBE = {mbe:.1f} m/yr\nRMSE = {rmse:.0f} m/yr\nr = {r2:.3f}",
                 c="k",
-                size=7,
                 transform=axs[-1, k].transAxes,
             )
 
@@ -276,22 +288,11 @@ if __name__ == "__main__":
             k += 1
         l += 1
 
-    rmse_mean = np.array(rmses).mean()
-    mae_mean = np.array(maes).mean()
-    mbe_mean = np.array(mbes).mean()
-    pearson_r_mean = np.array(pearson_rs).mean()
-    r2_mean = np.array(r2s).mean()
-    print("\n\nFinal Score:\n=======================================================")
-    print(
-        f"MAE={mae_mean:.2f}m/yr, MBE={mbe_mean:.2f} m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
-    )
-    print("\n")
     axs[0, 0].text(
         0.01,
         0.98,
         "PISM",
         c="k",
-        size=7,
         weight="bold",
         transform=axs[0, 0].transAxes,
     )
@@ -300,7 +301,6 @@ if __name__ == "__main__":
         0.98,
         "Emulator",
         c="k",
-        size=7,
         weight="bold",
         transform=axs[1, 0].transAxes,
     )
@@ -309,11 +309,10 @@ if __name__ == "__main__":
         0.98,
         "PISM-Emulator",
         c="k",
-        size=7,
         weight="bold",
         transform=axs[2, 0].transAxes,
     )
-    cb_ax = fig.add_axes([0.88, 0.65, 0.025, 0.15])
+    cb_ax = fig.add_axes([0.90, 0.65, 0.025, 0.15])
     plt.colorbar(
         c1,
         cax=cb_ax,
@@ -322,7 +321,7 @@ if __name__ == "__main__":
         orientation="vertical",
         extend="both",
     )
-    cb_ax2 = fig.add_axes([0.88, 0.3, 0.025, 0.15])
+    cb_ax2 = fig.add_axes([0.90, 0.3, 0.025, 0.15])
     plt.colorbar(
         c2,
         cax=cb_ax2,
@@ -331,9 +330,9 @@ if __name__ == "__main__":
         orientation="vertical",
         extend="both",
     )
-    cb_ax.tick_params(labelsize=7)
-    cb_ax2.tick_params(labelsize=7)
-    fig.subplots_adjust(wspace=0.0, hspace=0.0)
+    cb_ax.tick_params()
+    cb_ax2.tick_params()
+    fig.subplots_adjust(wspace=0.01, hspace=0.01)
 
     if validation:
         mode = "val"
@@ -347,3 +346,20 @@ if __name__ == "__main__":
     fig_name = join(fig_dir, f"speed_emulator_{mode}.pdf")
     print(f"Saving to {fig_name}")
     fig.savefig(fig_name)
+
+    rmse_mean = np.array(rmses).mean()
+    mae_mean = np.array(maes).mean()
+    mbe_mean = np.array(mbes).mean()
+    pearson_r_mean = np.array(pearson_rs).mean()
+    r2_mean = np.array(r2s).mean()
+
+    print("\n\nFinal Score:\n=======================================================")
+    print(
+        f"MAE={mae_mean:.2f}m/yr, MBE={mbe_mean:.2f} m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
+    )
+    print("\n")
+
+
+if __name__ == "__main__":
+    __spec__ = None  # type: ignore
+    main()

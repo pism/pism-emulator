@@ -45,7 +45,7 @@ def current_script_directory():
 script_directory = current_script_directory()
 
 if __name__ == "__main__":
-    __spec__ = None
+    __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../tests/training_data")

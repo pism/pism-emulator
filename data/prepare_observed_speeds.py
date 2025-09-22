@@ -19,13 +19,13 @@
 Download and process observed speeds.
 """
 
+import re
 from pathlib import Path
 
 import earthaccess
 import numpy as np
-import xarray as xr
 import rioxarray as rxr
-import re
+import xarray as xr
 
 
 def download_earthaccess(
@@ -76,7 +76,9 @@ def main():
     pat = re.compile(r"_mosaic\d+_(?P<comp>[a-z]{2})(?=_)")
     das = []
     for r in results:
-        varname = pat.search(str(r)).group("comp")
+        if (m := pat.search(str(r))) is None:
+            raise ValueError(f"No component code found in {r!r}")
+        varname = m.group("comp")
         da = (
             rxr.open_rasterio(r)
             .rio.write_nodata(-2e9, inplace=True)

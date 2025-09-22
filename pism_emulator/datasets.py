@@ -28,11 +28,13 @@ import re
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from pathlib import Path
-from time import time
-from typing import Final, Sequence, cast
 from glob import glob
 from os.path import join
+from pathlib import Path
+from re import Pattern
+from time import time
+from typing import Final, Sequence, cast
+
 import dask
 
 # add at top-level
@@ -475,7 +477,7 @@ class DatasetConfig:
     thin: int = 1
     normalize_x: bool = True
     log_y: bool = True
-    y_limits: tuple = (1, 100e3)
+    y_lim: tuple = (1, 100e3)
     epsilon: float = 0.0
     verbose: bool = False
     target_engine: str | None = None
@@ -556,7 +558,7 @@ class PISMDataset(Dataset):
         thin: int = 1,
         normalize_x: bool = True,
         log_y: bool = True,
-        y_limits: tuple = (1, 100),
+        y_lim: tuple = (1, 100e3),
         epsilon: float = 0.0,
         verbose: bool = False,
         target_engine: str | None = None,
@@ -592,7 +594,7 @@ class PISMDataset(Dataset):
             thin=int(thin),
             normalize_x=bool(normalize_x),
             log_y=bool(log_y),
-            y_limits=tuple(y_limits),
+            y_lim=tuple(y_lim),
             epsilon=float(epsilon),
             verbose=bool(verbose),
             target_engine=target_engine or _sniff_engine(target_file),
@@ -656,7 +658,7 @@ class PISMDataset(Dataset):
             f"  target_file={repr(cfg.target_file)},\n"
             f"  training_var={repr(cfg.training_var)}, target_var={repr(cfg.target_var)},\n"
             f"  target_corr_var={repr(cfg.target_corr_var)}, target_error_var={repr(cfg.target_error_var)},\n"
-            f"  target_corr_threshold={cfg.target_corr_threshold}, thin={cfg.thin}, threshold={cfg.threshold},\n"
+            f"  target_corr_threshold={cfg.target_corr_threshold}, thin={cfg.thin}, y_lim={cfg.y_lim},\n"
             f"  normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, epsilon={cfg.epsilon}, parallel={cfg.parallel},\n"
             f"  engines=(target={repr(cfg.target_engine)}, training={repr(cfg.training_engine)}),\n"
             f"  # Derived/runtime\n"
@@ -720,7 +722,7 @@ class PISMDataset(Dataset):
         )
         Y_target = torch.from_numpy(targ_vec.astype(np.float32))
         if cfg.log_y:
-            Y_target = torch.log10(torch.clamp(Y_target, *cfg.y_limits))
+            Y_target = torch.log10(torch.clamp(Y_target, *cfg.y_lim))
 
         Y_target_error = Y_target_error_2d = None
         if has_err:
@@ -857,10 +859,12 @@ class PISMDataset(Dataset):
         end_time = time()
         rank_zero_info(f"Reading training data took {(end_time - start_time):.0f}s")
 
-        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))
-        Y = torch.from_numpy(response.astype(np.float32))
+        good = response.max(axis=1) < cfg.y_lim[1]
+
+        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
+        Y = torch.from_numpy(response.astype(np.float32)[good])
         if cfg.log_y:
-            Y = torch.log10(torch.clamp(Y, *cfg.y_limits))
+            Y = torch.log10(torch.clamp(Y, *cfg.y_lim))
 
         X_keys = list(samples.columns)
         X_mean = X.mean(dim=0)
@@ -947,7 +951,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
     def load_target(self):
         epsilon = self.epsilon
         thinning_factor = self.thinning_factor
-        rank_zero_only(f"Loading target {self.target_file}")
+        rank_zero_info(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file, decode_times=False)
         ds = preprocess(ds, thinning_factor=thinning_factor)
         data = ds[self.target_var].squeeze()
@@ -1020,7 +1024,13 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
         training_files = list(OrderedDict.fromkeys(training_files))
-        ids = [int(re.search("id_(.+?)_", f).group(1)) for f in training_files]
+        pat: Pattern[str] = re.compile(r"id_(\d+)_")
+
+        ids: list[int] = []
+        for f in training_files:
+            if (m := pat.search(f)) is None:
+                raise ValueError(f"Could not find id_..._ in filename: {f!r}")
+            ids.append(int(m.group(1)))
         samples = (
             pd.read_csv(self.samples_file, delimiter=",", skipinitialspace=True)
             .squeeze("columns")
@@ -1060,7 +1070,15 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         response = np.zeros((m_samples, len(self.sparse_idx_1d)))
 
         rank_zero_info("  Loading data sets...")
-        training_files.sort(key=lambda x: int(re.search("id_(.+?)_", x).group(1)))
+        pat = re.compile(r"id_(\d+)_")
+
+        def _id_key(path: str) -> int:
+            m = pat.search(path)
+            if m is None:
+                raise ValueError(f"Could not find id_..._ in filename: {path!r}")
+            return int(m.group(1))
+
+        training_files.sort(key=_id_key)
         start_time = time()
         for idx, m_file in tqdm_rank0(
             enumerate(training_files), total=len(training_files)
@@ -1079,14 +1097,13 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         self.training_files = training_files
         rank_zero_info(f"Reading training data took {(end_time-start_time):.0f}s")
 
-        p = response.max(axis=1) < self.threshold
+        p = response.max(axis=1) < self.cfg.y_lim[1]
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
 
         X = torch.from_numpy(np.array(samples[p], dtype=np.float32))
         Y = torch.from_numpy(np.array(response[p], dtype=np.float32))
-        Y[Y < 0] = 0
 
         X_mean = X.mean(axis=0)
         X_std = X.std(axis=0)
