@@ -245,32 +245,18 @@ def main():
                 vmax=50,
                 cmap="coolwarm",
             )
-            try:
-                axs[-1, k].text(
-                    0.01,
-                    0.05,
-                    "\n".join(
-                        [
-                            f"{keys_dict[i]}: {j:.3f}"
-                            for i, j in zip(dataset.samples.X_keys, X_val_unscaled)
-                        ]
-                    ),
-                    c="k",
-                    transform=axs[-1, k].transAxes,
-                )
-            except:
-                axs[-1, k].text(
-                    0.01,
-                    0.05,
-                    "\n".join(
-                        [
-                            f"{i}: {j:.3f}"
-                            for i, j in zip(dataset.samples.X_keys, X_val_unscaled)
-                        ]
-                    ),
-                    c="k",
-                    transform=axs[-1, k].transAxes,
-                )
+            axs[-1, k].text(
+                0.01,
+                0.05,
+                "\n".join(
+                    [
+                        f"{keys_dict[i]}: {j:.3f}"
+                        for i, j in zip(dataset.samples.X_keys, X_val_unscaled)
+                    ]
+                ),
+                c="k",
+                transform=axs[-1, k].transAxes,
+            )
 
             axs[-1, k].text(
                 0.01,

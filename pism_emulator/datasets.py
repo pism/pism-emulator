@@ -1181,7 +1181,6 @@ class PISMInterpolatedDataset(Dataset):
         log_y: bool = True,
         y_lim: tuple = (1, 100e3),
         epsilon: float = 0.0,
-        verbose: bool = False,
         target_engine: str | None = None,
         training_engine: str | None = None,
         parallel: bool = True,
@@ -1216,7 +1215,6 @@ class PISMInterpolatedDataset(Dataset):
             log_y=bool(log_y),
             y_lim=tuple(y_lim),
             epsilon=float(epsilon),
-            verbose=bool(verbose),
             target_engine=target_engine or _sniff_engine(target_file),
             training_engine=training_engine or "h5netcdf",
             parallel=bool(parallel),
@@ -1264,11 +1262,9 @@ class PISMInterpolatedDataset(Dataset):
     # ---------- target / mask (with interpolation) ----------
     def _load_target_interp_and_mask(self) -> TargetData:
         cfg = self.cfg
-        if cfg.verbose:
-            rank_zero_info(
-                f"Loading target {cfg.target_file} (engine={cfg.target_engine})"
-            )
-            rank_zero_info("  Establishing reference grid from first training file")
+
+        rank_zero_info(f"Loading target {cfg.target_file} (engine={cfg.target_engine})")
+        rank_zero_info("  Establishing reference grid from first training file")
 
         if not cfg.training_files:
             raise FileNotFoundError("No training files provided")
@@ -1306,6 +1302,7 @@ class PISMInterpolatedDataset(Dataset):
 
         # Interpolate (linear) onto the *thinned* ref grid
         targ_interp = targ_da.interp_like(ref_da.squeeze())
+        print(targ_interp.max())
         # Optional extra masking via correlation field (interp it too, if present)
         mask = targ_interp.isnull()
         has_err = cfg.target_error_var in dtgt
@@ -1400,8 +1397,8 @@ class PISMInterpolatedDataset(Dataset):
     # ---------- training + samples (same policy as PISMDataset) ----------
     def _load_training_and_samples(self) -> SamplesData:
         cfg, tgt = self.cfg, self.target
-        if cfg.verbose:
-            rank_zero_info("  Loading samples & training responses (netCDF4 direct)")
+
+        rank_zero_info("  Loading samples & training responses (netCDF4 direct)")
 
         ids = [self._parse_id(p) for p in cfg.training_files]
         files_by_id = dict(zip(ids, cfg.training_files))
@@ -1413,10 +1410,10 @@ class PISMInterpolatedDataset(Dataset):
         )
 
         keep_ids = [i for i in sorted(files_by_id) if i in samples.index]
-        if cfg.verbose:
-            missing = sorted(set(samples.index).difference(keep_ids))
-            if missing:
-                rank_zero_info(f"  Missing runs (dropping from samples): {missing}")
+
+        missing = sorted(set(samples.index).difference(keep_ids))
+        if missing:
+            rank_zero_info(f"  Missing runs (dropping from samples): {missing}")
 
         samples = samples.loc[keep_ids]
 
@@ -1484,11 +1481,6 @@ class PISMInterpolatedDataset(Dataset):
 
         normed_area = torch.ones(n_grid_points, dtype=torch.float32)
         normed_area /= normed_area.sum()
-
-        if self.cfg.verbose:
-            rank_zero_info(f"X: {X.shape}")
-            rank_zero_info(f"Y {Y.shape}")
-            rank_zero_info(f"normed_area: {normed_area.shape}")
 
         return SamplesData(
             X=Xn,

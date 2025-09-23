@@ -42,9 +42,10 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from pism_emulator.datasets import PISMDataset
+from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 from pism_emulator.sampler.mala import ChainInitDataset, MALASamplerModule
+from pism_emulator.utils import param_keys_dict as keys_dict
 
 EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "NN": NNEmulator,
@@ -203,6 +204,8 @@ def main():
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument("--burn", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=100000)
+    parser.add_argument("--target_var", type=str, default="velsurf_mag")
+    parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
@@ -241,6 +244,8 @@ def main():
     thin = args.thin
     training_files = args.TRAINING_FILES
     model_file = args.MODEL_FILE[0]
+    target_var = args.target_var
+    target_error_var = args.target_error_var
 
     posterior_dir = f"{emulator_dir}/posterior_samples/"
     if not os.path.isdir(posterior_dir):
@@ -252,13 +257,15 @@ def main():
         target_file=target_file,
         thin=thin,
         target_corr_threshold=0,
-        target_error_var="velsurf_mag_error",
-        target_var="velsurf_mag",
+        target_error_var=target_error_var,
+        target_var=target_var,
     )
 
     X = dataset.samples.X
     X_min = X.cpu().numpy().min(axis=0) - 1e-3
     X_max = X.cpu().numpy().max(axis=0) + 1e-3
+    X_mean = np.asarray(dataset.samples.X_mean.cpu().numpy(), dtype=np.float32)
+    X_std = np.asarray(dataset.samples.X_std.cpu().numpy(), dtype=np.float32)
     n_parameters = dataset.samples.n_parameters
     Y_target = dataset.target.Y_target
 
@@ -297,6 +304,7 @@ def main():
         X_max,
         Y_target,
         sigma_hat,
+        log_y=False,
         metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
@@ -311,12 +319,12 @@ def main():
     )
 
     X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
-    X_mean = np.asarray(dataset.samples.X_mean.cpu().numpy(), dtype=np.float32)
-    X_std = np.asarray(dataset.samples.X_std.cpu().numpy(), dtype=np.float32)
+    rank_zero_info("MAP Point")
+    rank_zero_info("-" * 80)
     rank_zero_info(
         "".join(
             [
-                f"{key}: {(val * std + mean):.3f}\n"
+                f"{keys_dict[key]}: {(val * std + mean):.3f}\n"
                 for key, val, std, mean in zip(
                     dataset.samples.X_keys,
                     X_map,
@@ -373,10 +381,10 @@ def main():
         if np.any(keep):
             var_names = [dataset.samples.X_keys[i] for i in np.flatnonzero(keep)]
             az.plot_trace(
-                idata, var_names=var_names, hist_kwargs={"bins": 50}
+                idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
             )  # <-- key fix: kind/hist_kwargs at top level
             out_png = out_dir / f"X_posterior_model_{model_index}.trace.png"
-            plt.savefig(out_png, dpi=150, bbox_inches="tight")
+            plt.savefig(out_png, dpi=300, bbox_inches="tight")
             plt.close("all")
         else:
             rank_zero_info("All parameters are (near) constant; skipping trace plot.")

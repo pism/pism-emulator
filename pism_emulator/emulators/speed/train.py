@@ -149,7 +149,7 @@ def main():
         target_var=target_var,
         target_error_var=target_error_var,
         thin=thin,
-        verbose=True,
+        y_lim=(1, 10e3),
     )
     X = dataset.samples.X
     F = dataset.samples.Y
