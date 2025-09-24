@@ -44,7 +44,8 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
 }
 
 
-torch.set_float32_matmul_precision("medium")
+torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
+torch.backends.cudnn.benchmark = True
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -96,7 +97,9 @@ def main():
         ),
     )
     parser.add_argument(
-        "--strategy", choices=["ddp_spawn", "ddp", "auto"], default="auto"
+        "--strategy",
+        choices=["ddp_spawn", "ddp", "auto", "single_device"],
+        default="auto",
     )
     parser.add_argument(
         "--target_file",
@@ -152,6 +155,7 @@ def main():
         target_error_var=target_error_var,
         thin=thin,
         y_lim=y_lim,
+        parallel=True,
     )
     X = dataset.samples.X
     F = dataset.samples.Y

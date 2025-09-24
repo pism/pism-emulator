@@ -349,6 +349,7 @@ def _read_one_nc4(
     np.nan_to_num(arr, nan=eps, copy=False)
     # Gather sparse nodes in C-order (same as data[self.sparse_idx_2d].flatten())
     out = np.take(arr.ravel(), idx1d)
+
     return cast(NDArray[np.float32], out)
 
 
@@ -1459,7 +1460,6 @@ class PISMInterpolatedDataset(Dataset):
 
         end_time = time()
         rank_zero_info(f"Reading training data took {(end_time - start_time):.0f}s")
-
         # Same run filtering policy: use upper y_lim bound in *physical* space proxy.
         good = response.max(axis=1) < cfg.y_lim[1]
 
