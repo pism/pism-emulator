@@ -86,6 +86,7 @@ def main():
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--n_layers", type=int, default=4)
     parser.add_argument("-q", type=int, default=100)
+    parser.add_argument("--y_lim", type=float, nargs=2, default=[1, 10e3])
     parser.add_argument(
         "--samples_file",
         default=abspath(
@@ -139,6 +140,7 @@ def main():
     thin = args.thin
     tb_logs_dir = f"{emulator_dir}/tb_logs"
     training_files = args.TRAINING_FILES
+    y_lim = args.y_lim
 
     callbacks: list = [NoValBar()]
 
@@ -149,7 +151,7 @@ def main():
         target_var=target_var,
         target_error_var=target_error_var,
         thin=thin,
-        y_lim=(1, 10e3),
+        y_lim=y_lim,
     )
     X = dataset.samples.X
     F = dataset.samples.Y

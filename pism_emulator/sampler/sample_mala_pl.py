@@ -26,7 +26,7 @@ from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Sequence
-
+from pyfiglet import Figlet
 import arviz as az
 import lightning as pl
 import matplotlib.pylab as plt
@@ -41,6 +41,7 @@ from scipy.stats import beta
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+import matplotlib as mpl
 
 from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
@@ -58,6 +59,16 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"lightning\.pytorch",
 )
+
+rcparams = {
+    "axes.linewidth": 0.15,
+    "xtick.major.size": 2.0,
+    "xtick.major.width": 0.15,
+    "ytick.major.size": 2.0,
+    "ytick.major.width": 0.15,
+    "hatch.linewidth": 0.15,
+    "font.size": 6,
+}
 
 
 class DiskPredictionWriter(BasePredictionWriter):
@@ -251,6 +262,15 @@ def main():
     if not os.path.isdir(posterior_dir):
         os.makedirs(posterior_dir)
 
+    f = Figlet(font="standard")
+    banner = f.renderText("pism-emulator")
+    print("=" * 80)
+    print(banner)
+    print("=" * 80)
+    print(f"MALA Sampler")
+    print("-" * 80)
+    print("")
+
     dataset = PISMDataset(
         training_files=training_files,
         samples_file=samples_file,
@@ -373,16 +393,18 @@ def main():
     idata.to_datatree().to_zarr(str(out_zarr), mode="w")  # overwrite
 
     # Robust plotting: drop (near-)constant vars and use hist with fewer bins
-    plot_traces = True
-    if plot_traces:
+    az.style.use(["arviz-white", "arviz-greenish"])
+    with mpl.rc_context(rc=rcparams):
         # variance across chain & draw
         var_all = np.nanvar(arr_denorm, axis=(0, 1))
         keep = var_all > 1e-12
         if np.any(keep):
             var_names = [dataset.samples.X_keys[i] for i in np.flatnonzero(keep)]
-            az.plot_trace(
+            axes = az.plot_trace(
                 idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
             )  # <-- key fix: kind/hist_kwargs at top level
+            fig = axes.flatten()[0].get_figure()
+            fig.suptitle("Posterior Traces")
             out_png = out_dir / f"X_posterior_model_{model_index}.trace.png"
             plt.savefig(out_png, dpi=300, bbox_inches="tight")
             plt.close("all")

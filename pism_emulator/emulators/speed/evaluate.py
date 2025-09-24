@@ -91,6 +91,7 @@ def main():
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--sample_size", type=int, default=80)
+    parser.add_argument("--y_lim", nargs=2, type-float, default=[0.1, 10e3])
     parser.add_argument(
         "--training_files", nargs="+", help="PISM netCDF files", default=None
     )
@@ -116,6 +117,7 @@ def main():
     target_var = args.target_var
     target_error_var = args.target_error_var
     sample_size = args.sample_size
+    y_lim = args.y_lim
     mode = args.mode
     if mode == "train":
         validation = False
@@ -132,6 +134,7 @@ def main():
         target_var=target_var,
         target_error_var=target_error_var,
         thin=1,
+        y_lim=y_lim,
     )
     X = dataset.samples.X
     F = dataset.samples.Y

@@ -1302,7 +1302,7 @@ class PISMInterpolatedDataset(Dataset):
 
         # Interpolate (linear) onto the *thinned* ref grid
         targ_interp = targ_da.interp_like(ref_da.squeeze())
-        print(targ_interp.max())
+
         # Optional extra masking via correlation field (interp it too, if present)
         mask = targ_interp.isnull()
         has_err = cfg.target_error_var in dtgt
