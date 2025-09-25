@@ -24,4 +24,5 @@ torchaudio
 torchvision
 tqdm
 xarray
+xarray-datatree
 zarr

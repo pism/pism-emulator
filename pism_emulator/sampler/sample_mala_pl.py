@@ -298,9 +298,9 @@ def main():
     )
     if dataset.target.Y_target_error is not None:
         sigma = dataset.target.Y_target_error
-        sigma[sigma < 10] = 10
     else:
         sigma = 10
+    sigma = torch.clamp(sigma, min=1e-4)
 
     rho = 1.0 / (1e4**2)
     point_area = (dataset.target.grid_resolution * thin) ** 2
@@ -328,7 +328,7 @@ def main():
         metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
-        burn=1000,
+        burn=burn,
         samples=samples,
         h0=0.1,
         acc_target=0.25,
@@ -339,6 +339,7 @@ def main():
     )
 
     X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
+    rank_zero_info("-" * 80)
     rank_zero_info("MAP Point")
     rank_zero_info("-" * 80)
     rank_zero_info(
@@ -375,11 +376,22 @@ def main():
         name: arr_denorm[:, :, i] for i, name in enumerate(dataset.samples.X_keys)
     }
 
-    idata = az.from_dict(
-        posterior=posterior,
-        coords=coords,
-        dims=dims,
-    )
+    S_prior_total, D = X_prior.shape
+    C_prior = C  # match posterior chains
+    assert S_prior_total % C_prior == 0, "prior samples must split evenly across chains"
+    S_prior = S_prior_total // C_prior
+
+    X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
+
+    prior_coords = {"chain": np.arange(C_prior), "draw": np.arange(S_prior)}
+    prior_dims = {name: ["chain", "draw"] for name in dataset.samples.X_keys}
+
+    prior = {
+        name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)
+        for i, name in enumerate(dataset.samples.X_keys)
+    }
+
+    idata = az.from_dict(posterior=posterior, prior=prior)
 
     # (Optional) sanity check
     rank_zero_info(
@@ -389,8 +401,27 @@ def main():
     # Save to Zarr (overwrite)
     out_dir = Path(posterior_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_zarr = out_dir / f"X_posterior_model_{model_index}.zarr"
-    idata.to_datatree().to_zarr(str(out_zarr), mode="w")  # overwrite
+
+    # Optional: cast to float32 to shrink size
+    for grp in ("posterior", "prior"):
+        if hasattr(idata, grp):
+            ds = getattr(idata, grp)
+            setattr(idata, grp, ds.astype({v: "float32" for v in ds.data_vars}))
+
+    # Add useful metadata
+    idata.attrs.update(
+        {
+            "created": pd.Timestamp.utcnow().isoformat(),
+            "model": type(model).__name__,
+            "emulator_dir": str(posterior_dir),
+            "n_chains": int(idata.posterior.sizes["chain"]),
+            "n_draws": int(idata.posterior.sizes["draw"]),
+        }
+    )
+
+    # Save + load
+    out_nc = out_dir / f"X_posterior_model_{model_index}.nc"
+    az.to_netcdf(idata, out_nc)  # write
 
     # Robust plotting: drop (near-)constant vars and use hist with fewer bins
     az.style.use(["arviz-white", "arviz-greenish"])

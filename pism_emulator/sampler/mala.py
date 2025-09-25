@@ -13,6 +13,9 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+from tqdm import tqdm
+
+tqdm.set_lock(tqdm.get_lock())
 
 
 class ChainInitDataset(Dataset):
@@ -66,8 +69,6 @@ class MALASamplerModule(pl.LightningModule):
         EMA adaptation hyperparameters (only if adapt_method="ema").
     burn, samples : int
         Burn-in steps and number of samples to keep per chain.
-    print_interval : int
-        Progress logging cadence (in steps).
     """
 
     def __init__(
@@ -95,7 +96,7 @@ class MALASamplerModule(pl.LightningModule):
         dual_gamma: float = 0.05,
         k_adapt: float = 0.01,
         beta: float = 0.99,
-        burn: int = 1000,
+        burn: int = 500,
         samples: int = 2000,
         show_progress: bool = True,
         pbar_update_every: int = 10,
@@ -109,6 +110,9 @@ class MALASamplerModule(pl.LightningModule):
 
         # Make sure emulator is a proper submodule so it moves with .to(device)
         if isinstance(model, torch.nn.Module):
+            # self.model = torch.compile(
+            #     model, mode="reduce-overhead", fullgraph=False
+            # ).eval()
             self.model = model.eval()
         else:
             # fall back; Lightning won’t move this automatically
@@ -184,27 +188,31 @@ class MALASamplerModule(pl.LightningModule):
         """Negative log-posterior (scalar)."""
         Y_pred = self.forward(X)
         r = Y_pred - self.Y_target
-        t = r / self.sigma_hat
+        sigma_hat = self.sigma_hat
+        t = r / sigma_hat
         nu = self.nu
-        log_like = torch.sum(
-            torch.lgamma((nu + 1.0) * 0.5)
-            - torch.lgamma(nu * 0.5)
-            - 0.5 * torch.log(self._two_pi * (nu / 2.0))
-            - torch.log(self.sigma_hat)
+
+        log_like = (
+            torch.special.gammaln((nu + 1) * 0.5)
+            - torch.special.gammaln(nu * 0.5)
+            - 0.5 * torch.log(torch.pi * nu)
+            - torch.log(sigma_hat)
             - 0.5 * (nu + 1.0) * torch.log1p((t * t) / nu)
-        )
+        ).sum()
+
         X_bar = torch.clamp(
             (X - self.X_min) / (self.X_max - self.X_min),
             self._eps_beta,
             1 - self._eps_beta,
         )
-        log_prior = torch.sum(
+        log_prior = (
             (self.alpha_b - 1.0) * torch.log(X_bar)
             + (self.beta_b - 1.0) * torch.log(1.0 - X_bar)
             + torch.lgamma(self.alpha_b + self.beta_b)
             - torch.lgamma(self.alpha_b)
             - torch.lgamma(self.beta_b)
-        )
+        ).sum()
+
         return -(self.alpha * log_like + log_prior)
 
     @torch.enable_grad()
