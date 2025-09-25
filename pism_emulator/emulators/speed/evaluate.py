@@ -91,7 +91,7 @@ def main():
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--sample_size", type=int, default=80)
-    parser.add_argument("--y_lim", nargs=2, type-float, default=[0.1, 10e3])
+    parser.add_argument("--y_lim", nargs=2, type=float, default=[0.1, 10e3])
     parser.add_argument(
         "--training_files", nargs="+", help="PISM netCDF files", default=None
     )

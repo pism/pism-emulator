@@ -13,7 +13,6 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from tqdm import tqdm
 
 tqdm.set_lock(tqdm.get_lock())
 
@@ -368,7 +367,6 @@ class MALASamplerModule(pl.LightningModule):
 
         return X
 
-    # ------------- Predict loop (one chain per batch item) -------------
     def predict_step(self, batch: Tensor, batch_idx: int):
         chain_id, X0 = batch
         chain_id = (
@@ -379,6 +377,9 @@ class MALASamplerModule(pl.LightningModule):
         X = X0.detach().requires_grad_(True)
 
         burn, samples = int(self.hparams.burn), int(self.hparams.samples)
+        total = burn + samples
+
+        # step-size & adaptation params (unchanged)
         h = float(self.hparams.h0)
         h_min, h_max = float(self.hparams.h_min), float(self.hparams.h_max)
         acc_target = float(self.hparams.acc_target)
@@ -391,9 +392,13 @@ class MALASamplerModule(pl.LightningModule):
         )
 
         kept: list[Tensor] = []
-        local = None
 
-        # init adaptation state
+        # ── NEW: per-step histories (keep tensors; convert once at end) ─────────
+        lp_hist: list[Tensor] = []
+        h_hist: list[Tensor] = []
+        acc_hist: list[Tensor] = []  # 1 if accepted, else 0
+
+        local = None
         acc_ema = acc_target
         if adapt_method == "dual":
             n = 0
@@ -402,14 +407,28 @@ class MALASamplerModule(pl.LightningModule):
             Hbar = 0.0
             log_hbar = log_h
 
-        total = burn + samples
+        dev = X.device
         for t in range(total):
             X, local, s, a = self._mala_step(X, h, local)
 
+            # ── Log-prob for this step (tensor, avoid .item() here) ──────────────
+            # Your code uses -local[0] as the displayed logP; keep that convention.
+            if local is not None and len(local) >= 1:
+                # negate so that 'lp' = log posterior (not negative energy)
+                lp_t = (-local[0]).detach()
+            else:
+                lp_t = torch.tensor(float("nan"), device=dev)
+
+            # record step stats (tensors on device)
+            lp_hist.append(lp_t.to(torch.float32))
+            h_hist.append(torch.tensor(h, device=dev, dtype=torch.float32))
+            acc_hist.append(torch.tensor(s, device=dev, dtype=torch.int8))
+
+            # keep post-burn samples
             if t >= burn:
                 kept.append(X.detach())
 
-            # adapt only during burn-in
+            # ── Adapt only during burn-in (unchanged) ────────────────────────────
             if t < burn:
                 if adapt_method == "dual":
                     n += 1
@@ -430,17 +449,33 @@ class MALASamplerModule(pl.LightningModule):
                 h = float(math.exp(log_hbar))
                 h = min(max(h, h_min), h_max)
 
+            # existing pretty bar (ok to keep .item() just for display)
             if local is not None:
                 try:
-                    logP = -float(local[0].detach().item())
+                    logP_disp = float(lp_t.detach().cpu().item())
                 except Exception:
-                    logP = float("nan")
+                    logP_disp = float("nan")
             else:
-                logP = float("nan")
-            self._update_bar(t, h, logP)
+                logP_disp = float("nan")
+            self._update_bar(t, h, logP_disp)
 
-        samples = torch.stack(kept).cpu()
-        return {"chain": chain_id, "samples": samples}
+            # ensure X is a fresh leaf for next step
+            X = X.detach().requires_grad_(True)
+
+        # stack tensors ONCE, slice off burn-in, and move to CPU
+        samples_out = torch.stack(kept).cpu()  # (S, D)
+
+        lp_arr = torch.stack(lp_hist)[burn:].to(torch.float32).cpu()  # (S,)
+        h_arr = torch.stack(h_hist)[burn:].to(torch.float32).cpu()  # (S,)
+        acc_arr = torch.stack(acc_hist)[burn:].to(torch.bool).cpu()  # (S,)
+
+        return {
+            "chain": chain_id,
+            "samples": samples_out,  # (S, D)
+            "lp": lp_arr,  # (S,)
+            "step_size": h_arr,  # (S,)
+            "accept": acc_arr,  # (S,)
+        }
 
     def on_predict_start(self) -> None:
         # one chain per process -> rank == chain id

@@ -26,9 +26,10 @@ from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Sequence
-from pyfiglet import Figlet
+
 import arviz as az
 import lightning as pl
+import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
@@ -37,11 +38,11 @@ from joblib import Parallel, delayed
 from lightning import LightningModule
 from lightning.pytorch.callbacks import BasePredictionWriter, Timer
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+from pyfiglet import Figlet
 from scipy.stats import beta
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-import matplotlib as mpl
 
 from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
@@ -97,11 +98,17 @@ class DiskPredictionWriter(BasePredictionWriter):
         rank = int(getattr(trainer, "global_rank", 0))
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
+
         for p in preds:
             chain = int(p["chain"])
             samples = p["samples"]  # (S, D) CPU tensor
+            # ── NEW: optional stats (may be absent in older runs) ──
+            rec = {"chain": chain, "rank": rank, "samples": samples}
+            for key in ("lp", "step_size", "accept"):
+                if key in p and p[key] is not None:
+                    rec[key] = p[key]  # (S,) CPU tensors
             path = self.out_dir / f"rank{rank:02d}_chain{chain:06d}.pt"
-            torch.save({"chain": chain, "rank": rank, "samples": samples}, path)
+            torch.save(rec, path)
 
 
 def load_pred_dir(
@@ -116,6 +123,30 @@ def load_pred_dir(
     if expected_chains is not None and len(records) != expected_chains:
         raise RuntimeError(f"Expected {expected_chains} chains, found {len(records)}.")
     return torch.stack([r["samples"] for r in records])  # (C, S, D)
+
+
+def load_pred_dir_with_stats(pred_dir: str | Path, expected_chains: int | None = None):
+    pred_dir = Path(pred_dir)
+    files = sorted(pred_dir.glob("rank*_chain*.pt"))
+    records = [torch.load(f) for f in files]
+    if not records:
+        raise RuntimeError(f"No prediction files found in {pred_dir}")
+    records.sort(key=lambda r: r["chain"])
+    if expected_chains is not None and len(records) != expected_chains:
+        raise RuntimeError(f"Expected {expected_chains} chains, found {len(records)}.")
+
+    samples = torch.stack([r["samples"] for r in records])  # (C, S, D)
+
+    def _maybe_stack(key):
+        if all((key in r) for r in records):
+            return torch.stack([r[key] for r in records])  # (C, S)
+        return None
+
+    lp = _maybe_stack("lp")
+    h = _maybe_stack("step_size")
+    acc = _maybe_stack("accept")
+
+    return samples, lp, h, acc
 
 
 def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
@@ -142,14 +173,50 @@ def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
 
 
 def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
-    # Dataset should yield (chain_id, init_vector)
+    """
+    Returns:
+        stats: dict with keys:
+           - 'samples'   : (C, S, D) float32
+           - 'lp'        : (C, S)     float32  (if provided by predict_step)
+           - 'step_size' : (C, S)     float32  (if provided)
+           - 'accept'    : (C, S)     bool     (if provided)
+    """
     dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False, num_workers=0)
 
-    n_chains = inits.shape[0]
-    multi_cpu = accelerator == "cpu" and n_chains > 1
+    n_chains = int(inits.shape[0])
+    multi_cpu = (accelerator == "cpu") and (n_chains > 1)
+
+    def _stack_single_outs(outs):
+        """Stack list of prediction dicts (single-process predict path)."""
+        outs = [o for o in outs if o is not None]
+        outs.sort(key=lambda d: int(d["chain"]))
+        stats = {"samples": torch.stack([d["samples"] for d in outs])}  # (C, S, D)
+        # Optional stats if present
+        for k in ("lp", "step_size", "accept"):
+            if all((k in d) for d in outs):
+                stats[k] = torch.stack([d[k] for d in outs])  # (C, S)
+        return stats
+
+    def _stack_from_disk(pred_dir, expected_chains=None):
+        """Read rank*_chain*.pt files written by DiskPredictionWriter."""
+        pred_dir = Path(pred_dir)
+        files = sorted(pred_dir.glob("rank*_chain*.pt"))
+        if not files:
+            raise RuntimeError(f"No prediction files found in {pred_dir}")
+        recs = [torch.load(f) for f in files]
+        recs.sort(key=lambda r: int(r["chain"]))
+
+        stats = {"samples": torch.stack([r["samples"] for r in recs])}  # (C, S, D)
+        for k in ("lp", "step_size", "accept"):
+            if all((k in r) for r in recs):
+                stats[k] = torch.stack([r[k] for r in recs])  # (C, S)
+        if expected_chains is not None and stats["samples"].shape[0] != expected_chains:
+            raise RuntimeError(
+                f"Expected {expected_chains} chains, got {stats['samples'].shape[0]}."
+            )
+        return stats
 
     if multi_cpu:
-        # ── DDP spawn: use wall-clock timer in the parent process ─────────────
         wall_start = time.perf_counter()
         trainer = pl.Trainer(
             accelerator="cpu",
@@ -165,20 +232,12 @@ def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
         _ = trainer.predict(sampler, dl, return_predictions=False)
         wall_secs = time.perf_counter() - wall_start
         print(
-            f"[predict/ddp_spawn] Elapsed: {wall_secs:.2f}s "
-            f"({str(dt.timedelta(seconds=int(wall_secs)))})"
+            f"[predict/ddp_spawn] Elapsed: {wall_secs:.2f}s ({str(dt.timedelta(seconds=int(wall_secs)))})"
         )
 
-        files = sorted(Path(tmp_dir).glob("rank*_chain*.pt"))
-        if not files:
-            raise RuntimeError(f"No prediction files found in {tmp_dir}")
-        records = [torch.load(f) for f in files]
-        records.sort(key=lambda r: r["chain"])
-        chains = torch.stack([r["samples"] for r in records])  # (C, S, D)
-
+        stats = _stack_from_disk(tmp_dir, expected_chains=n_chains)
     else:
-        # ── Single process (CPU or GPU): use Lightning's Timer callback ───────
-        timer = Timer()  # <-- create explicitly so we can read it after
+        timer = Timer()
         trainer = pl.Trainer(
             accelerator=accelerator,
             devices=1,
@@ -191,15 +250,12 @@ def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
         )
         outs = trainer.predict(sampler, dl, return_predictions=True)
         secs = timer.time_elapsed("predict") or 0.0
-        print(
+        rank_zero_info(
             f"[predict] Elapsed: {secs:.2f}s ({str(dt.timedelta(seconds=int(secs)))})"
         )
+        stats = _stack_single_outs(outs)
 
-        outs = [o for o in outs if o is not None]
-        outs.sort(key=lambda d: int(d["chain"]))
-        chains = torch.stack([d["samples"] for d in outs])
-
-    return chains
+    return stats
 
 
 def main():
@@ -318,6 +374,7 @@ def main():
     # Initial condition for MAP. Note that using 0 yields similar results
     X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float)
 
+    start = time.time()
     sampler = MALASamplerModule(
         model,
         X_min,
@@ -357,10 +414,17 @@ def main():
     )
 
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
-    chains = run_sampling(sampler, inits, accelerator=accelerator)
+    stats = run_sampling(sampler, inits, accelerator=accelerator)
+    samples = stats["samples"]  # (C, S, D)
+    lp = stats.get("lp")  # (C, S) or None
+    step = stats.get("step_size")  # (C, S) or None
+    accept = stats.get("accept")  # (C, S) or None
     rank_zero_info("\n\n\n\n\n\n\n\n\n\n\n\n")
+    end = time.time()
+    time_elapsed = end - start
+    rank_zero_info(f"Sampling took {time_elapsed:.0f}s")
 
-    chains_np = [np.asarray(c) for c in chains]  # each (S, D)
+    chains_np = [np.asarray(c) for c in samples]  # each (S, D)
     arr = np.stack(chains_np, axis=0)  # (C, S, D)
 
     # Denorm once
@@ -392,7 +456,17 @@ def main():
     }
 
     idata = az.from_dict(posterior=posterior, prior=prior)
-
+    idata = az.from_dict(
+        posterior=posterior,
+        prior=prior,
+        sample_stats={
+            "lp": lp.numpy(),  # (chain, draw)
+            "step": step.numpy(),  # (chain, draw)
+            "accept": accept.numpy(),  # (chain, draw) -> bool
+        },
+        # optional: log_likelihood group if you want arviz to treat it as such
+        # log_likelihood = {"lp": lp.numpy()},
+    )
     # (Optional) sanity check
     rank_zero_info(
         "posterior dims:", idata.posterior.sizes
