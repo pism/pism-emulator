@@ -69,6 +69,14 @@ class ChainInitDataset(Dataset):
     """
 
     def __init__(self, inits: torch.Tensor) -> None:
+        """
+        Init.
+
+        Parameters
+        ----------
+        inits : torch.Tensor
+            Initial values.
+        """
         if inits.ndim != 2:
             raise ValueError(
                 f"`inits` must be 2-D (n_chains, dim); got shape {tuple(inits.shape)}"
@@ -76,7 +84,14 @@ class ChainInitDataset(Dataset):
         self.inits: torch.Tensor = inits  # (n_chains, dim)
 
     def __len__(self) -> int:
-        """Return the number of chains."""
+        """
+        Return the number of chains.
+
+        Returns
+        -------
+        int
+          The length.
+        """
         return int(self.inits.shape[0])
 
     def __getitem__(self, i: int) -> Tuple[int, torch.Tensor]:
@@ -99,78 +114,137 @@ class ChainInitDataset(Dataset):
 
 class MALASamplerModule(pl.LightningModule):
     """
-    Manifold MALA (mMALA) implemented as a LightningModule for multi-device
-    ``Trainer.predict`` runs. This module **does not** train parameters; it runs
-    sampling chains and returns posterior draws (and optional per-step stats).
+    Manifold MALA (mMALA) sampler implemented as a LightningModule.
+
+    This module **does not** perform training; it runs independent MCMC chains
+    using a manifold Metropolis-Adjusted Langevin Algorithm and returns
+    posterior draws (optionally with per-step statistics).
 
     Parameters
     ----------
     model : pl.LightningModule
-        The forward model. Must be a :class:`torch.nn.Module` compatible with
-        ``model(X, add_mean=True) -> prediction``.
-    X_min : array-like or torch.Tensor
-        Element-wise lower bounds for the (normalized) parameter support.
-    X_max : array-like or torch.Tensor
-        Element-wise upper bounds for the (normalized) parameter support.
-    Y_target : array-like or torch.Tensor
-        Observation vector (same shape as model prediction).
-    sigma_hat : array-like or torch.Tensor
-        Per-node standard deviation for the likelihood (same shape as ``Y_target``).
+        Forward model used inside the likelihood. Must behave like a
+        :class:`torch.nn.Module` and accept a 1D parameter tensor ``X`` with
+        signature ``model(X, add_mean=True) -> prediction``.
+    X_min : array-like of float or torch.Tensor, shape (D,)
+        Element-wise lower bounds used to normalize parameters for the Beta prior.
+    X_max : array-like of float or torch.Tensor, shape (D,)
+        Element-wise upper bounds used to normalize parameters for the Beta prior.
+    Y_target : array-like or torch.Tensor, shape (N,)
+        Observed target vector on which the emulator is conditioned.
+    sigma_hat : array-like or torch.Tensor, shape (N,)
+        Per-node standard deviation used in the Student-t likelihood.
     alpha : float, default=0.01
-        Multiplicative weight on the log-likelihood contribution to the posterior.
+        Weight on the (log) likelihood contribution in the posterior.
     alpha_b : float, default=3.0
-        Beta prior shape parameter α (applied to normalized parameters).
+        Beta prior shape parameter :math:`\\alpha` for normalized parameters.
     beta_b : float, default=3.0
-        Beta prior shape parameter β (applied to normalized parameters).
+        Beta prior shape parameter :math:`\\beta` for normalized parameters.
     nu : float, default=1.0
         Degrees of freedom of the Student-t likelihood.
     metric_mode : {"manifold", "current"}, default="manifold"
-        Reverse proposal metric: use geometry at x' (``"manifold"``) or reuse H(x)
-        (``"current"``).
+        Reverse proposal metric. If ``"manifold"``, compute geometry at the
+        proposal :math:`x'`; if ``"current"``, reuse :math:`H(x)` for both
+        directions.
     hess_refresh : int, default=1
-        Recompute local geometry (gradient/Hessian) every N steps (N ≥ 1).
+        Recompute the local geometry (gradient & Hessian) every ``N`` steps (``N >= 1``).
     delayed_accept : bool, default=False
-        Use two-stage delayed acceptance to avoid computing geometry at x' on
-        obviously bad proposals.
+        Enable two-stage delayed acceptance to avoid computing geometry at
+        obviously poor proposals.
     adapt_method : {"dual", "ema"}, default="ema"
-        Step-size adaptation during burn-in (dual-averaging or exponentially
-        weighted moving average).
+        Step-size adaptation during burn-in (dual-averaging à la NUTS/Stan, or
+        exponentially weighted moving average).
     h0 : float, default=0.1
         Initial step size.
     h_min : float, default=1e-3
-        Minimum step size clamp.
+        Minimum allowed step size during adaptation.
     h_max : float, default=1.0
-        Maximum step size clamp.
+        Maximum allowed step size during adaptation.
     acc_target : float, default=0.25
-        Target acceptance probability used by the adaptation.
+        Target acceptance probability used by the adaptation logic.
     dual_t0 : float, default=10.0
-        Dual-averaging hyperparameter (stabilizer).
+        Dual-averaging stabilizer (see Hoffman & Gelman 2014).
     dual_kappa : float, default=0.75
-        Dual-averaging hyperparameter (shrinkage exponent).
+        Dual-averaging shrinkage exponent.
     dual_gamma : float, default=0.05
-        Dual-averaging hyperparameter (learning-rate scale).
+        Dual-averaging learning-rate scale.
     k_adapt : float, default=0.01
-        EMA update gain (used when ``adapt_method="ema"``).
+        EMA adaptation gain (only if ``adapt_method="ema"``).
     beta : float, default=0.99
-        EMA decay factor (used when ``adapt_method="ema"``).
+        EMA decay factor (only if ``adapt_method="ema"``).
     burn : int, default=500
-        Number of burn-in iterations (not stored).
+        Number of burn-in iterations (discarded).
     samples : int, default=2000
-        Number of post-burn samples to store per chain.
+        Number of post-burn samples stored per chain.
     show_progress : bool, default=True
-        Whether to render per-chain progress bars with ``tqdm``.
+        If True, render per-chain progress bars via :mod:`tqdm`.
     pbar_update_every : int, default=10
         Update rate (in steps) for progress-bar postfix text.
     q : int, default=100
-        Reserved parameter (e.g., for low-rank geometry approximations).
+        Reserved parameter (e.g., truncation rank for a low-rank geometry); not
+        used in the default exact‐Hessian path.
     seed : int or None, default=None
-        Base RNG seed (chain-specific seeds are derived from this value).
+        Base RNG seed; the effective per-chain seed is derived from this value.
+    **kwargs : Any
+        Ignored. Included for forward compatibility with Lightning APIs.
+
+    Attributes
+    ----------
+    model : torch.nn.Module
+        The wrapped forward model (set to ``eval()``; parameters frozen).
+    X_min, X_max : torch.Tensor, shape (D,)
+        Registered buffers holding bounds for prior normalization.
+    Y_target : torch.Tensor, shape (N,)
+        Registered buffer with the observation vector.
+    sigma_hat : torch.Tensor, shape (N,)
+        Registered buffer with per-node standard deviations.
+    alpha, alpha_b, beta_b, nu : torch.Tensor
+        Scalar buffers storing distribution hyperparameters.
+    samples : int
+        Number of post-burn samples per chain.
+    burn : int
+        Number of burn-in iterations per chain.
+    show_progress : bool
+        Whether this instance attempts to draw progress bars.
+
+    Returns
+    -------
+    dict (per-chain, from ``predict_step``)
+        A mapping with:
+        - ``"chain"`` : int — chain id (rank),
+        - ``"samples"`` : torch.Tensor, shape (S, D) — post-burn samples,
+        - ``"lp"`` : torch.Tensor, shape (S,) — log posterior per step (optional),
+        - ``"step_size"`` : torch.Tensor, shape (S,) — step size per step (optional),
+        - ``"accept"`` : torch.Tensor, shape (S,) of bool — acceptance indicator.
+
+        When running multi-process CPU sampling (``ddp_spawn``), predictions may
+        be written to disk via a callback and re-assembled by the driver.
+
+    See Also
+    --------
+    lightning.pytorch.Trainer.predict : Run inference with Lightning modules.
 
     Notes
     -----
-    * The module is designed to be used via ``Trainer.predict``.
-    * Returned predictions contain a dict with the chain id, samples, and
-      optionally per-step statistics (log posterior, step size, accept flag).
+    * Designed for ``Trainer.predict`` with either:
+      - single-process (GPU/MPS/CPU), or
+      - multi-process CPU via ``ddp_spawn`` (one chain per process).
+    * The negative log posterior combines a Student-t likelihood (``nu``) and
+      independent Beta priors on normalized parameters
+      :math:`\\bar X = (X - X_{\\min}) / (X_{\\max} - X_{\\min})`.
+    * Local geometry is obtained via exact Hessian by default; if you add a
+      low-rank path, use ``q`` to control the truncation rank.
+
+    Examples
+    --------
+    Create and run 4 CPU chains with DDP‐spawn:
+
+    >>> sampler = MALASamplerModule(model, X_min, X_max, Y_obs, sigma_hat, samples=2000)
+    >>> dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False)
+    >>> trainer = pl.Trainer(accelerator="cpu", devices=4, strategy="ddp_spawn")
+    >>> preds = trainer.predict(sampler, dl, return_predictions=True)
+    >>> # stack all chains' samples:
+    >>> chains = torch.stack([p["samples"] for p in preds])  # (C, S, D)
     """
 
     def __init__(
@@ -273,10 +347,6 @@ class MALASamplerModule(pl.LightningModule):
     def configure_optimizers(self) -> None:
         """
         Lightning hook. This module does not optimize/train any parameters.
-
-        Returns
-        -------
-        None
         """
         return None
 
@@ -322,6 +392,14 @@ class MALASamplerModule(pl.LightningModule):
         t = r / self.sigma_hat
         nu = self.nu
 
+        # sigma = torch.clamp(self.sigma_hat, 1e-8)
+
+        # t_elem = torch.distributions.StudentT(
+        #     df=nu, loc=0.0, scale=sigma
+        # )  # elementwise
+        # t_joint = torch.distributions.Independent(t_elem, reinterpreted_batch_ndims=1)
+        # log_like = t_joint.log_prob(r)
+
         # Student-t log-likelihood (sum over observation dimension)
         log_like = (
             torch.special.gammaln((nu + 1) * 0.5)
@@ -345,6 +423,15 @@ class MALASamplerModule(pl.LightningModule):
             - torch.lgamma(self.beta_b)
         ).sum()
 
+        # alpha = self.alpha_b.expand_as(X_bar)
+        # beta = self.beta_b.expand_as(X_bar)
+        # beta_elem = torch.distributions.Beta(
+        #     alpha, beta
+        # )  # batch_shape=(D,), event_shape=()
+        # beta_joint = torch.distributions.Independent(
+        #     beta_elem, 1
+        # )  # reinterpret last batch dim as event
+        # log_prior = beta_joint.log_prob(X_bar)
         return -(self.alpha * log_like + log_prior)
 
     @torch.enable_grad()
@@ -362,13 +449,7 @@ class MALASamplerModule(pl.LightningModule):
         Returns
         -------
         tuple
-            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)`` where
-
-            * ``log_pi`` : scalar negative log-posterior at ``X`` (``Tensor``)
-            * ``g`` : gradient vector at ``X`` (``Tensor`` of shape ``(D,)``)
-            * ``Hpos`` : positive-definite surrogate of Hessian (``Tensor`` of shape ``(D, D)``)
-            * ``Hinv`` : inverse of ``Hpos`` (``Tensor`` of shape ``(D, D)``)
-            * ``log_det_Hinv`` : scalar log-determinant of ``Hinv`` (``Tensor``)
+            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)``.
         """
         log_pi = self.neg_log_prob(X)
         self.hessian_counter += 1

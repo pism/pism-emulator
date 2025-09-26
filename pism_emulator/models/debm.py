@@ -2654,17 +2654,17 @@ class TorchDEBMModel:
 
     def orbital_parameters(self, time: torch.tensor) -> dict[str, float]:
         """
-        Calculate orbital parameters (declination, distance_factor) given a time
+        Calculate orbital parameters (declination, distance_factor) given a time.
 
         Parameters
         ----------
         time numpy.tensor
-            Time
+            Time.
 
         Returns
         ----------
         orbital_parameters dict
-            Orbital parameters declination, distance_factor
+            Orbital parameters declination, distance_factor.
 
         Examples
         ----------
@@ -2682,7 +2682,6 @@ class TorchDEBMModel:
 
         >>>    debm.orbital_parameters(time)
         (array([0.07843061]), array([0.99889585]))
-
         """
 
         year_fraction = self.year_fraction(time)
@@ -2708,14 +2707,14 @@ class TorchDEBMModel:
 
     def seconds_per_year(self) -> float:
         """
-        Return the number of seconds in a year
+        Return the number of seconds in a year.
         """
 
         return 3.15569259747e7
 
     def albedo(self, melt_rate: torch.tensor) -> torch.tensor:
         """
-        Albedo parameterized as a function of the melt rate
+        Albedo parameterized as a function of the melt rate.
 
         See equation 7 in Zeitz et al.
 
@@ -2724,13 +2723,13 @@ class TorchDEBMModel:
 
         Parameters
         ----------
-        melt_rate numpy.tensor
-            Melt rate (m/yr)
+        melt_rate torch.tensor
+            Melt rate (m/yr).
 
         Returns
         ----------
-        albedo numpy.tensor
-            Albedo (1)
+        albedo torch.tensor
+            Albedo (1).
 
         Examples
         ----------
@@ -2753,19 +2752,19 @@ class TorchDEBMModel:
 
     def atmosphere_transmissivity(self, elevation: torch.tensor) -> torch.tensor:
         """
-        Atmosphere transmissivity (no units; acts as a scaling factor)
+        Atmosphere transmissivity (no units; acts as a scaling factor).
 
         See appendix A2 in Zeitz et al 2021.
 
         Parameters
         ----------
         elevation : numpy.tensor
-            elevation above the geoid (meters)
+            Elevation above the geoid (meters).
 
         Returns
         ----------
         transmissivity numpy.tensor
-            Transmissivity (1)
+            Transmissivity (1).
 
         Examples
         ----------
