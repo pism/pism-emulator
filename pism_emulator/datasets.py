@@ -742,8 +742,9 @@ class PISMDataset(Dataset):
             .values
         )
         Y_target = torch.from_numpy(targ_vec.astype(np.float32))
+        Y_target = torch.clamp(Y_target, *cfg.y_lim)
         if cfg.log_y:
-            Y_target = torch.log10(torch.clamp(Y_target, *cfg.y_lim))
+            Y_target = torch.log10(Y_target)
 
         Y_target_error = Y_target_error_2d = None
         if has_err:
@@ -1337,7 +1338,7 @@ class PISMInterpolatedDataset(Dataset):
         # Apply same log scaling policy as PISMDataset
         if cfg.log_y:
             # Clamp to y_lim then log10, identical to PISMDataset
-            Y_target = torch.log10(torch.clamp(Y_target, cfg.y_lim[0], cfg.y_lim[1]))
+            Y_target = torch.log10(torch.clamp(Y_target, *cfg.y_lim))
 
         # Optional error/corr 2D fields (already on ref grid)
         Y_target_error = Y_target_error_2d = None
@@ -1466,10 +1467,10 @@ class PISMInterpolatedDataset(Dataset):
 
         X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
         Y = torch.from_numpy(response.astype(np.float32)[good])
-
+        Y = torch.clamp(Y, *cfg.y_lim)
         # Same scaling policy: clamp to y_lim and log10 if requested
         if cfg.log_y:
-            Y = torch.log10(torch.clamp(Y, cfg.y_lim[0], cfg.y_lim[1]))
+            Y = torch.log10(Y)
 
         X_keys = list(samples.columns)
         X_mean = X.mean(dim=0)

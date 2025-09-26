@@ -273,6 +273,7 @@ def main():
     parser.add_argument("--samples", type=int, default=100000)
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
+    parser.add_argument("--y_lim", nargs=2, type=float, default=[0.1, 10e3])
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument(
         "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
@@ -304,6 +305,7 @@ def main():
     model_index = args.model_index
     chains = args.chains
     samples = args.samples
+    y_lim = args.y_lim
     burn = args.burn
     out_format = args.out_format
     samples_file = args.samples_file
@@ -335,6 +337,7 @@ def main():
         target_corr_threshold=0,
         target_error_var=target_error_var,
         target_var=target_var,
+        y_lim=y_lim,
     )
 
     X = dataset.samples.X
@@ -445,7 +448,10 @@ def main():
     assert S_prior_total % C_prior == 0, "prior samples must split evenly across chains"
     S_prior = S_prior_total // C_prior
 
-    X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
+    X_prior_reshaped = (
+        X_prior.reshape(C_prior, S_prior, D) * X_std[None, None, :]
+        + X_mean[None, None, :]
+    )
 
     prior_coords = {"chain": np.arange(C_prior), "draw": np.arange(S_prior)}
     prior_dims = {name: ["chain", "draw"] for name in dataset.samples.X_keys}

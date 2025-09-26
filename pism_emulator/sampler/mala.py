@@ -1,3 +1,23 @@
+# Copyright (C) 2021-25 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+"""
+MALA Sampler.
+"""
 from __future__ import annotations
 
 import math
@@ -18,65 +38,148 @@ tqdm.set_lock(tqdm.get_lock())
 
 
 class ChainInitDataset(Dataset):
-    def __init__(self, inits: torch.Tensor):
-        assert inits.ndim == 2
-        self.inits = inits  # (n_chains, dim)
+    """
+    Dataset of initial states for running multiple MCMC chains.
 
-    def __len__(self):
-        return self.inits.shape[0]
+    This dataset stores a 2-D tensor of initial parameter vectors and
+    yields `(chain_id, init_vector)` pairs suitable for a DataLoader.
 
-    def __getitem__(self, i: int):
+    Parameters
+    ----------
+    inits : torch.Tensor
+        A tensor of shape ``(n_chains, dim)`` containing the initial
+        parameter vectors for each chain. Must be 2-dimensional.
+
+    Attributes
+    ----------
+    inits : torch.Tensor
+        The stored initial states with shape ``(n_chains, dim)``.
+
+    Examples
+    --------
+    >>> inits = torch.randn(4, 10)  # 4 chains, 10 parameters each
+    >>> ds = ChainInitDataset(inits)
+    >>> len(ds)
+    4
+    >>> chain_id, x0 = ds[0]
+    >>> chain_id
+    0
+    >>> x0.shape
+    torch.Size([10])
+    """
+
+    def __init__(self, inits: torch.Tensor) -> None:
+        if inits.ndim != 2:
+            raise ValueError(
+                f"`inits` must be 2-D (n_chains, dim); got shape {tuple(inits.shape)}"
+            )
+        self.inits: torch.Tensor = inits  # (n_chains, dim)
+
+    def __len__(self) -> int:
+        """Return the number of chains."""
+        return int(self.inits.shape[0])
+
+    def __getitem__(self, i: int) -> Tuple[int, torch.Tensor]:
+        """
+        Get the ``i``-th chain's initial state.
+
+        Parameters
+        ----------
+        i : int
+            Index of the chain to retrieve.
+
+        Returns
+        -------
+        tuple of (int, torch.Tensor)
+            A pair ``(chain_id, init_vector)`` where ``chain_id == i`` and
+            ``init_vector`` has shape ``(dim,)``.
+        """
         return i, self.inits[i]
 
 
 class MALASamplerModule(pl.LightningModule):
     """
-    Manifold MALA (mMALA) implemented as a LightningModule suitable for multi-device
-    `Trainer.predict` runs. It **does not** train parameters; it runs sampling chains.
+    Manifold MALA (mMALA) implemented as a LightningModule for multi-device
+    ``Trainer.predict`` runs. This module **does not** train parameters; it runs
+    sampling chains and returns posterior draws (and optional per-step stats).
 
     Parameters
     ----------
     model : pl.LightningModule
-        Forward model.
-    X_min, X_max : array-like or Tensor
-        Element-wise bounds for Beta prior support.
-    Y_target, sigma_hat : array-like or Tensor
-        Target vector and per-node std.
-    alpha : float, default 0.01
-        Likelihood weight in the negative log-posterior (X).
-    alpha_b, beta_b : float, default 3.0
-        Beta prior parameters applied to normalized parameters.
-    nu : float, default 1.0
-        Degrees of freedom for Student-t likelihood.
-    metric_mode : {"manifold", "current"}, default "manifold"
-        Whether to use H(x') in the reverse proposal or reuse H(x).
-    hess_refresh : int, default 1
-        Recompute local geometry H(x) every N steps (>=1).
-    delayed_accept : bool, default False
-        Use two-stage delayed acceptance to avoid computing H(x') on obviously bad proposals.
-    adapt_method : {"dual", "ema"}, default "dual"
-        Step-size adaptation during burn-in (dual-averaging or simple EMA).
-    h0 : float, default 0.1
+        The forward model. Must be a :class:`torch.nn.Module` compatible with
+        ``model(X, add_mean=True) -> prediction``.
+    X_min : array-like or torch.Tensor
+        Element-wise lower bounds for the (normalized) parameter support.
+    X_max : array-like or torch.Tensor
+        Element-wise upper bounds for the (normalized) parameter support.
+    Y_target : array-like or torch.Tensor
+        Observation vector (same shape as model prediction).
+    sigma_hat : array-like or torch.Tensor
+        Per-node standard deviation for the likelihood (same shape as ``Y_target``).
+    alpha : float, default=0.01
+        Multiplicative weight on the log-likelihood contribution to the posterior.
+    alpha_b : float, default=3.0
+        Beta prior shape parameter α (applied to normalized parameters).
+    beta_b : float, default=3.0
+        Beta prior shape parameter β (applied to normalized parameters).
+    nu : float, default=1.0
+        Degrees of freedom of the Student-t likelihood.
+    metric_mode : {"manifold", "current"}, default="manifold"
+        Reverse proposal metric: use geometry at x' (``"manifold"``) or reuse H(x)
+        (``"current"``).
+    hess_refresh : int, default=1
+        Recompute local geometry (gradient/Hessian) every N steps (N ≥ 1).
+    delayed_accept : bool, default=False
+        Use two-stage delayed acceptance to avoid computing geometry at x' on
+        obviously bad proposals.
+    adapt_method : {"dual", "ema"}, default="ema"
+        Step-size adaptation during burn-in (dual-averaging or exponentially
+        weighted moving average).
+    h0 : float, default=0.1
         Initial step size.
-    h_min, h_max : float, default (1e-3, 1.0)
-        Min/max clamps for step size.
-    acc_target : float, default 0.25
-        Target acceptance probability during adaptation.
-    dual_t0, dual_kappa, dual_gamma : floats
-        Dual-averaging hyperparameters (see NUTS/Stan references).
-    k_adapt, beta : floats
-        EMA adaptation hyperparameters (only if adapt_method="ema").
-    burn, samples : int
-        Burn-in steps and number of samples to keep per chain.
+    h_min : float, default=1e-3
+        Minimum step size clamp.
+    h_max : float, default=1.0
+        Maximum step size clamp.
+    acc_target : float, default=0.25
+        Target acceptance probability used by the adaptation.
+    dual_t0 : float, default=10.0
+        Dual-averaging hyperparameter (stabilizer).
+    dual_kappa : float, default=0.75
+        Dual-averaging hyperparameter (shrinkage exponent).
+    dual_gamma : float, default=0.05
+        Dual-averaging hyperparameter (learning-rate scale).
+    k_adapt : float, default=0.01
+        EMA update gain (used when ``adapt_method="ema"``).
+    beta : float, default=0.99
+        EMA decay factor (used when ``adapt_method="ema"``).
+    burn : int, default=500
+        Number of burn-in iterations (not stored).
+    samples : int, default=2000
+        Number of post-burn samples to store per chain.
+    show_progress : bool, default=True
+        Whether to render per-chain progress bars with ``tqdm``.
+    pbar_update_every : int, default=10
+        Update rate (in steps) for progress-bar postfix text.
+    q : int, default=100
+        Reserved parameter (e.g., for low-rank geometry approximations).
+    seed : int or None, default=None
+        Base RNG seed (chain-specific seeds are derived from this value).
+
+    Notes
+    -----
+    * The module is designed to be used via ``Trainer.predict``.
+    * Returned predictions contain a dict with the chain id, samples, and
+      optionally per-step statistics (log posterior, step size, accept flag).
     """
 
     def __init__(
         self,
         model: pl.LightningModule,
-        X_min,
-        X_max,
-        Y_target,
-        sigma_hat,
+        X_min: Tensor | np.ndarray | list[float],
+        X_max: Tensor | np.ndarray | list[float],
+        Y_target: Tensor | np.ndarray | list[float],
+        sigma_hat: Tensor | np.ndarray | list[float],
         *,
         alpha: float = 0.01,
         alpha_b: float = 3.0,
@@ -101,23 +204,17 @@ class MALASamplerModule(pl.LightningModule):
         pbar_update_every: int = 10,
         q: int = 100,
         seed: int | None = None,
-        **kwargs,
-    ):
-
+        **kwargs: Any,
+    ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["model"])  # everything except the model
 
-        # Make sure emulator is a proper submodule so it moves with .to(device)
         if isinstance(model, torch.nn.Module):
-            # self.model = torch.compile(
-            #     model, mode="reduce-overhead", fullgraph=False
-            # ).eval()
-            self.model = model.eval()
+            self.model: torch.nn.Module = model.eval()
         else:
-            # fall back; Lightning won’t move this automatically
             raise TypeError("`model` must be an nn.Module / LightningModule")
 
-        # Register everything that must live on the same device as the model
+        # Buffers follow device automatically
         self.register_buffer(
             "X_min", torch.as_tensor(X_min, dtype=torch.float32), persistent=False
         )
@@ -133,7 +230,6 @@ class MALASamplerModule(pl.LightningModule):
             persistent=False,
         )
 
-        # Scalars can also be buffers so they follow device/dtype automatically
         self.register_buffer(
             "alpha", torch.as_tensor(alpha, dtype=torch.float32), persistent=False
         )
@@ -152,53 +248,90 @@ class MALASamplerModule(pl.LightningModule):
             torch.tensor(2.0 * math.pi, dtype=torch.float32),
             persistent=False,
         )
-        self.register_buffer(
-            "q",
-            torch.tensor(q, dtype=torch.int),
-            persistent=False,
-        )
+        self.register_buffer("q", torch.tensor(q, dtype=torch.int), persistent=False)
 
-        # Numerics
-        self._eps_beta = 1e-7
-        self._eps_eig = 1e-6
-        self.hessian_counter = 0
-        self.show_progress = show_progress
-        self.pbar_update_every = int(pbar_update_every)
-        self._pbar = None
-        self._rank = 0
-        self._total_steps = 0
-        self.burn = burn
-        self.samples = samples
-        self.delayed_accept = delayed_accept
-        self.metric_mode = metric_mode
-        self._step_count = 0
-        self.hess_refresh = hess_refresh
-        self._base_seed = 0 if seed is None else int(seed)
+        # Numerics / state
+        self._eps_beta: float = 1e-7
+        self._eps_eig: float = 1e-6
+        self.hessian_counter: int = 0
+        self.show_progress: bool = show_progress
+        self.pbar_update_every: int = int(pbar_update_every)
+        self._pbar: Optional[tqdm] = None
+        self._rank: int = 0
+        self._total_steps: int = 0
+        self.burn: int = int(burn)
+        self.samples: int = int(samples)
+        self.delayed_accept: bool = bool(delayed_accept)
+        self.metric_mode: Literal["manifold", "current"] = metric_mode
+        self._step_count: int = 0
+        self.hess_refresh: int = int(hess_refresh)
+        self._base_seed: int = 0 if seed is None else int(seed)
 
-    def configure_optimizers(self):
-        return None  # no training here
+    # ------------------------------------------------------------------ #
+    # Lightning API                                                      #
+    # ------------------------------------------------------------------ #
+    def configure_optimizers(self) -> None:
+        """
+        Lightning hook. This module does not optimize/train any parameters.
 
-    # ------------- Core maths -------------
+        Returns
+        -------
+        None
+        """
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Core maths                                                         #
+    # ------------------------------------------------------------------ #
     def forward(self, X: Tensor) -> Tensor:
-        """Model wrapper; expects model(X, add_mean=True) -> log10(Y)."""
+        """
+        Forward model wrapper.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Parameter vector of shape ``(D,)`` or mini-batch of shape ``(N, D)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Model prediction consistent with ``Y_target`` shape.
+        """
         return self.model(X, add_mean=True)
 
     def neg_log_prob(self, X: Tensor) -> Tensor:
-        """Negative log-posterior (scalar)."""
+        """
+        Negative log-posterior at ``X``.
+
+        Combines a Student-t log-likelihood with element-wise Beta priors
+        on parameters transformed to :math:`[0,1]` via
+        ``(X - X_min) / (X_max - X_min)`` (clamped to avoid log(0)).
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Parameter vector (leaf tensor with ``requires_grad=True`` recommended).
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar tensor with the negative log-posterior.
+        """
         Y_pred = self.forward(X)
         r = Y_pred - self.Y_target
-        sigma_hat = self.sigma_hat
-        t = r / sigma_hat
+        t = r / self.sigma_hat
         nu = self.nu
 
+        # Student-t log-likelihood (sum over observation dimension)
         log_like = (
             torch.special.gammaln((nu + 1) * 0.5)
             - torch.special.gammaln(nu * 0.5)
             - 0.5 * torch.log(torch.pi * nu)
-            - torch.log(sigma_hat)
+            - torch.log(self.sigma_hat)
             - 0.5 * (nu + 1.0) * torch.log1p((t * t) / nu)
         ).sum()
 
+        # Beta prior on normalized parameters
         X_bar = torch.clamp(
             (X - self.X_min) / (self.X_max - self.X_min),
             self._eps_beta,
@@ -215,7 +348,28 @@ class MALASamplerModule(pl.LightningModule):
         return -(self.alpha * log_like + log_prior)
 
     @torch.enable_grad()
-    def _local_geometry(self, X: torch.Tensor):
+    def _local_geometry(
+        self, X: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """
+        Compute local geometry at ``X``: negative log-posterior, gradient and Hessian.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (requires grad).
+
+        Returns
+        -------
+        tuple
+            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)`` where
+
+            * ``log_pi`` : scalar negative log-posterior at ``X`` (``Tensor``)
+            * ``g`` : gradient vector at ``X`` (``Tensor`` of shape ``(D,)``)
+            * ``Hpos`` : positive-definite surrogate of Hessian (``Tensor`` of shape ``(D, D)``)
+            * ``Hinv`` : inverse of ``Hpos`` (``Tensor`` of shape ``(D, D)``)
+            * ``log_det_Hinv`` : scalar log-determinant of ``Hinv`` (``Tensor``)
+        """
         log_pi = self.neg_log_prob(X)
         self.hessian_counter += 1
 
@@ -223,27 +377,9 @@ class MALASamplerModule(pl.LightningModule):
         H = torch.autograd.functional.hessian(
             self.neg_log_prob, X, vectorize=False, create_graph=False
         )
-
         H = 0.5 * (H + H.T)
-        # Fun fact: performance is about the same.
-        # # Choose rank. For an exact decomposition use q=min(H.shape), but you can pick
-        # # a smaller q for a low-rank approximation.
-        # q = min(H.shape)  # or your chosen truncation
 
-        # # Low-rank SVD: H ≈ U @ diag(S) @ V.T
-        # # For symmetric H, U ≈ V (up to signs)
-        # U, S, V = torch.svd_lowrank(H, q=q)
-
-        # # S are singular values (>=0). For symmetric H, S = |λ|.
-        # # Your λ_p = sqrt(λ^2 + eps) equals sqrt(S^2 + eps) here.
-        # eps = self._eps_eig
-        # lam_p = torch.sqrt(S * S + eps)
-
-        # # Build Hpos ≈ V diag(lam_p) V^T  and Hinv ≈ V diag(1/lam_p) V^T
-        # # (use broadcasting instead of forming explicit diags)
-        # Hpos = (V * lam_p) @ V.T
-        # Hinv = (V * (1.0 / lam_p.clamp_min(1e-12))) @ V.T
-
+        # Eigen decomposition (symmetric)
         lam, Q = torch.linalg.eigh(H)
         lam = lam.real
         Q = Q.real
@@ -254,14 +390,73 @@ class MALASamplerModule(pl.LightningModule):
         return log_pi, g, Hpos, Hinv, log_det_Hinv
 
     @staticmethod
-    def _proposal_logpdf(y, mu, H, log_det_Hinv, h, two_pi):
+    def _proposal_logpdf(
+        y: Tensor,
+        mu: Tensor,
+        H: Tensor,
+        log_det_Hinv: Tensor,
+        h: float,
+        two_pi: Tensor,
+    ) -> Tensor:
+        """
+        Log-density of Gaussian proposal :math:`\\mathcal{N}(\\mu,\, 2h\\,H^{-1})`.
+
+        Parameters
+        ----------
+        y : torch.Tensor
+            Evaluation point (shape ``(D,)``).
+        mu : torch.Tensor
+            Mean vector (shape ``(D,)``).
+        H : torch.Tensor
+            Positive-definite matrix proportional to inverse covariance (``(D, D)``).
+        log_det_Hinv : torch.Tensor
+            Scalar log-determinant of :math:`H^{-1}`.
+        h : float
+            MALA step size.
+        two_pi : torch.Tensor
+            Constant tensor with value :math:`2\\pi`.
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar log-density value.
+        """
         d = y.numel()
         delta = (y - mu).unsqueeze(-1)
         quad = (delta.transpose(0, 1) @ (H @ delta)).squeeze() / (2.0 * h)
         logdet_Sigma = d * np.log(2.0 * h) + log_det_Hinv
         return -0.5 * (d * torch.log(two_pi) + logdet_Sigma + quad)
 
-    def _mala_step(self, X: torch.Tensor, h: float, local=None):
+    def _mala_step(
+        self,
+        X: Tensor,
+        h: float,
+        local: Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]] = None,
+    ) -> tuple[
+        Tensor, Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]], int, float
+    ]:
+        """
+        Perform one mMALA/DA-mMALA step.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (leaf tensor with ``requires_grad=True``).
+        h : float
+            Current step size.
+        local : tuple or None, optional
+            Cached local geometry at ``X`` as returned by :meth:`_local_geometry`.
+
+        Returns
+        -------
+        tuple
+            ``(X_next, local_next, accepted, alpha)`` where:
+
+            * ``X_next`` : next state (possibly unchanged on reject)
+            * ``local_next`` : geometry tuple at the accepted state or ``None`` if invalidated
+            * ``accepted`` : 1 if accepted else 0
+            * ``alpha`` : acceptance probability used for the decision
+        """
         # refresh metric at x if needed
         if (
             (local is None)
@@ -280,14 +475,12 @@ class MALASamplerModule(pl.LightningModule):
 
         # Target at proposal
         log_pi_p = self.neg_log_prob(Xp)
-
         # forward q(x'|x) using H(x)
         logq_f = self._proposal_logpdf(Xp, X, H, log_det_Hinv, h, self._two_pi)
 
         if not self.delayed_accept or self.metric_mode == "current":
             # reverse q(x|x') also using H(x)  (CURRENT metric variant)
             logq_r = self._proposal_logpdf(X, Xp, H, log_det_Hinv, h, self._two_pi)
-            # log α = -log p(x') + log q(x|x') + log p(x) - log q(x'|x)
             log_alpha = -log_pi_p + logq_r + log_pi - logq_f
             alpha = (
                 torch.exp(torch.clamp(log_alpha, max=0.0))
@@ -305,7 +498,6 @@ class MALASamplerModule(pl.LightningModule):
             return X, local, s, float(alpha.detach())
 
         # Delayed-acceptance (manifold)
-        # cheap reverse with H(x)
         logq_r_cheap = self._proposal_logpdf(X, Xp, H, log_det_Hinv, h, self._two_pi)
         log_alpha_cheap = -log_pi_p + logq_r_cheap + log_pi - logq_f
         a1 = (
@@ -338,18 +530,44 @@ class MALASamplerModule(pl.LightningModule):
         self._step_count += 1
         return X, local, s, float((a1 * a2).detach())
 
-    # --------------------------- MAP via L-BFGS ---------------------------
+    # ------------------------------------------------------------------ #
+    # MAP search                                                         #
+    # ------------------------------------------------------------------ #
     def find_MAP(
         self,
-        X: torch.Tensor,
+        X: Tensor,
         max_iter: int = 100,
         lr: float = 1.0,
-    ) -> torch.Tensor:
-        """Find a MAP estimate via L-BFGS on the negative log-posterior (X)."""
+    ) -> Tensor:
+        """
+        Find a MAP estimate via L-BFGS on the negative log-posterior.
 
+        Parameters
+        ----------
+        X : torch.Tensor
+            Initial point (will be detached and made a leaf with grad).
+        max_iter : int, default=100
+            Maximum number of L-BFGS iterations (passed to the optimizer).
+        lr : float, default=1.0
+            L-BFGS learning rate.
+
+        Returns
+        -------
+        torch.Tensor
+            The optimized MAP point (same device as module buffers).
+        """
         X = X.detach().to(self.device, dtype=torch.float32).requires_grad_(True)
 
-        def closure():
+        def closure() -> Tensor:
+            """
+            Closure.
+
+            Returns
+            -------
+
+            torch.Tensor
+                Loss tensor.
+            """
             self.zero_grad(set_to_none=True)
             loss = self.neg_log_prob(X)
             loss.backward()
@@ -358,16 +576,33 @@ class MALASamplerModule(pl.LightningModule):
         opt = torch.optim.LBFGS(
             [X], lr=lr, max_iter=max_iter, line_search_fn="strong_wolfe"
         )
-
-        last_val = float("nan")
-
-        val = opt.step(closure)
-        last_val = float(val.detach())
+        _ = opt.step(closure)
         self.zero_grad(set_to_none=True)
-
         return X
 
-    def predict_step(self, batch: Tensor, batch_idx: int):
+    def predict_step(self, batch: Tensor, batch_idx: int) -> dict[str, Any]:
+        """
+        One predict step = one chain.
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            Tuple-like batch where ``batch[0]`` is an integer chain id and
+            ``batch[1]`` is the initial parameter vector for that chain.
+        batch_idx : int
+            Lightning-provided batch index (unused).
+
+        Returns
+        -------
+        dict
+            Dictionary with fields:
+
+            * ``chain`` : int, the chain id
+            * ``samples`` : (S, D) tensor of post-burn samples on CPU
+            * ``lp`` : (S,) tensor, log posterior per kept step (CPU)
+            * ``step_size`` : (S,) tensor, step size per kept step (CPU)
+            * ``accept`` : (S,) boolean tensor, acceptance indicator per kept step (CPU)
+        """
         chain_id, X0 = batch
         chain_id = (
             int(chain_id) if isinstance(chain_id, torch.Tensor) else int(chain_id)
@@ -379,7 +614,7 @@ class MALASamplerModule(pl.LightningModule):
         burn, samples = int(self.hparams.burn), int(self.hparams.samples)
         total = burn + samples
 
-        # step-size & adaptation params (unchanged)
+        # step-size & adaptation params
         h = float(self.hparams.h0)
         h_min, h_max = float(self.hparams.h_min), float(self.hparams.h_max)
         acc_target = float(self.hparams.acc_target)
@@ -393,10 +628,10 @@ class MALASamplerModule(pl.LightningModule):
 
         kept: list[Tensor] = []
 
-        # ── NEW: per-step histories (keep tensors; convert once at end) ─────────
+        # per-step histories (kept as tensors, sliced post-burn once)
         lp_hist: list[Tensor] = []
         h_hist: list[Tensor] = []
-        acc_hist: list[Tensor] = []  # 1 if accepted, else 0
+        acc_hist: list[Tensor] = []
 
         local = None
         acc_ema = acc_target
@@ -411,24 +646,20 @@ class MALASamplerModule(pl.LightningModule):
         for t in range(total):
             X, local, s, a = self._mala_step(X, h, local)
 
-            # ── Log-prob for this step (tensor, avoid .item() here) ──────────────
-            # Your code uses -local[0] as the displayed logP; keep that convention.
+            # log posterior (as tensor; avoid .item() inside loop)
             if local is not None and len(local) >= 1:
-                # negate so that 'lp' = log posterior (not negative energy)
                 lp_t = (-local[0]).detach()
             else:
                 lp_t = torch.tensor(float("nan"), device=dev)
 
-            # record step stats (tensors on device)
             lp_hist.append(lp_t.to(torch.float32))
             h_hist.append(torch.tensor(h, device=dev, dtype=torch.float32))
             acc_hist.append(torch.tensor(s, device=dev, dtype=torch.int8))
 
-            # keep post-burn samples
             if t >= burn:
                 kept.append(X.detach())
 
-            # ── Adapt only during burn-in (unchanged) ────────────────────────────
+            # adapt during burn-in
             if t < burn:
                 if adapt_method == "dual":
                     n += 1
@@ -449,72 +680,76 @@ class MALASamplerModule(pl.LightningModule):
                 h = float(math.exp(log_hbar))
                 h = min(max(h, h_min), h_max)
 
-            # existing pretty bar (ok to keep .item() just for display)
-            if local is not None:
-                try:
-                    logP_disp = float(lp_t.detach().cpu().item())
-                except Exception:
-                    logP_disp = float("nan")
-            else:
-                logP_disp = float("nan")
+            # display-only fetch (safe occasional .item())
+            logP_disp = (
+                float(lp_t.detach().cpu().item())
+                if torch.isfinite(lp_t)
+                else float("nan")
+            )
             self._update_bar(t, h, logP_disp)
 
-            # ensure X is a fresh leaf for next step
+            # re-leaf for next step
             X = X.detach().requires_grad_(True)
 
-        # stack tensors ONCE, slice off burn-in, and move to CPU
+        # stack once, slice burn, move to CPU
         samples_out = torch.stack(kept).cpu()  # (S, D)
-
         lp_arr = torch.stack(lp_hist)[burn:].to(torch.float32).cpu()  # (S,)
         h_arr = torch.stack(h_hist)[burn:].to(torch.float32).cpu()  # (S,)
         acc_arr = torch.stack(acc_hist)[burn:].to(torch.bool).cpu()  # (S,)
 
         return {
             "chain": chain_id,
-            "samples": samples_out,  # (S, D)
-            "lp": lp_arr,  # (S,)
-            "step_size": h_arr,  # (S,)
-            "accept": acc_arr,  # (S,)
+            "samples": samples_out,
+            "lp": lp_arr,
+            "step_size": h_arr,
+            "accept": acc_arr,
         }
 
+    # ------------------------------------------------------------------ #
+    # Progress bar helpers                                               #
+    # ------------------------------------------------------------------ #
     def on_predict_start(self) -> None:
-        # one chain per process -> rank == chain id
-        self._rank = int(getattr(self.trainer, "global_rank", 0))
+        """
+        Lightning hook executed at the beginning of prediction.
 
+        Initializes RNG seeds, prepares progress-bar layout, and computes the
+        total number of steps as ``burn + samples``.
+        """
+        self._rank = int(getattr(self.trainer, "global_rank", 0))
         s = self._base_seed + 1000 * self._rank + 12345
         torch.manual_seed(s)
         np.random.seed(s % (2**32))
-
         self._total_steps = self.burn + self.samples
 
-        # Pretty, stable single-line bar per rank
         bar_fmt = (
             f"chain {self._rank}: "
             "{percentage:>3.0f}%|{bar}| {n_fmt}/{total_fmt} "
             "[{elapsed}<{remaining}, {rate_fmt}] {postfix}"
         )
-
-        # If stdout isn’t a TTY (e.g. piping to a file), suppress bars
         disable_bars = not sys.stdout.isatty() or not self.show_progress
 
         self._pbar = tqdm(
             total=self._total_steps,
-            position=self._rank,  # each rank gets its own line
+            position=self._rank,
             leave=True,
-            ncols=120,  # fixed width avoids flicker
+            ncols=120,
             dynamic_ncols=False,
-            ascii=True,  # safe in multi-proc terminals
+            ascii=True,
             bar_format=bar_fmt,
-            mininterval=0.25,  # throttle refresh rate
+            mininterval=0.25,
             disable=disable_bars,
         )
 
     def on_predict_end(self) -> None:
+        """
+        Lightning hook executed at the end of prediction.
+
+        Cleans up the progress bar (if enabled).
+        """
         p = self._pbar
         self._pbar = None
         if p is not None:
             try:
-                # final refresh; then close without tripping tqdm internals
                 p.set_postfix_str("done", refresh=True)
                 p.refresh()
             except Exception:
@@ -526,20 +761,32 @@ class MALASamplerModule(pl.LightningModule):
                 pass
 
     def _update_bar(self, t: int, h: float, logp: float) -> None:
-        """Update tqdm bar every `pbar_update_every` steps."""
+        """
+        Update the chain's progress bar.
+
+        Updates the progress bar.
+
+        Parameters
+        ----------
+        t : int
+            Current step (0-based).
+        h : float
+            Current step size (for display).
+        logp : float
+            Current (display) log posterior value.
+
+        Notes
+        -----
+        The bar postfix is updated at most every ``pbar_update_every`` steps
+        to reduce rendering overhead in multi-process runs.
+        """
         if self._pbar is None:
             return
-
-        # show post-burn sample index; ‘—’ during burn
         sample_str = "—" if t < self.burn else f"{t - self.burn + 1}"
-
-        # update postfix only occasionally to reduce contention
         if (t % self.pbar_update_every) == 0 or (t + 1) == self._total_steps:
-            # single string postfix is more robust than dict
             self._pbar.set_postfix_str(
                 f"h={h:.3f}  logp={logp:.3f}  sample={sample_str}", refresh=True
             )
-
         self._pbar.update(1)
 
 
