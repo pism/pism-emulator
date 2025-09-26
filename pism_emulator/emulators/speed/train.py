@@ -147,6 +147,7 @@ def main():
 
     callbacks: list = [NoValBar()]
 
+    rank_zero_info(y_lim)
     dataset = PISMDataset(
         training_files=training_files,
         samples_file=samples_file,

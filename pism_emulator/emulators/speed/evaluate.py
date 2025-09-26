@@ -155,7 +155,7 @@ def main():
     plot_glaciers = sorted(rng.choice(glaciers, size=4, replace=False))
     cmap = "viridis"
     fig, axs = plt.subplots(
-        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8)
+        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8), constrained_layout=True)
     )
 
     n_emulators = len(emulator_files)
@@ -277,6 +277,18 @@ def main():
             k += 1
         l += 1
 
+    rmse_mean = np.array(rmses).mean()
+    mae_mean = np.array(maes).mean()
+    mbe_mean = np.array(mbes).mean()
+    pearson_r_mean = np.array(pearson_rs).mean()
+    r2_mean = np.array(r2s).mean()
+
+    print("\n\nFinal Score:\n=======================================================")
+    print(
+        f"MAE={mae_mean:.2f}m/yr, MBE={mbe_mean:.2f} m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
+    )
+    print("\n")
+
     axs[0, 0].text(
         0.01,
         0.98,
@@ -335,18 +347,6 @@ def main():
     fig_name = join(fig_dir, f"speed_emulator_{mode}.pdf")
     print(f"Saving to {fig_name}")
     fig.savefig(fig_name)
-
-    rmse_mean = np.array(rmses).mean()
-    mae_mean = np.array(maes).mean()
-    mbe_mean = np.array(mbes).mean()
-    pearson_r_mean = np.array(pearson_rs).mean()
-    r2_mean = np.array(r2s).mean()
-
-    print("\n\nFinal Score:\n=======================================================")
-    print(
-        f"MAE={mae_mean:.2f}m/yr, MBE={mbe_mean:.2f} m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
-    )
-    print("\n")
 
 
 if __name__ == "__main__":
