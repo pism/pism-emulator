@@ -185,11 +185,16 @@ def main():
     V_hat = dm.eig.V_hat
     F_mean = dm.eig.F_mean
     plot_eigenglaciers(dataset, dm, model_index, emulator_dir, q=q)
+
     checkpoint_callback = ModelCheckpoint(
         dirpath=f"{emulator_dir}/emulator",
         filename="emulator_{model_index}",
-        every_n_epochs=0,
-        save_last=True,
+        save_last=True,  # write only the final checkpoint
+        every_n_epochs=None,  # disable periodic-by-epoch saving
+        every_n_train_steps=None,  # disable periodic-by-step saving
+        train_time_interval=None,  # disable time-based saving
+        save_top_k=0,  # disable "best" checkpoints (no monitor)
+        save_on_train_epoch_end=False,  # don't save at each epoch end
     )
     checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
     callbacks.append(checkpoint_callback)
