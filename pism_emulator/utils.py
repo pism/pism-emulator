@@ -98,7 +98,7 @@ param_keys_dict = {
     "basal_yield_stress.mohr_coulomb.topg_to_phi.phi_max": r"$\phi_{\mathrm{max}} (^{\circ{}})$",
     "basal_yield_stress.mohr_coulomb.topg_to_phi.topg_min": "r$z_{\mathrm{min}}$ (m)",
     "basal_yield_stress.mohr_coulomb.topg_to_phi.topg_max": r"$z_{\mathrm{max}}$ (m)",
-    "basal_resistance.pseudo_plastic.u_threshold": r"u_${\mathrm{th}}$",
+    "basal_resistance.pseudo_plastic.u_threshold": r"$u_{\mathrm{th}}$",
     "basal_yield_stress.mohr_coulomb.till_phi_default": r"$\phi$ ($^{\circ}$)",
 }
 

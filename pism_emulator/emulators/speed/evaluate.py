@@ -59,6 +59,18 @@ rcparams = {
 mpl.rcParams.update(rcparams)
 
 
+def add_final_score_footer(fig, mae, mbe, rmse, r, r2, y=0.01, fontsize=9):
+    score = (
+        f"MAE={mae:.2f} m/yr, "
+        f"MBE={mbe:.2f} m/yr, "
+        f"RMSE={rmse:.0f} m/yr, "
+        f"Pearson r={r:.2f}, "
+        f"r²={r2:.2f}"
+    )
+    # `supxlabel` plays nicely with constrained_layout and reserves space
+    fig.supxlabel(f"Mean Score: {score}", y=y, fontsize=fontsize)
+
+
 def current_script_directory():
     import inspect
 
@@ -154,8 +166,47 @@ def main():
 
     plot_glaciers = sorted(rng.choice(glaciers, size=4, replace=False))
     cmap = "viridis"
-    fig, axs = plt.subplots(
-        nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 8), constrained_layout=True)
+    fig = plt.figure(figsize=(6.4, 4.8), layout="constrained")
+
+    # Outer layout: top block + bottom block (tweak height_ratios as you like)
+    outer = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[1, 0.4])
+
+    # Add a skinny column on the left for row titles
+    gs_top = outer[0].subgridspec(
+        3,
+        5,  # 3 rows, 5 cols (1 skinny + 4 plots)
+        width_ratios=[0.12, 1, 1, 1, 1],
+        wspace=0.025,
+        hspace=0.025,
+    )
+
+    # Axes for the 4 plot columns
+    axs_top = np.array(
+        [[fig.add_subplot(gs_top[r, c]) for c in range(1, 5)] for r in range(3)]
+    )
+
+    # Title column axes (one per row)
+    row_titles = ["True", "Predicted", "Error"]
+    for r, title in enumerate(row_titles):
+        ax_lab = fig.add_subplot(gs_top[r, 0])
+        ax_lab.axis("off")
+        ax_lab.text(
+            1.0,
+            0.5,
+            title,
+            transform=ax_lab.transAxes,
+            ha="right",
+            va="center",
+            fontsize=8,
+        )
+
+    # --- BOTTOM: 4 × 2 (i.e., 2 rows × 4 cols) ---
+    gs_bot = outer[1].subgridspec(
+        1, 5, width_ratios=[0.12, 1, 1, 1, 1], wspace=0.025, hspace=0.025
+    )
+    # Axes for the 4 plot columns
+    axs_bot = np.array(
+        [[fig.add_subplot(gs_bot[r, c]) for c in range(1, 5)] for r in range(1)]
     )
 
     n_emulators = len(emulator_files)
@@ -235,22 +286,22 @@ def main():
             F_val_2d = np.ma.array(data=F_val_2d, mask=mask)
             F_pred_2d = np.ma.array(data=F_pred_2d, mask=mask)
 
-            c1 = axs[0, k].imshow(
+            c1 = axs_top[0, k].imshow(
                 F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
             )
-            axs[1, k].imshow(
+            axs_top[1, k].imshow(
                 F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
             )
-            c2 = axs[2, k].imshow(
+            c2 = axs_top[2, k].imshow(
                 F_pred_2d - F_val_2d,
                 origin="lower",
                 vmin=-50,
                 vmax=50,
                 cmap="coolwarm",
             )
-            axs[-1, k].text(
-                0.01,
-                0.05,
+            axs_bot[0, k].text(
+                0.2,
+                0.75,
                 "\n".join(
                     [
                         f"{keys_dict[i]}: {j:.3f}"
@@ -258,22 +309,16 @@ def main():
                     ]
                 ),
                 c="k",
-                transform=axs[-1, k].transAxes,
+                transform=axs_bot[0, k].transAxes,
             )
 
-            axs[-1, k].text(
-                0.01,
-                0.75,
+            axs_bot[0, k].text(
+                0.2,
+                0.2,
                 f"MAE = {mae:.1f} m/yr\nMBE = {mbe:.1f} m/yr\nRMSE = {rmse:.0f} m/yr\nr = {r2:.3f}",
                 c="k",
-                transform=axs[-1, k].transAxes,
+                transform=axs_bot[0, k].transAxes,
             )
-
-            axs[0, k].set_axis_off()
-            axs[1, k].set_axis_off()
-            axs[2, k].set_axis_off()
-            axs[-1, k].set_axis_off()
-
             k += 1
         l += 1
 
@@ -283,57 +328,26 @@ def main():
     pearson_r_mean = np.array(pearson_rs).mean()
     r2_mean = np.array(r2s).mean()
 
+    add_final_score_footer(
+        fig,
+        mae=mae_mean,
+        mbe=mbe_mean,
+        rmse=rmse_mean,
+        r=pearson_r_mean,
+        r2=r2_mean,
+        y=0.01,  # nudge closer/further from bottom if needed
+        fontsize=6,
+    )
     print("\n\nFinal Score:\n=======================================================")
     print(
         f"MAE={mae_mean:.2f}m/yr, MBE={mbe_mean:.2f} m/yr, RMSE={rmse_mean:.0f} m/yr, Pearson r={pearson_r_mean:.2f}, r2={r2_mean:.2f}"
     )
     print("\n")
 
-    axs[0, 0].text(
-        0.01,
-        0.98,
-        "PISM",
-        c="k",
-        weight="bold",
-        transform=axs[0, 0].transAxes,
-    )
-    axs[1, 0].text(
-        0.01,
-        0.98,
-        "Emulator",
-        c="k",
-        weight="bold",
-        transform=axs[1, 0].transAxes,
-    )
-    axs[2, 0].text(
-        0.01,
-        0.98,
-        "PISM-Emulator",
-        c="k",
-        weight="bold",
-        transform=axs[2, 0].transAxes,
-    )
-    cb_ax = fig.add_axes([0.90, 0.65, 0.025, 0.15])
-    plt.colorbar(
-        c1,
-        cax=cb_ax,
-        shrink=0.9,
-        label="speed (m/yr)",
-        orientation="vertical",
-        extend="both",
-    )
-    cb_ax2 = fig.add_axes([0.90, 0.3, 0.025, 0.15])
-    plt.colorbar(
-        c2,
-        cax=cb_ax2,
-        shrink=0.9,
-        label="diff. (m/yr)",
-        orientation="vertical",
-        extend="both",
-    )
-    cb_ax.tick_params()
-    cb_ax2.tick_params()
-    fig.subplots_adjust(wspace=0.01, hspace=0.01)
+    for ax in axs_top.ravel():
+        ax.set_axis_off()
+    for ax in axs_bot.ravel():
+        ax.set_axis_off()
 
     if validation:
         mode = "val"
