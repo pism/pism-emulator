@@ -20,6 +20,7 @@ MALA Sampler.
 """
 from __future__ import annotations
 
+import datetime as dt
 import math
 import os
 import sys

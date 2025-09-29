@@ -80,8 +80,6 @@ class DataConfig:
         Optional auxiliary per-sample weights with same length as ``omegas``.
     batch_size : int, default=128
         Batch size used by train/validation DataLoaders.
-    train_size : float, default=0.9
-        Fraction of samples assigned to the training split (remainder to validation).
     num_workers : int, default=0
         Number of worker processes for DataLoaders. On macOS/MPS, ``0`` is often
         fastest due to process spawn overhead.
@@ -92,7 +90,6 @@ class DataConfig:
     omegas: Tensor
     omegas_0: Tensor
     batch_size: int = 128
-    train_size: float = 0.9
     num_workers: int = 0
 
 
@@ -154,13 +151,10 @@ class PISMDataModule(pl.LightningDataModule):
         omegas_0: Tensor,
         *,
         batch_size: int = 128,
-        train_size: float = 0.9,
         num_workers: int = 0,
     ):
         super().__init__()
-        self.cfg = DataConfig(
-            X, F, omegas, omegas_0, batch_size, train_size, num_workers
-        )
+        self.cfg = DataConfig(X, F, omegas, omegas_0, batch_size, num_workers)
         self.eig = EigCache()
 
         # only the splits are kept; loaders are created on demand
@@ -185,11 +179,7 @@ class PISMDataModule(pl.LightningDataModule):
             self.cfg.X, self.eig.F_bar, self.cfg.omegas, self.cfg.omegas_0
         )
         self._all = ds_all
-
-        train_ds, val_ds = train_test_split(
-            ds_all, train_size=self.cfg.train_size, random_state=0
-        )
-        self._train, self._val = train_ds, val_ds
+        self._train, self._val = ds_all, ds_all
 
     def _build_loader(self, ds: TensorDataset, *, shuffle: bool) -> DataLoader:
         return DataLoader(

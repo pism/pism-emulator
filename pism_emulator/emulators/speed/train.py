@@ -27,9 +27,9 @@ from typing import Mapping
 import lightning as pl
 import numpy as np
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint, Timer, TQDMProgressBar
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.utilities.rank_zero import rank_zero_info
+from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from pyfiglet import Figlet
 from scipy.stats import dirichlet
 from tqdm import tqdm
@@ -68,17 +68,43 @@ def current_script_directory():
 script_directory = current_script_directory()
 
 
-class NoValBar(TQDMProgressBar):
-    def init_validation_tqdm(self):
-        return tqdm(
-            total=0,  # avoids "0/?"
-            disable=True,  # fully hidden
+class EpochProgressBar(Callback):
+    """A simple tqdm bar that advances once per epoch."""
+
+    def __init__(self, *, desc: str = "Training", ncols: int = 120):
+        super().__init__()
+        self._bar: tqdm | None = None
+        self._desc = desc
+        self._ncols = ncols
+
+    @rank_zero_only
+    def on_train_start(self, trainer, pl_module) -> None:
+        total = int(trainer.max_epochs) if trainer.max_epochs is not None else 0
+        self._bar = tqdm(
+            total=total,
+            desc=self._desc,
+            ncols=self._ncols,
+            unit="epoch",
+            leave=True,
+            dynamic_ncols=False,
         )
 
-    # also silence the sanity-check progress (which reuses validation bar)
-    def on_sanity_check_start(self, trainer, pl_module):
-        # skip parent behavior that would touch the bar/desc
-        pass
+    @rank_zero_only
+    def on_train_epoch_end(self, trainer, pl_module) -> None:
+        if self._bar is None:
+            return
+        # Grab latest metrics if available
+        m = trainer.callback_metrics
+        train_loss = float(m.get("train_loss", float("nan")))
+        test_loss = float(m.get("test_loss", float("nan")))
+        self._bar.set_postfix_str(f"train={train_loss:.4g}, val={test_loss:.4g}")
+        self._bar.update(1)
+
+    @rank_zero_only
+    def on_train_end(self, trainer, pl_module) -> None:
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
 
 
 def main():
@@ -159,7 +185,7 @@ def main():
     training_files = args.TRAINING_FILES
     y_lim = args.y_lim
 
-    callbacks: list = [NoValBar()]
+    callbacks: list = [EpochProgressBar(desc="Training")]
 
     rank_zero_info(y_lim)
     dataset = PISMDataset(
@@ -220,7 +246,11 @@ def main():
     )
     checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
     callbacks.append(checkpoint_callback)
-
+    dl = dm.train_dataloader()
+    print(
+        f"N={len(dl.dataset)}, batch_size={getattr(dl, 'batch_size', '?')}, "
+        f"batches/epoch={len(dl)}"
+    )
     logger = TensorBoardLogger(tb_logs_dir, name=f"Emulator {model_index}")
 
     timer = Timer()
@@ -243,6 +273,7 @@ def main():
         num_sanity_val_steps=0,
         accelerator=accelerator,
         devices=devices,
+        enable_progress_bar=False,
         strategy=strategy,
     )
 

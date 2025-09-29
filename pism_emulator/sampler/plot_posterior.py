@@ -149,14 +149,35 @@ if __name__ == "__main__":
         .reset_index(drop=True)
     ).rename(columns={k: keys_dict[k] for k in params})
 
+    with mpl.rc_context(rc=rcparams):
+        # variance across chain & draw
+
+        axes = az.plot_trace(
+            idata.rename_vars({k: keys_dict[k] for k in params}),
+            hist_kwargs={"bins": 50},
+            figsize=(6.4, 8.4),
+        )  # <-- key fix: kind/hist_kwargs at top level
+
+        fig = axes.flatten()[0].get_figure()
+
+        fig.suptitle("Posterior Traces")
+        fig.savefig("traces.png", dpi=300)
+
     with mpl.rc_context(rcparams):
         g = sns.pairplot(
-            df[df["ensemble"] == "Posterior"], hue="model", palette="crest"
+            df[df["ensemble"] == "Posterior"],
+            hue="model",
+            palette="crest",
         )
         g.fig.set_size_inches(6.4, 6.4)  # (width, height) in inches
         g.fig.tight_layout()
         g.fig.savefig("test.png", dpi=300)
-        g = sns.pairplot(df, hue="ensemble", palette="crest")
+        g = sns.pairplot(
+            df,
+            hue="ensemble",
+            hue_order=["Prior", "Posterior"],
+            palette=["#97a6c4", "#384860"],
+        )
         g.fig.set_size_inches(6.4, 6.4)  # (width, height) in inches
         g.fig.tight_layout()
         g.fig.savefig("test_prior_posterior.png", dpi=300)
