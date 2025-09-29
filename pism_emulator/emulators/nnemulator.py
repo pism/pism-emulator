@@ -29,7 +29,7 @@ import torch.nn as nn
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import ExponentialLR, _LRScheduler
+from torch.optim.lr_scheduler import ExponentialLR, _LRScheduler, ReduceLROnPlateau
 
 from pism_emulator.metrics import AreaAbsoluteError, area_absolute_error
 
@@ -67,6 +67,7 @@ class MLPBlock(nn.Module):
 
         self.drop = nn.Dropout(p_dropout)
 
+    # mirror old order: Linear -> Norm -> Dropout -> ReLU
     def forward(self, x: Tensor) -> Tensor:  # noqa: D401
         """Forward pass."""
         return self.act(self.drop(self.norm(self.lin(x))))
@@ -116,11 +117,11 @@ class DNNEmulator(pl.LightningModule):
 
         width: int = int(self.hparams.get("width", 128))
         depth: int = int(self.hparams.get("depth", 4))
-        p_drop: float = float(self.hparams.get("dropout", 0.1))
+        p_drop: float = float(self.hparams.get("dropout", 0.5))
         activation: str = str(self.hparams.get("activation", "relu"))
 
         # input projection
-        self.inp = MLPBlock(n_parameters, width, p_drop, activation=activation)
+        self.inp = MLPBlock(n_parameters, width, 0.0, activation=activation)
 
         # residual stack
         self.blocks = nn.ModuleList(
@@ -185,7 +186,7 @@ class DNNEmulator(pl.LightningModule):
         parser = parent_parser.add_argument_group("DNNEmulator")
         parser.add_argument("--width", type=int, default=128)
         parser.add_argument("--depth", type=int, default=4)
-        parser.add_argument("--dropout", type=float, default=0.1)
+        parser.add_argument("--dropout", type=float, default=0.5)
         parser.add_argument(
             "--norm", type=str, default="batch", choices=["batch", "layer", "none"]
         )
@@ -288,25 +289,22 @@ class NNEmulator(pl.LightningModule):
                 "area": area.detach().cpu(),
             }
         )
-        n_hidden_1 = self.hparams.get("n_hidden_1", 128)
-        n_hidden_2 = self.hparams.get("n_hidden_2", 128)
-        n_hidden_3 = self.hparams.get("n_hidden_3", 128)
-        n_hidden_4 = self.hparams.get("n_hidden_4", 128)
+        n_hidden = self.hparams.get("n_hidden", 128)
 
         # Inputs to hidden layer linear transformation
-        self.l_1 = nn.Linear(n_parameters, n_hidden_1)
-        self.norm_1 = nn.LayerNorm(n_hidden_1)
+        self.l_1 = nn.Linear(n_parameters, n_hidden)
+        self.norm_1 = nn.LayerNorm(n_hidden)
         self.dropout_1 = nn.Dropout(p=0.0)
-        self.l_2 = nn.Linear(n_hidden_1, n_hidden_2)
-        self.norm_2 = nn.LayerNorm(n_hidden_2)
+        self.l_2 = nn.Linear(n_hidden, n_hidden)
+        self.norm_2 = nn.LayerNorm(n_hidden)
         self.dropout_2 = nn.Dropout(p=0.5)
-        self.l_3 = nn.Linear(n_hidden_2, n_hidden_3)
-        self.norm_3 = nn.LayerNorm(n_hidden_3)
+        self.l_3 = nn.Linear(n_hidden, n_hidden)
+        self.norm_3 = nn.LayerNorm(n_hidden)
         self.dropout_3 = nn.Dropout(p=0.5)
-        self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
-        self.norm_4 = nn.LayerNorm(n_hidden_4)
+        self.l_4 = nn.Linear(n_hidden, n_hidden)
+        self.norm_4 = nn.LayerNorm(n_hidden)
         self.dropout_4 = nn.Dropout(p=0.5)
-        self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
+        self.l_5 = nn.Linear(n_hidden, n_eigenglaciers)
 
         self.register_buffer("V_hat", V_hat, persistent=True)
         self.register_buffer("F_mean", F_mean, persistent=True)
@@ -349,11 +347,178 @@ class NNEmulator(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--n_hidden_1", type=int, default=128)
-        parser.add_argument("--n_hidden_2", type=int, default=128)
-        parser.add_argument("--n_hidden_3", type=int, default=128)
-        parser.add_argument("--n_hidden_4", type=int, default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.01)
+        parser.add_argument("--n_hidden", type=int, default=128)
+        parser.add_argument("--learning_rate", type=float, default=0.1)
+
+        return parent_parser
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(
+            self.parameters(), self.hparams.learning_rate, weight_decay=0.0
+        )
+        # This is an approximation to Doug's version:
+        scheduler = {
+            "scheduler": ExponentialLR(optimizer, 0.9975),
+        }
+
+        return [optimizer], [scheduler]
+
+    def training_step(self, batch, batch_idx):
+        x, f, o, _ = batch
+        f_pred = self.forward(x)
+        area = self.area
+        loss = area_absolute_error(f_pred, f, o, area)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, f, o, o_0 = batch
+        f_pred = self.forward(x)
+        area = self.area
+
+        self.log(
+            "train_loss",
+            self.train_ae(f_pred, f, o, area),
+            sync_dist=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae(f_pred, f, o_0, area),
+            sync_dist=True,
+        )
+
+        return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
+
+    def on_validation_epoch_end(self):
+        self.log(
+            "train_loss",
+            self.train_ae,
+            sync_dist=True,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test_loss",
+            self.test_ae,
+            sync_dist=True,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+    def on_after_backward(self):
+        if self.global_rank == 0:
+            unused = [
+                n
+                for n, p in self.named_parameters()
+                if p.requires_grad and p.grad is None
+            ]
+            if unused:
+                print(
+                    "UNUSED PARAMS THIS STEP:",
+                    unused[:10],
+                    "   " if len(unused) > 10 else "",
+                )
+
+
+class NN5Emulator(pl.LightningModule):
+    def __init__(
+        self,
+        n_parameters,
+        V_hat,
+        F_mean,
+        area,
+        n_eigenglaciers: int | None = None,
+        **hparams,
+    ):
+        super().__init__()
+        flat = vars(hparams) if hasattr(hparams, "__dict__") else dict(hparams)
+        # infer n_eigenglaciers if not provided
+        if n_eigenglaciers is None:
+            if V_hat is None:
+                raise ValueError(
+                    "n_eigenglaciers is None and V_hat is None; cannot infer output size."
+                )
+            n_eigenglaciers = int(V_hat.shape[1])
+        self.save_hyperparameters(
+            {
+                **flat,
+                "n_parameters": int(n_parameters),
+                "n_eigenglaciers": int(n_eigenglaciers),
+                "V_hat": V_hat.detach().cpu(),
+                "F_mean": F_mean.detach().cpu(),
+                "area": area.detach().cpu(),
+            }
+        )
+        n_hidden = self.hparams.get("n_hidden", 128)
+
+        # Inputs to hidden layer linear transformation
+        self.l_1 = nn.Linear(n_parameters, n_hidden)
+        self.norm_1 = nn.LayerNorm(n_hidden)
+        self.dropout_1 = nn.Dropout(p=0.0)
+        self.l_2 = nn.Linear(n_hidden, n_hidden)
+        self.norm_2 = nn.LayerNorm(n_hidden)
+        self.dropout_2 = nn.Dropout(p=0.5)
+        self.l_3 = nn.Linear(n_hidden, n_hidden)
+        self.norm_3 = nn.LayerNorm(n_hidden)
+        self.dropout_3 = nn.Dropout(p=0.5)
+        self.l_4 = nn.Linear(n_hidden, n_hidden)
+        self.norm_4 = nn.LayerNorm(n_hidden)
+        self.dropout_4 = nn.Dropout(p=0.5)
+        self.l_5 = nn.Linear(n_hidden, n_hidden)
+        self.norm_5 = nn.LayerNorm(n_hidden)
+        self.dropout_5 = nn.Dropout(p=0.5)
+        self.l_6 = nn.Linear(n_hidden, n_eigenglaciers)
+
+        self.register_buffer("V_hat", V_hat, persistent=True)
+        self.register_buffer("F_mean", F_mean, persistent=True)
+        self.register_buffer("area", area, persistent=True)
+
+        self.train_ae = AreaAbsoluteError()
+        self.test_ae = AreaAbsoluteError()
+
+    def forward(self, x, add_mean=False):
+        # Pass the input tensor through each of our operations
+
+        a_1 = self.l_1(x)
+        a_1 = self.norm_1(a_1)
+        a_1 = self.dropout_1(a_1)
+        z_1 = torch.relu(a_1)
+
+        a_2 = self.l_2(z_1)
+        a_2 = self.norm_2(a_2)
+        a_2 = self.dropout_2(a_2)
+        z_2 = torch.relu(a_2) + z_1
+
+        a_3 = self.l_3(z_2)
+        a_3 = self.norm_3(a_3)
+        a_3 = self.dropout_3(a_3)
+        z_3 = torch.relu(a_3) + z_2
+
+        a_4 = self.l_4(z_3)
+        a_4 = self.norm_4(a_4)
+        a_4 = self.dropout_4(a_4)
+        z_4 = torch.relu(a_4) + z_3
+
+        a_5 = self.l_5(z_4)
+        a_5 = self.norm_5(a_5)
+        a_5 = self.dropout_5(a_5)
+        z_5 = torch.relu(a_5) + z_4
+
+        z_6 = self.l_6(z_5)
+
+        if add_mean:
+            F_pred = z_6 @ self.V_hat.T + self.F_mean
+        else:
+            F_pred = z_6 @ self.V_hat.T
+        return F_pred
+
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group("NNEmulator")
+        parser.add_argument("--n_hidden", type=int, default=128)
+        parser.add_argument("--learning_rate", type=float, default=0.1)
 
         return parent_parser
 
@@ -457,7 +622,7 @@ class LegacyNNEmulator(pl.LightningModule):
         self.norm_3 = nn.LayerNorm(n_hidden_3)
         self.dropout_3 = nn.Dropout(p=0.5)
         self.l_4 = nn.Linear(n_hidden_3, n_hidden_4)
-        self.norm_4 = nn.LayerNorm(n_hidden_3)
+        self.norm_4 = nn.LayerNorm(n_hidden_4)
         self.dropout_4 = nn.Dropout(p=0.5)
         self.l_5 = nn.Linear(n_hidden_4, n_eigenglaciers)
 
@@ -488,8 +653,8 @@ class LegacyNNEmulator(pl.LightningModule):
         z_3 = torch.relu(a_3) + z_2
 
         a_4 = self.l_4(z_3)
-        a_4 = self.norm_3(a_4)
-        a_4 = self.dropout_3(a_4)
+        a_4 = self.norm_4(a_4)
+        a_4 = self.dropout_4(a_4)
         z_4 = torch.relu(a_4) + z_3
 
         z_5 = self.l_5(z_4)
@@ -503,7 +668,6 @@ class LegacyNNEmulator(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--batch_size", type=int, default=128)
         parser.add_argument("--n_hidden_1", type=int, default=128)
         parser.add_argument("--n_hidden_2", type=int, default=128)
         parser.add_argument("--n_hidden_3", type=int, default=128)

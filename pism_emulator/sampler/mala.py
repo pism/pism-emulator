@@ -25,6 +25,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Callable, Iterable, Literal, Optional, Sequence
+import time
 
 import lightning as pl
 import numpy as np
@@ -33,6 +34,8 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+
+from pism_emulator.sampler.writer import DiskPredictionWriter
 
 tqdm.set_lock(tqdm.get_lock())
 
@@ -918,3 +921,171 @@ if __name__ == "__main__":
         [o.squeeze(0) if o.ndim == 3 else o for o in outs]
     )  # (chains, samples, dim)
     rank_zero_info(all_chains.shape)
+
+
+def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
+    """Create a minimal Trainer configured for single- or multi-chain inference.
+
+    CPU runs can use multiple processes (one per chain). GPU/MPS runs use a single
+    device and run one chain per call to ``predict``.
+
+    Parameters
+    ----------
+    accelerator : str
+        One of ``{"cpu", "cuda", "gpu", "mps"}`` as accepted by Lightning.
+    n_chains : int
+        Number of chains to run. On CPU, this sets the number of processes.
+
+    Returns
+    -------
+    pl.Trainer
+        A Trainer instance with logging/checkpointing disabled and inference mode
+        enabled as appropriate for prediction-only workloads.
+    """
+    if accelerator.lower() == "cpu" and n_chains > 1:
+        devices = n_chains
+        strategy = "ddp_spawn"  # safe on macOS/Windows; uses spawn
+    else:
+        devices = 1  # one chain per (single) GPU/MPS
+        strategy = "auto"
+
+    return pl.Trainer(
+        accelerator=accelerator,
+        devices=devices,
+        strategy=strategy,
+        logger=False,
+        enable_checkpointing=False,
+        inference_mode=False,  # we need autograd for MALA
+        num_sanity_val_steps=0,
+    )
+
+
+def run_sampling(
+    sampler: pl.LightningModule,
+    inits: Tensor,
+    accelerator: str = "cpu",
+    tmp_dir: str | Path = "./_preds",
+) -> Dict[str, Tensor]:
+    """Run MCMC chains via ``Trainer.predict`` and return stacked results.
+
+    This function supports two modes:
+
+    * **CPU with multiple chains** (``accelerator="cpu"`` and ``inits.shape[0] > 1``):
+      launches DDP-spawn and writes each chain to disk using
+      :class:`DiskPredictionWriter`, then reads and stacks the results.
+
+    * **Single-process** (GPU/MPS or CPU with 1 chain): runs predict in-process
+      and stacks the returned dicts.
+
+    Parameters
+    ----------
+    sampler : pl.LightningModule
+        The sampling module implementing ``predict_step`` that returns a dict with
+        at least ``{"chain": int, "samples": Tensor}`` and optionally
+        ``"lp"``, ``"step_size"``, and ``"accept"`` (all shaped ``(S,)``).
+    inits : torch.Tensor
+        Initial states per chain of shape ``(C, D)``.
+    accelerator : str, default "cpu"
+        Lightning accelerator string (``"cpu"``, ``"cuda"``/``"gpu"``, or ``"mps"``).
+    tmp_dir : str or pathlib.Path, default "./_preds"
+        Temporary directory for per-chain files in multi-process CPU mode.
+
+    Returns
+    -------
+    dict[str, torch.Tensor]
+        Dictionary with keys:
+          - ``"samples"`` : ``(C, S, D)`` float32 tensor
+          - ``"lp"`` : ``(C, S)`` float32 tensor (if provided)
+          - ``"step_size"`` : ``(C, S)`` float32 tensor (if provided)
+          - ``"accept"`` : ``(C, S)`` bool tensor (if provided)
+
+    Raises
+    ------
+    RuntimeError
+        If predictions are missing on disk in DDP mode.
+
+    Notes
+    -----
+    Uses :class:`Timer` to report elapsed time for the single-process path, and
+    wall-clock timing for the multi-process path.
+    """
+    dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False, num_workers=0)
+
+    n_chains = int(inits.shape[0])
+    multi_cpu = (accelerator == "cpu") and (n_chains > 1)
+
+    def _stack_single_outs(outs: Sequence[Dict[str, Tensor]]) -> Dict[str, Tensor]:
+        """Stack a list of single-process prediction dicts into (C, ...) tensors."""
+        outs = [o for o in outs if o is not None]
+        outs = sorted(outs, key=lambda d: int(d["chain"]))
+        stats: Dict[str, Tensor] = {
+            "samples": torch.stack([d["samples"] for d in outs])
+        }
+        for k in ("lp", "step_size", "accept"):
+            if all((k in d) for d in outs):
+                stats[k] = torch.stack([d[k] for d in outs])
+        return stats
+
+    def _stack_from_disk(
+        pred_dir: str | Path, expected_chains: Optional[int] = None
+    ) -> Dict[str, Tensor]:
+        """Load rank*_chain*.pt files and stack per-chain tensors."""
+        pred_dir = Path(pred_dir)
+        files = sorted(pred_dir.glob("rank*_chain*.pt"))
+        if not files:
+            raise RuntimeError(f"No prediction files found in {pred_dir}")
+        recs = [torch.load(f) for f in files]
+        recs.sort(key=lambda r: int(r["chain"]))
+
+        stats: Dict[str, Tensor] = {
+            "samples": torch.stack([r["samples"] for r in recs])
+        }
+        for k in ("lp", "step_size", "accept"):
+            if all((k in r) for r in recs):
+                stats[k] = torch.stack([r[k] for r in recs])
+        if expected_chains is not None and stats["samples"].shape[0] != expected_chains:
+            raise RuntimeError(
+                f"Expected {expected_chains} chains, got {stats['samples'].shape[0]}."
+            )
+        return stats
+
+    if multi_cpu:
+        wall_start = time.perf_counter()
+        trainer = pl.Trainer(
+            accelerator="cpu",
+            devices=n_chains,
+            strategy="ddp_spawn",
+            logger=False,
+            enable_checkpointing=False,
+            inference_mode=False,
+            num_sanity_val_steps=0,
+            enable_progress_bar=False,
+            callbacks=[DiskPredictionWriter(tmp_dir, write_interval="batch")],
+        )
+        _ = trainer.predict(sampler, dl, return_predictions=False)
+        wall_secs = time.perf_counter() - wall_start
+        print(
+            f"[predict/ddp_spawn] Elapsed: {wall_secs:.2f}s "
+            f"({str(dt.timedelta(seconds=int(wall_secs)))})"
+        )
+        stats = _stack_from_disk(tmp_dir, expected_chains=n_chains)
+    else:
+        timer = Timer()
+        trainer = pl.Trainer(
+            accelerator=accelerator,
+            devices=1,
+            logger=False,
+            enable_checkpointing=False,
+            inference_mode=False,
+            num_sanity_val_steps=0,
+            enable_progress_bar=False,
+            callbacks=[timer],
+        )
+        outs = trainer.predict(sampler, dl, return_predictions=True)
+        secs = timer.time_elapsed("predict") or 0.0
+        rank_zero_info(
+            f"[predict] Elapsed: {secs:.2f}s ({str(dt.timedelta(seconds=int(secs)))})"
+        )
+        stats = _stack_single_outs(outs)  # type: ignore[arg-type]
+
+    return stats

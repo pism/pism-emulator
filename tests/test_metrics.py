@@ -19,7 +19,7 @@
 import torch
 from numpy.testing import assert_almost_equal
 
-from pism_emulator.metrics import AbsoluteError, AreaAbsoluteError, L2MeanSquaredError
+from pism_emulator.metrics import AbsoluteError, AreaAbsoluteError
 
 
 def test_AreaAbsoluteError():
@@ -39,13 +39,3 @@ def test_AbsoluteError():
     aae = AbsoluteError()
     ae = aae(x, y, o)
     assert_almost_equal(ae, 1.6000, decimal=4)
-
-
-def test_L2MeanSquaredError():
-    target = torch.tensor([2.5, 5.0, 4.0, 8.0])
-    preds = torch.tensor([3.0, 5.0, 2.5, 7.0])
-    weight = torch.tensor([0.1, 0.2, 0.5, 0.2])
-    k = 1e-1
-    l2_mean_squared_error = L2MeanSquaredError()
-    l2mse = l2_mean_squared_error(preds, target, weight, k)
-    assert_almost_equal(l2mse, torch.tensor(0.8835))

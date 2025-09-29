@@ -36,7 +36,7 @@ import pandas as pd
 import torch
 from joblib import Parallel, delayed
 from lightning import LightningModule
-from lightning.pytorch.callbacks import BasePredictionWriter, Timer
+from lightning.pytorch.callbacks import Timer
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from pyfiglet import Figlet
 from scipy.stats import beta
@@ -46,7 +46,7 @@ from tqdm.auto import tqdm
 
 from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
-from pism_emulator.sampler.mala import ChainInitDataset, MALASamplerModule
+from pism_emulator.sampler.mala import ChainInitDataset, MALASamplerModule, run_sampling
 from pism_emulator.utils import param_keys_dict as keys_dict
 
 EMULATORS: Mapping[str, type[pl.LightningModule]] = {
@@ -70,192 +70,6 @@ rcparams = {
     "hatch.linewidth": 0.15,
     "font.size": 6,
 }
-
-
-class DiskPredictionWriter(BasePredictionWriter):
-    """Write each chain's samples to disk during predict (works with DDP spawn/fork)."""
-
-    def __init__(self, out_dir: str, write_interval: str = "batch"):
-        # write_interval: "batch" | "epoch"
-        super().__init__(write_interval=write_interval)
-        self.out_dir = Path(out_dir)
-
-    def write_on_batch_end(  # called every batch when write_interval="batch"
-        self,
-        trainer: "pl.Trainer",
-        pl_module: "pl.LightningModule",
-        prediction,  # whatever predict_step returned
-        batch_indices,
-        batch,
-        batch_idx: int,
-        dataloader_idx: int = 0,
-    ) -> None:
-        if prediction is None:
-            return
-
-        # Lightning may give a single dict or a list of dicts
-        preds = prediction if isinstance(prediction, (list, tuple)) else [prediction]
-        rank = int(getattr(trainer, "global_rank", 0))
-
-        self.out_dir.mkdir(parents=True, exist_ok=True)
-
-        for p in preds:
-            chain = int(p["chain"])
-            samples = p["samples"]  # (S, D) CPU tensor
-            # ── NEW: optional stats (may be absent in older runs) ──
-            rec = {"chain": chain, "rank": rank, "samples": samples}
-            for key in ("lp", "step_size", "accept"):
-                if key in p and p[key] is not None:
-                    rec[key] = p[key]  # (S,) CPU tensors
-            path = self.out_dir / f"rank{rank:02d}_chain{chain:06d}.pt"
-            torch.save(rec, path)
-
-
-def load_pred_dir(
-    pred_dir: str | Path, expected_chains: int | None = None
-) -> torch.Tensor:
-    pred_dir = Path(pred_dir)
-    files = sorted(pred_dir.glob("rank*_chain*.pt"))
-    records = [torch.load(f) for f in files]
-    if not records:
-        raise RuntimeError(f"No prediction files found in {pred_dir}")
-    records.sort(key=lambda r: r["chain"])
-    if expected_chains is not None and len(records) != expected_chains:
-        raise RuntimeError(f"Expected {expected_chains} chains, found {len(records)}.")
-    return torch.stack([r["samples"] for r in records])  # (C, S, D)
-
-
-def load_pred_dir_with_stats(pred_dir: str | Path, expected_chains: int | None = None):
-    pred_dir = Path(pred_dir)
-    files = sorted(pred_dir.glob("rank*_chain*.pt"))
-    records = [torch.load(f) for f in files]
-    if not records:
-        raise RuntimeError(f"No prediction files found in {pred_dir}")
-    records.sort(key=lambda r: r["chain"])
-    if expected_chains is not None and len(records) != expected_chains:
-        raise RuntimeError(f"Expected {expected_chains} chains, found {len(records)}.")
-
-    samples = torch.stack([r["samples"] for r in records])  # (C, S, D)
-
-    def _maybe_stack(key):
-        if all((key in r) for r in records):
-            return torch.stack([r[key] for r in records])  # (C, S)
-        return None
-
-    lp = _maybe_stack("lp")
-    h = _maybe_stack("step_size")
-    acc = _maybe_stack("accept")
-
-    return samples, lp, h, acc
-
-
-def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
-    """
-    CPU: run n_chains processes in parallel (DDP spawn).
-    GPU/MPS: run 1 process (1 chain).
-    """
-    if accelerator.lower() == "cpu" and n_chains > 1:
-        devices = n_chains
-        strategy = "ddp_spawn"  # safe on macOS/Windows; uses spawn
-    else:
-        devices = 1  # one chain per (single) GPU/MPS
-        strategy = "auto"
-
-    return pl.Trainer(
-        accelerator=accelerator,
-        devices=devices,
-        strategy=strategy,
-        logger=False,
-        enable_checkpointing=False,
-        inference_mode=False,  # we need autograd for MALA
-        num_sanity_val_steps=0,
-    )
-
-
-def run_sampling(sampler, inits, accelerator="cpu", tmp_dir="./_preds"):
-    """
-    Returns:
-        stats: dict with keys:
-           - 'samples'   : (C, S, D) float32
-           - 'lp'        : (C, S)     float32  (if provided by predict_step)
-           - 'step_size' : (C, S)     float32  (if provided)
-           - 'accept'    : (C, S)     bool     (if provided)
-    """
-    dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False, num_workers=0)
-
-    n_chains = int(inits.shape[0])
-    multi_cpu = (accelerator == "cpu") and (n_chains > 1)
-
-    def _stack_single_outs(outs):
-        """Stack list of prediction dicts (single-process predict path)."""
-        outs = [o for o in outs if o is not None]
-        outs.sort(key=lambda d: int(d["chain"]))
-        stats = {"samples": torch.stack([d["samples"] for d in outs])}  # (C, S, D)
-        # Optional stats if present
-        for k in ("lp", "step_size", "accept"):
-            if all((k in d) for d in outs):
-                stats[k] = torch.stack([d[k] for d in outs])  # (C, S)
-        return stats
-
-    def _stack_from_disk(pred_dir, expected_chains=None):
-        """Read rank*_chain*.pt files written by DiskPredictionWriter."""
-        pred_dir = Path(pred_dir)
-        files = sorted(pred_dir.glob("rank*_chain*.pt"))
-        if not files:
-            raise RuntimeError(f"No prediction files found in {pred_dir}")
-        recs = [torch.load(f) for f in files]
-        recs.sort(key=lambda r: int(r["chain"]))
-
-        stats = {"samples": torch.stack([r["samples"] for r in recs])}  # (C, S, D)
-        for k in ("lp", "step_size", "accept"):
-            if all((k in r) for r in recs):
-                stats[k] = torch.stack([r[k] for r in recs])  # (C, S)
-        if expected_chains is not None and stats["samples"].shape[0] != expected_chains:
-            raise RuntimeError(
-                f"Expected {expected_chains} chains, got {stats['samples'].shape[0]}."
-            )
-        return stats
-
-    if multi_cpu:
-        wall_start = time.perf_counter()
-        trainer = pl.Trainer(
-            accelerator="cpu",
-            devices=n_chains,
-            strategy="ddp_spawn",
-            logger=False,
-            enable_checkpointing=False,
-            inference_mode=False,
-            num_sanity_val_steps=0,
-            enable_progress_bar=False,
-            callbacks=[DiskPredictionWriter(tmp_dir, write_interval="batch")],
-        )
-        _ = trainer.predict(sampler, dl, return_predictions=False)
-        wall_secs = time.perf_counter() - wall_start
-        print(
-            f"[predict/ddp_spawn] Elapsed: {wall_secs:.2f}s ({str(dt.timedelta(seconds=int(wall_secs)))})"
-        )
-
-        stats = _stack_from_disk(tmp_dir, expected_chains=n_chains)
-    else:
-        timer = Timer()
-        trainer = pl.Trainer(
-            accelerator=accelerator,
-            devices=1,
-            logger=False,
-            enable_checkpointing=False,
-            inference_mode=False,
-            num_sanity_val_steps=0,
-            enable_progress_bar=False,
-            callbacks=[timer],
-        )
-        outs = trainer.predict(sampler, dl, return_predictions=True)
-        secs = timer.time_elapsed("predict") or 0.0
-        rank_zero_info(
-            f"[predict] Elapsed: {secs:.2f}s ({str(dt.timedelta(seconds=int(secs)))})"
-        )
-        stats = _stack_single_outs(outs)
-
-    return stats
 
 
 def main():

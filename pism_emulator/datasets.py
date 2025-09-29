@@ -1475,6 +1475,8 @@ class PISMInterpolatedDataset(Dataset):
         X_keys = list(samples.columns)
         X_mean = X.mean(dim=0)
         X_std = X.std(dim=0)
+        eps = 1e-6
+        X_std = torch.where(X_std < eps, torch.ones_like(X_std), X_std)
         Xn = (X - X_mean) / X_std if cfg.normalize_x else X
 
         n_parameters = Xn.shape[1]

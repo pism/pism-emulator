@@ -23,6 +23,7 @@ import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
 from typing import Mapping
+from pyfiglet import Figlet
 
 import lightning as pl
 import numpy as np
@@ -35,12 +36,19 @@ from tqdm import tqdm
 
 from pism_emulator.datamodules import PISMDataModule
 from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
-from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
+from pism_emulator.emulators.nnemulator import (
+    DNNEmulator,
+    NNEmulator,
+    LegacyNNEmulator,
+    NN5Emulator,
+)
 from pism_emulator.utils import plot_eigenglaciers
 
 EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "NN": NNEmulator,
+    "NN5": NN5Emulator,
     "DNN": DNNEmulator,
+    "LegacyNN": LegacyNNEmulator,
 }
 
 
@@ -75,7 +83,9 @@ class NoValBar(TQDMProgressBar):
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
+    parser.add_argument(
+        "--emulator", choices=["NN", "NN5", "DNN", "LegacyNN"], default="NN"
+    )
     tmp, _ = parser.parse_known_args()
 
     parser.add_argument("--accelerator", type=str, default="auto")
@@ -87,6 +97,7 @@ def main():
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--n_layers", type=int, default=4)
     parser.add_argument("-q", type=int, default=100)
+    parser.add_argument("--drop_out", type=float, default=0.1)
     parser.add_argument("--y_lim", type=float, nargs=2, default=[1, 10e3])
     parser.add_argument(
         "--samples_file",
@@ -123,6 +134,8 @@ def main():
         Emulator = NNEmulator
     elif tmp.emulator == "DNN":
         Emulator = DNNEmulator
+    elif tmp.emulator == "LegacyNN":
+        Emulator = LegacyNNEmulator
 
     args = parser.parse_args()
     hparams = vars(args)
@@ -135,6 +148,7 @@ def main():
     num_workers = args.num_workers
     max_epochs = args.max_epochs
     q = args.q
+    p = args.drop_out
     samples_file = args.samples_file
     strategy = args.strategy
     target_file = args.target_file
@@ -156,6 +170,7 @@ def main():
         target_error_var=target_error_var,
         thin=thin,
         y_lim=y_lim,
+        log_y=True,
         parallel=True,
     )
     X = dataset.samples.X
@@ -171,6 +186,12 @@ def main():
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
+
+    f = Figlet(font="standard")
+    banner = f.renderText("pism-emulator")
+    print("=" * 80)
+    print(banner)
+    print("=" * 80)
 
     rank_zero_info(f"Training model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
