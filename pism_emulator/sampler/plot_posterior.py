@@ -20,21 +20,21 @@
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
+from typing import Sequence
+
+import arviz as az
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import pylab as plt
+import seaborn as sns
+import xarray as xr
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
 from matplotlib.ticker import NullFormatter
-from pism_emulator.utils import param_keys_dict as keys_dict
 from scipy.stats import beta, gaussian_kde
 
-import seaborn as sns
-import arviz as az
-import xarray as xr
-from pathlib import Path
-from typing import Sequence
+from pism_emulator.utils import param_keys_dict as keys_dict
 
 fontsize = 6
 lw = 1.0

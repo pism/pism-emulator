@@ -23,7 +23,6 @@ import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
 from typing import Mapping
-from pyfiglet import Figlet
 
 import lightning as pl
 import numpy as np
@@ -31,6 +30,7 @@ import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, Timer, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
+from pyfiglet import Figlet
 from scipy.stats import dirichlet
 from tqdm import tqdm
 
@@ -38,9 +38,9 @@ from pism_emulator.datamodules import PISMDataModule
 from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import (
     DNNEmulator,
-    NNEmulator,
     LegacyNNEmulator,
     NN5Emulator,
+    NNEmulator,
 )
 from pism_emulator.utils import plot_eigenglaciers
 

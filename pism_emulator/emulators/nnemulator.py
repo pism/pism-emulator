@@ -29,7 +29,7 @@ import torch.nn as nn
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import ExponentialLR, _LRScheduler, ReduceLROnPlateau
+from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, _LRScheduler
 
 from pism_emulator.metrics import AreaAbsoluteError, area_absolute_error
 

@@ -23,9 +23,9 @@ from __future__ import annotations
 import math
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Callable, Iterable, Literal, Optional, Sequence
-import time
 
 import lightning as pl
 import numpy as np

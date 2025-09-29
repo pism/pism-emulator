@@ -27,13 +27,12 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
-import torch
-from torch import Tensor
-from torch.utils.data import DataLoader
-
 import lightning as pl
+import torch
 from lightning.pytorch.callbacks import BasePredictionWriter, Timer
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
+from torch import Tensor
+from torch.utils.data import DataLoader
 
 
 class DiskPredictionWriter(BasePredictionWriter):
