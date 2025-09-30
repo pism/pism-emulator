@@ -925,7 +925,8 @@ if __name__ == "__main__":
 
 
 def make_trainer_for_chains(accelerator: str, n_chains: int) -> pl.Trainer:
-    """Create a minimal Trainer configured for single- or multi-chain inference.
+    """
+    Create a minimal Trainer configured for single- or multi-chain inference.
 
     CPU runs can use multiple processes (one per chain). GPU/MPS runs use a single
     device and run one chain per call to ``predict``.
@@ -966,17 +967,9 @@ def run_sampling(
     inits: Tensor,
     accelerator: str = "cpu",
     tmp_dir: str | Path = "./_preds",
-) -> Dict[str, Tensor]:
-    """Run MCMC chains via ``Trainer.predict`` and return stacked results.
-
-    This function supports two modes:
-
-    * **CPU with multiple chains** (``accelerator="cpu"`` and ``inits.shape[0] > 1``):
-      launches DDP-spawn and writes each chain to disk using
-      :class:`DiskPredictionWriter`, then reads and stacks the results.
-
-    * **Single-process** (GPU/MPS or CPU with 1 chain): runs predict in-process
-      and stacks the returned dicts.
+) -> dict[str, Tensor]:
+    """
+    Run MCMC chains.
 
     Parameters
     ----------
@@ -999,27 +992,48 @@ def run_sampling(
           - ``"lp"`` : ``(C, S)`` float32 tensor (if provided)
           - ``"step_size"`` : ``(C, S)`` float32 tensor (if provided)
           - ``"accept"`` : ``(C, S)`` bool tensor (if provided)
-
-    Raises
-    ------
-    RuntimeError
-        If predictions are missing on disk in DDP mode.
-
-    Notes
-    -----
-    Uses :class:`Timer` to report elapsed time for the single-process path, and
-    wall-clock timing for the multi-process path.
     """
     dl = DataLoader(ChainInitDataset(inits), batch_size=1, shuffle=False, num_workers=0)
 
     n_chains = int(inits.shape[0])
     multi_cpu = (accelerator == "cpu") and (n_chains > 1)
 
-    def _stack_single_outs(outs: Sequence[Dict[str, Tensor]]) -> Dict[str, Tensor]:
-        """Stack a list of single-process prediction dicts into (C, ...) tensors."""
+    def _stack_single_outs(outs: Sequence[dict[str, Tensor]]) -> dict[str, Tensor]:
+        """
+        Stack single-process prediction outputs into chain-major tensors.
+
+        This helper filters out ``None`` entries, sorts records by the integer value
+        of the ``"chain"`` field, and stacks common keys across chains. It always
+        returns a ``"samples"`` tensor of shape ``(C, ...)`` where ``C`` is the
+        number of chains. Optional keys among ``{"lp", "step_size", "accept"}``
+        are included if present in **all** records and stacked to shape ``(C, ...)``
+        as well.
+
+        Parameters
+        ----------
+        outs : Sequence[dict[str, Tensor]]
+            Iterable of per-process prediction dictionaries. Each dictionary must
+            contain:
+              - ``"chain"``: an integer (or string convertible to int) identifying the chain
+              - ``"samples"``: a :class:`torch.Tensor` with arbitrary trailing shape
+            May additionally contain keys ``"lp"``, ``"step_size"``, and ``"accept"``.
+            ``None`` entries are ignored.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary with stacked tensors:
+              - ``"samples"`` : ``(C, ...)``
+              - ``"lp"``, ``"step_size"``, ``"accept"`` : ``(C, ...)`` if available for all chains.
+
+        Notes
+        -----
+        Records are sorted by ``int(d["chain"])`` before stacking to ensure
+        deterministic chain ordering.
+        """
         outs = [o for o in outs if o is not None]
         outs = sorted(outs, key=lambda d: int(d["chain"]))
-        stats: Dict[str, Tensor] = {
+        stats: dict[str, Tensor] = {
             "samples": torch.stack([d["samples"] for d in outs])
         }
         for k in ("lp", "step_size", "accept"):
@@ -1028,9 +1042,46 @@ def run_sampling(
         return stats
 
     def _stack_from_disk(
-        pred_dir: str | Path, expected_chains: Optional[int] = None
-    ) -> Dict[str, Tensor]:
-        """Load rank*_chain*.pt files and stack per-chain tensors."""
+        pred_dir: str | Path, expected_chains: int | None = None
+    ) -> dict[str, Tensor]:
+        """
+        Load and stack per-chain prediction tensors saved on disk.
+
+        Finds files matching ``rank*_chain*.pt`` in ``pred_dir``, loads them with
+        :func:`torch.load`, sorts by the ``"chain"`` field, and stacks common keys
+        across chains. As with :func:`_stack_single_outs`, ``"samples"`` is required
+        and optional keys among ``{"lp", "step_size", "accept"}`` are stacked only
+        if present in **all** records.
+
+        Parameters
+        ----------
+        pred_dir : str or pathlib.Path
+            Directory containing files named like ``rank*_chain*.pt``. Each file
+            must serialize a dict with at least ``"chain"`` and ``"samples"``.
+        expected_chains : int, optional
+            If provided, validate that the number of stacked chains equals this
+            value. A mismatch raises a :class:`RuntimeError`.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary with stacked tensors:
+              - ``"samples"`` : ``(C, ...)``
+              - ``"lp"``, ``"step_size"``, ``"accept"`` : ``(C, ...)`` if available for all chains.
+
+        Raises
+        ------
+        RuntimeError
+            If no matching files are found in ``pred_dir``.
+        RuntimeError
+            If ``expected_chains`` is given and does not match the number of
+            stacked chains.
+
+        Notes
+        -----
+        Files are sorted by ``int(record["chain"])`` to ensure deterministic chain
+        ordering independent of filename ordering.
+        """
         pred_dir = Path(pred_dir)
         files = sorted(pred_dir.glob("rank*_chain*.pt"))
         if not files:
@@ -1038,7 +1089,7 @@ def run_sampling(
         recs = [torch.load(f) for f in files]
         recs.sort(key=lambda r: int(r["chain"]))
 
-        stats: Dict[str, Tensor] = {
+        stats: dict[str, Tensor] = {
             "samples": torch.stack([r["samples"] for r in recs])
         }
         for k in ("lp", "step_size", "accept"):

@@ -720,7 +720,7 @@ class TorchPDDModel(torch.nn.modules.Module):
     def refreeze_ice(self, value):
         self._refreeze_ice = value
 
-    def forward(self, temp, prec, stdv=0.0):
+    def forward(self, temp, prec, stdv=np.array(0.0)):
         """Run the positive degree day model.
 
         Use temperature, precipitation, and standard deviation of temperature
@@ -745,9 +745,9 @@ class TorchPDDModel(torch.nn.modules.Module):
         ('smb'), and many other output variables in a dictionary.
         """
 
-        temp = torch.asarray(temp, device=self.device)
-        prec = torch.asarray(prec, device=self.device)
-        stdv = torch.asarray(stdv, device=self.device)
+        temp = torch.from_numpy(temp)
+        prec = torch.from_numpy(prec)
+        stdv = torch.from_numpy(stdv)
 
         # expand arrays to the largest shape
         maxshape = max(temp.shape, prec.shape, stdv.shape)
