@@ -30,7 +30,6 @@ def test_dataset():
         training_files="tests/training_data/*.nc",
         samples_file="data/samples/velocity_calibration_samples_50.csv",
         target_file="tests/test_data/test_vel_g9000m.nc",
-        thin=1,
     )
 
     X = dataset.samples.X.detach().numpy()

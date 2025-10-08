@@ -682,7 +682,7 @@ class LegacyNNEmulator(pl.LightningModule):
         )
         # This is an approximation to Doug's version:
         scheduler = {
-            "scheduler": ExponentialLR(optimizer, 0.9975, verbose=True),
+            "scheduler": ExponentialLR(optimizer, 0.9975),
         }
 
         return [optimizer], [scheduler]
@@ -703,11 +703,11 @@ class LegacyNNEmulator(pl.LightningModule):
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
-    def validation_epoch_end(self, outputs):
-
+    def on_validation_epoch_end(self):
         self.log(
             "train_loss",
             self.train_ae,
+            sync_dist=True,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -715,6 +715,7 @@ class LegacyNNEmulator(pl.LightningModule):
         self.log(
             "test_loss",
             self.test_ae,
+            sync_dist=True,
             on_step=False,
             on_epoch=True,
             prog_bar=True,

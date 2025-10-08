@@ -38,3 +38,7 @@ Final Score:
 =======================================================
 MAE=42.06m/yr, MBE=-12.12 m/yr, RMSE=4224 m/yr, Pearson r=1.00, r2=0.99
 ```
+
+# Create your own emulators
+
+    $ python train_speed_emulator.py --emulator_dir emulators_legacy  --data_dir speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv

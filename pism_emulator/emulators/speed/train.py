@@ -220,7 +220,7 @@ def main():
     print("=" * 80)
 
     rank_zero_info(f"Training model {model_index}")
-    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
+    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples), random_state=model_index)).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 

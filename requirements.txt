@@ -1,7 +1,8 @@
-SALib
 arviz
+bokeh
 dask[distributed,dataframe]
 earthaccess
+h5netcdf
 ipywidgets
 joblib
 lightning
@@ -24,5 +25,4 @@ torchaudio
 torchvision
 tqdm
 xarray
-xarray-datatree
 zarr

@@ -66,7 +66,7 @@ def nn_setup(Emulator):
         "n_hidden_3": 128,
         "n_hidden_4": 128,
         "n_layers": 4,
-        "learning_rate": 0.1,
+        "learning_rate": 0.01,
         "width": 128,
         "depth": 4,
     }
@@ -105,7 +105,7 @@ def nn_setup(Emulator):
         generator=g,
     )
 
-    max_epochs = 20
+    max_epochs = 50
 
     trainer_e = pl.Trainer(
         deterministic=True,
@@ -131,4 +131,4 @@ def test_emulator_equivalence():
     mean_squared_error = MeanSquaredError()
     mse = mean_squared_error(Y_e, Y_de)
 
-    assert mse <= 1e-1
+    assert mse <= 2.5e-3

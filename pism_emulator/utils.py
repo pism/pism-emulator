@@ -35,9 +35,11 @@ import xarray as xr
 from matplotlib.colors import LogNorm
 from numpy.typing import NDArray
 from pyDOE3 import lhs
-from SALib.sample import saltelli
 from scipy.stats.distributions import gamma, randint, truncnorm, uniform
-from sklearn.linear_model import LinearRegression
+import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import mean_squared_error
 
 np.random.seed(0)
@@ -611,46 +613,80 @@ def plot_eigenglaciers(
 
 
 def calc_bic(
+    model: BaseEstimator,
     X: np.ndarray | pd.DataFrame,
     Y: np.ndarray | pd.DataFrame,
 ) -> float:
     """
-    Bayesian Information Criterion
+    Compute the Bayesian Information Criterion (BIC) for any fitted scikit-learn model.
 
-    Calculates the Bayesian Information Criterion (BIC) under the assumption that the model errors or disturbances are independent and identically distributed according to a normal distribution and that the boundary condition that the derivative of the log likelihood with respect to the true variance is zero, this becomes (up to an additive constant, which depends only on n and not on the model). BIC is given by:
-
-    BIC = n*ln(RSS/n) + ln(n)*k,
-
-    where
-
-    n = the number of data points in x, the number of observations, or equivalently, the sample size
-    k = the number of parameters estimated by the model. For example, in multiple linear regression, the estimated parameters are the intercept, the q slope parameters, and the constant variance of the errors; thus, k = q + 2
-    RSS = residual sums of squares (FIXME)
+    Automatically detects model type (regression vs classification) and
+    computes BIC using the appropriate likelihood formulation.
 
     Parameters
     ----------
-    X : ndarray
-        input observations
-    Y : ndarray
-        output observations
+    model : fitted scikit-learn estimator
+        The trained model (must implement `predict`, and optionally `predict_proba`).
+    X : array-like of shape (n_samples, n_features)
+        Input features.
+    Y : array-like of shape (n_samples,)
+        True target values.
 
     Returns
     -------
-    BIC : scalar
-          The Bayesian Information Criterion (BIC)
+    BIC : float
+        Bayesian Information Criterion (smaller is better).
+
+    Notes
+    -----
+    - For regression models, assumes Gaussian errors:
+        BIC = n * ln(RSS/n) + k * ln(n)
+    - For classifiers with predict_proba(), assumes Bernoulli or multinomial likelihood.
+    - The number of parameters `k` is estimated from model coefficients if available.
+    - If parameter count cannot be inferred, a warning is printed and a heuristic is used.
     """
 
-    lm = LinearRegression()
-    lm.fit(X, Y)
-    Y_hat = lm.predict(X)
-    res = Y - Y_hat
-    RSS = np.sum(np.power(res, 2))
-    n, q = X.shape
-    # k = q + 2
-    k = q
-    BIC = n * np.log(RSS / n) + k * np.log(n)
+    X = np.asarray(X)
+    Y = np.asarray(Y).ravel()
+    n = X.shape[0]
 
-    return BIC
+    # --- Determine model type ---
+    is_classifier = hasattr(model, "predict_proba")
+
+    # --- Estimate number of parameters (k) ---
+    if hasattr(model, "coef_"):
+        coef = np.asarray(model.coef_)
+        k = coef.size
+        if getattr(model, "fit_intercept", False):
+            k += coef.shape[0]  # intercepts
+    else:
+        # Fallback heuristic: assume one parameter per feature + intercept
+        k = X.shape[1] + 1
+        print("[calc_bic] Warning: parameter count (k) inferred heuristically.")
+
+    # --- Compute log-likelihood depending on model type ---
+    if not is_classifier:
+        # Regression case (Gaussian likelihood)
+        y_pred = model.predict(X)
+        residuals = Y - y_pred
+        RSS = np.sum(residuals**2)
+        RSS = np.maximum(RSS, np.finfo(float).eps)
+        bic = n * np.log(RSS / n) + k * np.log(n)
+    else:
+        # Classification case (Bernoulli or multinomial likelihood)
+        proba = model.predict_proba(X)
+        proba = np.clip(proba, 1e-12, 1 - 1e-12)  # numerical stability
+
+        if proba.shape[1] == 2:  # binary
+            log_likelihood = np.sum(
+                Y * np.log(proba[:, 1]) + (1 - Y) * np.log(proba[:, 0])
+            )
+        else:  # multiclass
+            log_likelihood = np.sum(np.log(proba[np.arange(n), Y]))
+
+        bic = -2 * log_likelihood + k * np.log(n)
+
+    return float(bic)
 
 
 def stepwise_bic(
@@ -892,59 +928,6 @@ def prepare_data(
         return s, r
 
 
-def draw_samples(distributions, n_samples=100000, method="lhs"):
-    """
-    Draw n_samples Sobol sequences using the Saltelli method
-    or using Latin Hypercube Sampling (LHS)
-
-    Provide a dictionary with distributions of the form
-
-    distributions = {
-        "X1": scipy.stats.distributions.randint(0, 2),
-        "X2": scipy.stats.distributions.truncnorm(-4 / 4.0, 4.0 / 4, loc=8, scale=4),
-        "X3": scipy.stats.distributions.uniform(loc=5, scale=2),
-    }
-
-    Parameters
-    ----------
-    distributions : dictionary of scipy.stats.distributions.
-    n_samples : number of samples to draw.
-    method: drawing method. Either Latin Hypercube ("lhs")
-            or Saltelli ("saltelli").
-
-    Returns
-    -------
-    d : pandas.DataFrame
-    """
-
-    # Names of all the variables
-    keys = [x for x in distributions.keys()]
-
-    # Describe the Problem
-    problem = {"num_vars": len(keys), "names": keys, "bounds": [[0, 1]] * len(keys)}
-
-    # Generate uniform samples (i.e. one unit hypercube)
-    if method == "lhs":
-        unif_sample = lhs(len(keys), n_samples)
-    elif method == "saltelli":
-        unif_sample = saltelli.sample(problem, n_samples, calc_second_order=False)
-    else:
-        sys.exit("How did I get here? Invalid sampling method")
-
-    # To hold the transformed variables
-    dist_sample = np.zeros_like(unif_sample)
-
-    # Now transform the unit hypercube to the prescribed distributions
-    # For each variable, transform with the inverse of the CDF (inv(CDF)=ppf)
-    for i, key in enumerate(keys):
-        dist_sample[:, i] = distributions[key].ppf(unif_sample[:, i])
-
-    # Save to CSV file using Pandas DataFrame and to_csv method
-    # Convert to Pandas dataframe, append column headers, output as csv
-    header = keys
-    return pd.DataFrame(data=dist_sample, columns=header)
-
-
 def kl_divergence(p, q):
     r"""
     Kullback-Leibler divergence
@@ -1077,3 +1060,44 @@ def gelman_rubin(p: np.ndarray, q: np.ndarray):
 # Define constants
 
 golden_ratio = (1 + np.sqrt(5)) / 2
+
+
+def plot_legacy_eigenglaciers(
+    dataset,
+    data_loader,
+    model_index,
+    emulator_dir,
+    nrows=2,
+    ncols=3,
+    figsize=(3.2, 3.6),
+    q: int = 6,
+):
+    V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True, q=q)
+
+    lamda_scaled = lamda / lamda.sum() * 100
+    fig, axs = plt.subplots(
+        nrows=nrows, ncols=ncols, sharex="col", sharey="row", figsize=figsize
+    )
+    for k, ax in enumerate(axs.ravel()):
+        V = V_hat[:, k]
+        data = np.zeros((dataset.ny, dataset.nx))
+        data.put(dataset.sparse_idx_1d, V)
+        eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
+        c = ax.imshow(
+            eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3
+        )
+
+        ax.text(
+            0.05,
+            -0.025,
+            f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%",
+            transform=ax.transAxes,
+        )
+        ax.axis("off")
+    fig.subplots_adjust(wspace=0.05, hspace=0.05)
+    plt.tight_layout()
+    fig_dir = f"{emulator_dir}/eigenglaciers"
+    if not isdir(fig_dir):
+        mkdir(fig_dir)
+
+    fig.savefig(join(fig_dir, f"eigenglaciers_{model_index}.pdf"))

@@ -1118,7 +1118,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         self.training_files = training_files
         rank_zero_info(f"Reading training data took {(end_time-start_time):.0f}s")
 
-        p = response.max(axis=1) < self.cfg.y_lim[1]
+        p = response.max(axis=1) < 100e3
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
