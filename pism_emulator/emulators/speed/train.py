@@ -201,12 +201,7 @@ def main():
     parser.add_argument("--drop_out", type=float, default=0.1)
     parser.add_argument("--y_lim", type=float, nargs=2, default=[1, 10e3])
     parser.add_argument(
-        "--samples_file",
-        default=abspath(
-            join(
-                script_directory, "../data/samples/velocity_calibration_samples_50.csv"
-            )
-        ),
+        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
     )
     parser.add_argument(
         "--strategy",
@@ -215,12 +210,7 @@ def main():
     )
     parser.add_argument(
         "--target_file",
-        default=abspath(
-            join(
-                script_directory,
-                "../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
-            )
-        ),
+        default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
