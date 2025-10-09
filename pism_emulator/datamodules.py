@@ -185,7 +185,7 @@ class PISMDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             num_workers=self.cfg.num_workers,
             worker_init_fn=seed_worker,
-            persistent_workers=True,
+            persistent_workers=False,
             generator=g,
         )
 

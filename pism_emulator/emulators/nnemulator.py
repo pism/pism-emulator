@@ -53,7 +53,7 @@ class MLPBlock(nn.Module):
         activation: str = "relu",
     ) -> None:
         super().__init__()
-        self.lin = nn.Linear(in_features, out_features, bias=True)
+        self.lin = nn.Linear(in_features, out_features)
         self.norm = nn.LayerNorm(out_features)
 
         if activation.lower() == "relu":
@@ -132,7 +132,7 @@ class DNNEmulator(pl.LightningModule):
         )
 
         # output head to coefficient space, then project back with V_hat
-        self.head = nn.Linear(width, n_eigenglaciers, bias=False)
+        self.head = nn.Linear(width, n_eigenglaciers)
 
         # buffers (non-trainable, but saved with state)
         self.register_buffer("V_hat", V_hat, persistent=True)
