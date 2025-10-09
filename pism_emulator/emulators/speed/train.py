@@ -259,7 +259,6 @@ def main():
 
     callbacks: list = [EpochProgressBar(desc="Training")]
 
-    rank_zero_info(y_lim)
     dataset = PISMDataset(
         training_files=training_files,
         samples_file=samples_file,
@@ -353,7 +352,6 @@ def main():
         strategy=strategy,
     )
 
-    rank_zero_info(dm.eig.F_mean.max())
     trainer.fit(e, datamodule=dm)
     final_ckpt = f"{emulator_dir}/emulator/emulator_{model_index}.ckpt"
     trainer.save_checkpoint(final_ckpt)

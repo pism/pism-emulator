@@ -188,6 +188,8 @@ class PISMDataModule(pl.LightningDataModule):
             worker_init_fn=seed_worker,
             generator=self._dl_generator,
             persistent_workers=True,
+            pin_memory=True,
+            prefetch_factor=2,
         )
 
     def train_dataloader(self) -> DataLoader:
