@@ -52,6 +52,7 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
 }
 
 
+torch.use_deterministic_algorithms(True)
 torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
 torch.backends.cudnn.benchmark = True
 
@@ -120,7 +121,7 @@ def main():
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--n_layers", type=int, default=4)
     parser.add_argument("-q", type=int, default=100)
     parser.add_argument("--drop_out", type=float, default=0.1)
@@ -194,7 +195,6 @@ def main():
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        thin=thin,
         y_lim=y_lim,
         log_y=True,
         parallel=True,
@@ -228,24 +228,26 @@ def main():
         X, F, omegas, omegas_0, num_workers=num_workers, batch_size=batch_size
     )
 
-    dm.prepare_data(q=q)
+    dm.prepare_data(cutoff=0.9999)
     dm.setup(stage="fit")
     V_hat = dm.eig.V_hat
     F_mean = dm.eig.F_mean
+    print(V_hat.shape)
     plot_eigenglaciers(dataset, dm, model_index, emulator_dir, q=q)
 
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=f"{emulator_dir}/emulator",
-        filename="emulator_{model_index}",
-        save_last=True,  # write only the final checkpoint
-        every_n_epochs=None,  # disable periodic-by-epoch saving
-        every_n_train_steps=None,  # disable periodic-by-step saving
-        train_time_interval=None,  # disable time-based saving
-        save_top_k=0,  # disable "best" checkpoints (no monitor)
-        save_on_train_epoch_end=False,  # don't save at each epoch end
-    )
-    checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
-    callbacks.append(checkpoint_callback)
+    # checkpoint_callback = ModelCheckpoint(
+    #     dirpath=f"{emulator_dir}/emulator",
+    #     filename="emulator_{model_index}",
+    #     save_last=True,  # write only the final checkpoint
+    #     every_n_epochs=None,  # disable periodic-by-epoch saving
+    #     every_n_train_steps=None,  # disable periodic-by-step saving
+    #     train_time_interval=None,  # disable time-based saving
+    #     save_top_k=0,  # disable "best" checkpoints (no monitor)
+    #     save_on_train_epoch_end=False,  # don't save at each epoch end
+    # )
+    # checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
+    # callbacks.append(checkpoint_callback)
+
     dl = dm.train_dataloader()
     print(
         f"N={len(dl.dataset)}, batch_size={getattr(dl, 'batch_size', '?')}, "
@@ -274,10 +276,13 @@ def main():
         accelerator=accelerator,
         devices=devices,
         enable_progress_bar=False,
+        enable_checkpointing=False,
         strategy=strategy,
     )
 
     trainer.fit(e, datamodule=dm)
+    final_ckpt = f"{emulator_dir}/emulator/emulator_{model_index}.ckpt"
+    trainer.save_checkpoint(final_ckpt)
     rank_zero_info(f"Training took {timer.time_elapsed():.0f}s")
 
 

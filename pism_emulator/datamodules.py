@@ -134,7 +134,6 @@ class PISMDataModule(pl.LightningDataModule):
     X, F, omegas, omegas_0 : torch.Tensor
         See original docstring.
     batch_size : int, default=128
-    train_size : float, default=0.9
     num_workers : int, default=0
     """
 
@@ -185,7 +184,7 @@ class PISMDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             num_workers=self.cfg.num_workers,
             worker_init_fn=seed_worker,
-            persistent_workers=False,
+            persistent_workers=True,
             generator=g,
         )
 
@@ -201,6 +200,7 @@ class PISMDataModule(pl.LightningDataModule):
         self,
         *,
         q: int = 10,
+        cutoff: float | None = None,
         svd_lowrank: bool = True,
         cache_path: str | Path | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -213,6 +213,7 @@ class PISMDataModule(pl.LightningDataModule):
         -------
         V_hat, F_bar, F_mean, eigs_vals : tuple[Tensor, Tensor, Tensor, Tensor]
         """
+
         if self.eig.ready:
             return self.eig.V_hat, self.eig.F_bar, self.eig.F_mean, self.eig.eigs_vals
 
@@ -234,7 +235,6 @@ class PISMDataModule(pl.LightningDataModule):
                     self.eig.eigs_vals,
                 )
 
-        rank_zero_info(f"Generating eigenglaciers using the first {q} eigen values")
         with self.eig.lock:
             if self.eig.ready:
                 return (
@@ -250,16 +250,34 @@ class PISMDataModule(pl.LightningDataModule):
             F_mean = (F * omegas).sum(axis=0)
             F_bar = F - F_mean  # Eq. 28
 
+            if cutoff is not None:
+                q_r = F.shape[0]
+            else:
+                q_r = q
+
             if svd_lowrank:
                 Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-                _, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
+                _, S, V = torch.svd_lowrank(Z @ F_bar, q=q_r)
                 lamda = S**2 / (n_grid_points)
             else:
                 S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar
                 lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
                 lamda = lamda[:, 0].squeeze()
 
-            V_hat = V.detach() @ torch.diag(torch.sqrt(lamda.detach()))
+            if cutoff is not None:
+                cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
+                lamda_truncated = lamda.detach()[:cutoff_index]
+                rank_zero_info(
+                    f"Generating eigenglaciers using the first {cutoff_index} eigen values for {cutoff * 100}% fidelity"
+                )
+                V_hat = V.detach()[:, :cutoff_index] @ torch.diag(
+                    torch.sqrt(lamda.detach()[:cutoff_index])
+                )
+            else:
+                rank_zero_info(
+                    f"Generating eigenglaciers using the first {q_r} eigen values"
+                )
+                V_hat = V.detach() @ torch.diag(torch.sqrt(lamda.detach()))
 
             if cache_path is not None:
                 torch.save(
@@ -398,6 +416,7 @@ class PDDDataModule(pl.LightningDataModule):
             batch_size=self.cfg.batch_size,
             shuffle=shuffle,
             num_workers=self.cfg.num_workers,
+            pin_memory=True,
             worker_init_fn=seed_worker,
             generator=g,
         )

@@ -37,12 +37,15 @@ from pism_emulator.utils import plot_legacy_eigenglaciers as plot_eigenglaciers
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
+torch.use_deterministic_algorithms(True)
+torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
+torch.backends.cudnn.benchmark = True
+
 
 def current_script_directory():
     import inspect
 
     filename = inspect.stack(0)[0][1]
-    print(dirname(filename))
     return realpath(dirname(filename))
 
 
@@ -65,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--n_layers", type=int, default=4)
     parser.add_argument("-q", type=int, default=100)
     parser.add_argument(
