@@ -26,6 +26,7 @@ from typing import Mapping
 
 import lightning as pl
 import numpy as np
+import random
 import torch
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -54,7 +55,6 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
 
 torch.use_deterministic_algorithms(True)
 torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
-torch.backends.cudnn.benchmark = True
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -188,6 +188,12 @@ def main():
     training_files = args.TRAINING_FILES
     y_lim = args.y_lim
 
+    np.random.seed(model_index)
+    random.seed(model_index)
+    np.random.seed(model_index)
+    torch.manual_seed(model_index)
+    pl.seed_everything(model_index, workers=True)
+
     callbacks: list = [EpochProgressBar(desc="Training")]
 
     rank_zero_info(y_lim)
@@ -208,9 +214,6 @@ def main():
     n_parameters = dataset.samples.n_parameters
     n_samples = dataset.samples.n_samples
 
-    torch.manual_seed(0)
-    np.random.seed(model_index)
-
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
         os.makedirs(os.path.join(emulator_dir, "emulator"))
@@ -227,14 +230,19 @@ def main():
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
     dm = PISMDataModule(
-        X, F, omegas, omegas_0, num_workers=num_workers, batch_size=batch_size
+        X,
+        F,
+        omegas,
+        omegas_0,
+        num_workers=num_workers,
+        batch_size=batch_size,
+        seed=model_index,
     )
 
     dm.prepare_data(cutoff=cutoff, q=q)
     dm.setup(stage="fit")
     V_hat = dm.eig.V_hat
     F_mean = dm.eig.F_mean
-    print(V_hat.shape)
     plot_eigenglaciers(dataset, dm, model_index, emulator_dir, q=q)
 
     # checkpoint_callback = ModelCheckpoint(
@@ -282,6 +290,7 @@ def main():
         strategy=strategy,
     )
 
+    rank_zero_info(dm.eig.F_mean.max())
     trainer.fit(e, datamodule=dm)
     final_ckpt = f"{emulator_dir}/emulator/emulator_{model_index}.ckpt"
     trainer.save_checkpoint(final_ckpt)

@@ -36,7 +36,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 def seed_worker(worker_id: int) -> None:  # pylint: disable=unused-argument
-    """Seed NumPy and Python RNGs for a DataLoader worker.
+    """
+    Seed NumPy and Python RNGs for a DataLoader worker.
 
     Parameters
     ----------
@@ -55,10 +56,6 @@ def seed_worker(worker_id: int) -> None:  # pylint: disable=unused-argument
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
-
-g = torch.Generator()
-g.manual_seed(0)
 
 
 @dataclass
@@ -134,7 +131,8 @@ class PISMDataModule(pl.LightningDataModule):
     X, F, omegas, omegas_0 : torch.Tensor
         See original docstring.
     batch_size : int, default=128
-    num_workers : int, default=0
+    num_workers : int, default=1
+    seed : int, default=42
     """
 
     # pylint: disable=too-many-instance-attributes  # (remove after refactor if under threshold)
@@ -147,11 +145,15 @@ class PISMDataModule(pl.LightningDataModule):
         omegas_0: Tensor,
         *,
         batch_size: int = 128,
+        seed: int = 42,
         num_workers: int = 0,
     ):
         super().__init__()
         self.cfg = DataConfig(X, F, omegas, omegas_0, batch_size, num_workers)
         self.eig = EigCache()
+
+        self._dl_generator = torch.Generator(device="cpu")
+        self._dl_generator.manual_seed(seed)
 
         # only the splits are kept; loaders are created on demand
         self._train = None
@@ -184,12 +186,12 @@ class PISMDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             num_workers=self.cfg.num_workers,
             worker_init_fn=seed_worker,
+            generator=self._dl_generator,
             persistent_workers=True,
-            generator=g,
         )
 
     def train_dataloader(self) -> DataLoader:
-        return self._build_loader(self._train, shuffle=True)
+        return self._build_loader(self._train, shuffle=False)
 
     def val_dataloader(self) -> DataLoader:
         return self._build_loader(self._val, shuffle=False)
@@ -358,6 +360,7 @@ class PDDDataModule(pl.LightningDataModule):
         omegas_0: Tensor,
         *,
         batch_size: int = 128,
+        seed: int = 42,
         train_size: float = 0.9,
         num_workers: int = 0,
     ) -> None:
@@ -371,6 +374,9 @@ class PDDDataModule(pl.LightningDataModule):
             train_size=train_size,
             num_workers=num_workers,
         )
+        self._dl_generator = torch.Generator(device="cpu")
+        self._dl_generator.manual_seed(seed)
+
         # dataset splits; loaders built on demand
         self._all: TensorDataset | None = None
         self._train: TensorDataset | None = None
@@ -418,7 +424,7 @@ class PDDDataModule(pl.LightningDataModule):
             num_workers=self.cfg.num_workers,
             pin_memory=True,
             worker_init_fn=seed_worker,
-            generator=g,
+            generator=self._dl_generator,
         )
 
     def train_dataloader(self) -> DataLoader:
@@ -432,7 +438,7 @@ class PDDDataModule(pl.LightningDataModule):
         """
         if self._train is None:  # defensive, in case setup hasn't run
             self.setup("fit")
-        return self._build_loader(self._train, shuffle=True)
+        return self._build_loader(self._train, shuffle=False)
 
     def val_dataloader(self) -> DataLoader:
         """
@@ -458,6 +464,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
         batch_size: int = 128,
         train_size: float = 0.9,
         num_workers: int = 0,
+        seed: int = 42,
     ):
         super().__init__()
         self.X = X
@@ -467,6 +474,8 @@ class LegacyPISMDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.train_size = train_size
         self.num_workers = num_workers
+        self._dl_generator = torch.Generator(device="cpu")
+        self._dl_generator.manual_seed(seed)
 
     def setup(self, stage: Optional[str] = None):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
@@ -486,7 +495,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             worker_init_fn=seed_worker,
-            generator=g,
+            generator=self._dl_generator,
         )
         self.train_all_loader = train_all_loader
         val_all_loader = DataLoader(
@@ -496,7 +505,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             worker_init_fn=seed_worker,
-            generator=g,
+            generator=self._dl_generator,
         )
         self.val_all_loader = val_all_loader
         train_loader = DataLoader(
@@ -506,7 +515,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             worker_init_fn=seed_worker,
-            generator=g,
+            generator=self._dl_generator,
         )
         self.train_loader = train_loader
         self.test_loader = train_loader
@@ -516,7 +525,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             worker_init_fn=seed_worker,
-            generator=g,
+            generator=self._dl_generator,
         )
         self.val_loader = val_loader
 
@@ -529,7 +538,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
         self.n_eigenglaciers = n_eigenglaciers
 
     def get_eigenglaciers(self, **kwargs):
-        print("Generating eigenglaciers")
+        rank_zero_info("Generating eigenglaciers")
         defaultKwargs = {
             "cutoff": 1.0,
             "q": 10,
@@ -558,7 +567,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
             lamda, V = torch.linalg.eig(S)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        print(f"...using the first {q} eigen values")
+        rank_zero(f"...using the first {q} eigen values")
         lamda_truncated = lamda.detach()
         V = V.detach()
         V_hat = V @ torch.diag(torch.sqrt(lamda))

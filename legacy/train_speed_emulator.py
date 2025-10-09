@@ -22,6 +22,7 @@ import os
 import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
+import random
 
 import lightning as pl
 import numpy as np
@@ -115,6 +116,11 @@ if __name__ == "__main__":
     thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
 
+    np.random.seed(model_index)
+    random.seed(model_index)
+    torch.manual_seed(model_index)
+    pl.seed_everything(model_index, workers=True)
+
     callbacks: list = []
 
     dataset = PISMDataset(
@@ -133,9 +139,6 @@ if __name__ == "__main__":
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
-
-    torch.manual_seed(0)
-    np.random.seed(model_index)
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
@@ -159,6 +162,7 @@ if __name__ == "__main__":
             train_size=train_size,
             num_workers=num_workers,
             batch_size=batch_size,
+            seed=model_index,
         )
 
     data_loader.prepare_data(q=q)
