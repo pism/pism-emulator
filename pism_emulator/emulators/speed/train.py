@@ -117,6 +117,7 @@ def main():
 
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--cutoff", type=float, default=None)
     parser.add_argument("--devices", default="auto")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--max_epochs", type=int, default=1000)
@@ -169,6 +170,7 @@ def main():
 
     accelerator = args.accelerator
     batch_size = args.batch_size
+    cutoff = args.cutoff
     devices = args.devices
     emulator_dir = args.emulator_dir
     model_index = args.model_index
@@ -228,7 +230,7 @@ def main():
         X, F, omegas, omegas_0, num_workers=num_workers, batch_size=batch_size
     )
 
-    dm.prepare_data(cutoff=0.9999)
+    dm.prepare_data(cutoff=cutoff, q=q)
     dm.setup(stage="fit")
     V_hat = dm.eig.V_hat
     F_mean = dm.eig.F_mean
