@@ -19,10 +19,10 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
+import random
 import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
-import random
 
 import lightning as pl
 import numpy as np
@@ -34,7 +34,7 @@ from scipy.stats import dirichlet
 from pism_emulator.datamodules import LegacyPISMDataModule as PISMDataModule
 from pism_emulator.datasets import LegacyPISMDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import LegacyNNEmulator as NNEmulator
-from pism_emulator.utils import plot_legacy_eigenglaciers as plot_eigenglaciers
+from pism_emulator.plotting import plot_legacy_eigenglaciers as plot_eigenglaciers
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 

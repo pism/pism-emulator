@@ -17,8 +17,12 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+"""
+Surrogate model training.
+"""
 
 import os
+import random
 import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
@@ -26,7 +30,6 @@ from typing import Mapping
 
 import lightning as pl
 import numpy as np
-import random
 import torch
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -43,7 +46,7 @@ from pism_emulator.emulators.nnemulator import (
     NN5Emulator,
     NNEmulator,
 )
-from pism_emulator.utils import plot_eigenglaciers
+from pism_emulator.plotting import plot_eigenglaciers
 
 EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "NN": NNEmulator,
@@ -59,27 +62,68 @@ torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
 
-def current_script_directory():
-    import inspect
-
-    filename = inspect.stack(0)[0][1]
-    return realpath(dirname(filename))
-
-
-script_directory = current_script_directory()
-
-
 class EpochProgressBar(Callback):
-    """A simple tqdm bar that advances once per epoch."""
+    """
+    A simple tqdm progress bar that advances once per training epoch.
 
-    def __init__(self, *, desc: str = "Training", ncols: int = 120):
+    The bar is created on rank 0 at training start, updates at each epoch end
+    with the latest `train_loss` and `val`/`test` loss (if present in
+    ``trainer.callback_metrics``), and closes at training end.
+
+    Parameters
+    ----------
+    desc : str, optional
+        Text shown to the left of the bar, by default ``"Training"``.
+    ncols : int, optional
+        Fixed width of the progress bar in terminal columns. If you want
+        automatic resizing, set this high and change ``dynamic_ncols=True``
+        in the implementation, by default ``120``.
+
+    Attributes
+    ----------
+    _bar : tqdm or None
+        The underlying tqdm progress bar instance (rank 0 only) or ``None``
+        when not active.
+    _desc : str
+        Description shown next to the bar.
+    _ncols : int
+        Fixed width (columns) of the bar.
+    """
+
+    def __init__(self, *, desc: str = "Training", ncols: int = 120) -> None:
+        """
+        Initialize the progress bar callback.
+
+        Parameters
+        ----------
+        desc : str, optional
+            Text shown to the left of the bar, by default ``"Training"``.
+        ncols : int, optional
+            Fixed width of the progress bar in terminal columns, by default ``120``.
+        """
         super().__init__()
-        self._bar: tqdm | None = None
+        self._bar: Optional[tqdm] = None
         self._desc = desc
         self._ncols = ncols
 
     @rank_zero_only
-    def on_train_start(self, trainer, pl_module) -> None:
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        """
+        Create and display the tqdm bar at the start of training (rank 0 only).
+
+        Parameters
+        ----------
+        trainer : lightning.pytorch.Trainer
+            The current Trainer instance.
+        pl_module : lightning.pytorch.LightningModule
+            The model being trained.
+
+        Notes
+        -----
+        The total number of epochs is derived from ``trainer.max_epochs``.
+        If ``max_epochs`` is ``None``, the total is set to 0 and tqdm will
+        display an indeterminate-length bar.
+        """
         total = int(trainer.max_epochs) if trainer.max_epochs is not None else 0
         self._bar = tqdm(
             total=total,
@@ -91,10 +135,26 @@ class EpochProgressBar(Callback):
         )
 
     @rank_zero_only
-    def on_train_epoch_end(self, trainer, pl_module) -> None:
+    def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        """
+        Advance the bar by one epoch and print latest losses (rank 0 only).
+
+        Parameters
+        ----------
+        trainer : lightning.pytorch.Trainer
+            The current Trainer instance. Uses ``trainer.callback_metrics`` to
+            fetch the most recent metrics.
+        pl_module : lightning.pytorch.LightningModule
+            The model being trained.
+
+        Notes
+        -----
+        Looks for ``"train_loss"`` and ``"test_loss"`` (or validation loss if
+        you map it to ``"test_loss"``) in ``trainer.callback_metrics``. Missing
+        metrics are displayed as ``nan``.
+        """
         if self._bar is None:
             return
-        # Grab latest metrics if available
         m = trainer.callback_metrics
         train_loss = float(m.get("train_loss", float("nan")))
         test_loss = float(m.get("test_loss", float("nan")))
@@ -102,13 +162,26 @@ class EpochProgressBar(Callback):
         self._bar.update(1)
 
     @rank_zero_only
-    def on_train_end(self, trainer, pl_module) -> None:
+    def on_train_end(self, trainer: Any, pl_module: Any) -> None:
+        """
+        Close and clear the tqdm bar at the end of training (rank 0 only).
+
+        Parameters
+        ----------
+        trainer : lightning.pytorch.Trainer
+            The current Trainer instance.
+        pl_module : lightning.pytorch.LightningModule
+            The model that was trained.
+        """
         if self._bar is not None:
             self._bar.close()
             self._bar = None
 
 
 def main():
+    """
+    Main.
+    """
     parser = ArgumentParser()
     parser.add_argument(
         "--emulator", choices=["NN", "NN5", "DNN", "LegacyNN"], default="NN"

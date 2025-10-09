@@ -15,7 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-
+"""
+Test emulators.
+"""
 
 import random
 
@@ -31,17 +33,20 @@ from torchmetrics.regression import MeanSquaredError
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 
 
-def seed_worker(worker_id):
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
+def nn_setup(Emulator: pl.LightningModule) -> torch.tensor:
+    """
+    Setup emulator.
 
+    Parameters
+    ----------
+    Emulator : LightningModule
+       An Emulator.
 
-g = torch.Generator()
-g.manual_seed(0)
-
-
-def nn_setup(Emulator):
+    Returns
+    -------
+    Tensor
+        Prediction.
+    """
     torch.use_deterministic_algorithms(True)
     torch.manual_seed(0)
 
@@ -122,7 +127,7 @@ def nn_setup(Emulator):
 
 def test_emulator_equivalence():
     """
-    Compare NNEmulator and DNNEmulator
+    Compare NNEmulator and DNNEmulator.
     """
 
     Y_e = nn_setup(NNEmulator)
