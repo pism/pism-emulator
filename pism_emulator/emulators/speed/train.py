@@ -26,7 +26,7 @@ import random
 import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
-from typing import Mapping
+from typing import Any, Mapping
 
 import lightning as pl
 import numpy as np
