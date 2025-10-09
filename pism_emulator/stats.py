@@ -133,10 +133,12 @@ def calc_bic(
 
     # --- Estimate number of parameters (k) ---
     if hasattr(model, "coef_"):
+        # correct
         coef = np.asarray(model.coef_)
         k = coef.size
         if getattr(model, "fit_intercept", False):
-            k += coef.shape[0]  # intercepts
+            # number of intercepts: 1 for single-target, n_targets for multi-output
+            k += np.size(getattr(model, "intercept_", np.array([0])))
     else:
         # Fallback heuristic: assume one parameter per feature + intercept
         k = X.shape[1] + 1

@@ -238,7 +238,7 @@ def test_stepwise_bic(dp16data):
         varnames=list(X.columns) if isinstance(X, pd.DataFrame) else None,
         estimator=LinearRegression(),  # or any sklearn regressor/classifier
         direction="both",  # 'forward' | 'backward' | 'both'
-        interactions=False,  # consider first-order interactions
+        interactions=True,  # consider first-order interactions
         start="main",  # start with all main effects
         tol=0.0,  # require strict BIC decrease
         max_steps=None,  # or cap steps if desired
