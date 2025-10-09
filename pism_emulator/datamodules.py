@@ -567,7 +567,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
             lamda, V = torch.linalg.eig(S)  # Eq. 26
             lamda = lamda[:, 0].squeeze()
 
-        rank_zero(f"...using the first {q} eigen values")
+        rank_zero_info(f"...using the first {q} eigen values")
         lamda_truncated = lamda.detach()
         V = V.detach()
         V_hat = V @ torch.diag(torch.sqrt(lamda))
