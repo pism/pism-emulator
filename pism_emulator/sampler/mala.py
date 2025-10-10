@@ -444,8 +444,52 @@ class MALASamplerModule(pl.LightningModule):
         self, X: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Compute local geometry at X: (log_pi, g, Hpos, Hinv, log_det_Hinv),
-        without using torch.linalg.eigh (MPS-safe).
+        Compute local geometry.
+
+        Compute local geometry of the negative log-posterior at a point ``X``:
+        value, gradient, and a positive-(semi)definite Hessian proxy together with
+        its inverse and log-determinant factor.
+
+        This MPS-safe implementation avoids eigen-decomposition by forming the
+        symmetric Hessian ``H`` via autograd, then operating on the SPD matrix
+        ``S = H @ H + eps * I``. The matrix square root and inverse square root of
+        ``S`` are obtained through a Newton–Schulz iteration (matmul-only), and the
+        log-determinant is computed from a Cholesky factorization with adaptive
+        jitter.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (parameter vector) at which to evaluate the local geometry.
+            Must require gradients (``requires_grad=True``). Shape ``(d,)`` or ``(d, 1)``
+            and on the same device/dtype expected by the model.
+
+        Returns
+        -------
+        log_pi : torch.Tensor
+            Scalar negative log-posterior evaluated at ``X``; shape ``()``.
+        g : torch.Tensor
+            Gradient of ``log_pi`` w.r.t. ``X``; shape ``(d,)``.
+        Hpos : torch.Tensor
+            Positive-(semi)definite matrix approximating
+            ``sqrt(H @ H + eps * I)``; shape ``(d, d)``.
+        Hinv : torch.Tensor
+            Inverse of ``Hpos``, i.e., ``(H @ H + eps * I)^{-1/2}``; shape ``(d, d)``.
+        log_det_Hinv : torch.Tensor
+            Scalar equal to ``-0.5 * log|H @ H + eps * I|``.
+
+        Notes
+        -----
+        - ``H`` is constructed via ``torch.autograd.functional.hessian`` and
+          symmetrized as ``0.5 * (H + H.T)``.
+        - The SPD matrix ``S = H @ H + eps * I`` shares eigenvectors with ``H`` and
+          has eigenvalues ``lambda(H)^2 + eps``; thus
+          ``Hpos = S^{1/2}`` and ``Hinv = S^{-1/2}``.
+        - The Newton–Schulz iteration uses only matrix multiplications and additions,
+          making it compatible with MPS where ``torch.linalg.eigh`` may be unavailable.
+        - The Cholesky step employs adaptive jitter to ensure positive-definiteness.
+          If Cholesky still fails, a small CPU fallback using ``slogdet`` may be used
+          solely for the log-determinant (dimension is typically small).
         """
         # 1) Negative log-posterior and gradient
         log_pi = self.neg_log_prob(X)
@@ -465,17 +509,69 @@ class MALASamplerModule(pl.LightningModule):
         S = H @ H
         S = 0.5 * (S + S.T)  # enforce symmetry to reduce numerical asymmetry
 
-        # ---- helper: Newton–Schulz matrix sqrt & inverse sqrt (all on-device) ----
         def _mat_sqrt_inv_sqrt(
             A: torch.Tensor, iters: int = 6
         ) -> tuple[torch.Tensor, torch.Tensor]:
-            # Scale for better convergence (Frobenius norm is fine and MPS-supported)
+            """
+            Compute square root and inverse square root.
+
+            Compute the matrix square root and inverse square root of a symmetric
+            positive-(semi)definite matrix using the Newton–Schulz iteration.
+
+            The iteration is applied to the scaled matrix ``A / ||A||_F`` for
+            numerical stability, then rescaled to obtain ``A^{1/2}`` and
+            ``A^{-1/2}``. The method uses only matrix multiplications and additions,
+            making it suitable for devices where eigen-decompositions are not
+            available.
+
+            Parameters
+            ----------
+            A : torch.Tensor
+                Square input matrix of shape ``(d, d)`` on the current device and
+                dtype. Should be symmetric and (near) positive-definite; in practice
+                you may add a small jitter ``eps * I`` before calling this routine.
+            iters : int, optional
+                Number of Newton–Schulz iterations. Typical values in ``[5, 8]``
+                yield ~1e-4 to ~1e-6 relative accuracy for well-conditioned inputs.
+                Default is ``6``.
+
+            Returns
+            -------
+            root : torch.Tensor
+                Matrix square root ``A^{1/2}`` of shape ``(d, d)`` with the same
+                device and dtype as ``A``.
+            invrt : torch.Tensor
+                Matrix inverse square root ``A^{-1/2}`` of shape ``(d, d)`` with the
+                same device and dtype as ``A``.
+
+            Notes
+            -----
+            The iteration updates are
+
+            ``Y_{k+1} = Y_k * (3I - Z_k * Y_k) / 2``,
+            ``Z_{k+1} = (3I - Z_k * Y_k) * Z_k / 2``,
+
+            initialized with ``Y_0 = A_s`` and ``Z_0 = I``, where
+            ``A_s = A / ||A||_F``. Upon convergence,
+            ``root = Y * sqrt(||A||_F)`` and ``invrt = Z / sqrt(||A||_F)``.
+
+            References
+            ----------
+            * Higham, N. J. and Lin, L. (2011). "A New Scaling and Squaring Algorithm
+              for the Matrix Exponential." SIAM J. Matrix Anal. Appl.
+            * Ionescu, C. et al. (2015). "Matrix Backpropagation for Deep Networks
+              with Structured Layers." ICCV.
+            """
+            # Scale for better convergence (Frobenius norm is fine and device-friendly)
             scale = A.norm(p="fro").clamp_min(1e-12)
             As = A / scale
 
             Y = As.clone()  # approx sqrt(As)
-            Z = torch.eye(d, device=A.device, dtype=A.dtype)  # approx invsqrt(As)
+            Z = torch.eye(
+                A.size(-1), device=A.device, dtype=A.dtype
+            )  # approx invsqrt(As)
 
+            I = Z  # reuse allocated identity
             for _ in range(iters):
                 T = 0.5 * (3.0 * I - Z @ Y)
                 Y = Y @ T

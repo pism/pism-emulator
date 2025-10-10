@@ -16,7 +16,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-instance-attributes,too-many-lines,too-many-positional-arguments,too-many-statements
 """
 Dataset Module.
 """
@@ -41,7 +41,6 @@ import dask
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
-import rioxarray
 import torch
 import xarray as xr
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
@@ -860,7 +859,7 @@ class PISMDataset(Dataset):
                 tqdm_rank0(keep_ids, desc="Reading training files", unit="file")
             ):
                 response[row] = _read_one_nc4(
-                    files_by_id[i], cfg.training_var, step, idx1d, cfg.epsilon
+                    files_by_id[i], cfg.training_var, 1, idx1d, cfg.epsilon
                 )
 
         end_time = time()
@@ -914,7 +913,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         target_corr_var="thickness",
         target_error_var="velsurf_mag_error",
         training_var="velsurf_mag",
-        thinning_factor=1,
         normalize_x=True,
         log_y=True,
         threshold=100e3,
@@ -928,7 +926,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         self.target_corr_threshold = target_corr_threshold
         self.target_corr_var = target_corr_var
         self.target_error_var = target_error_var
-        self.thinning_factor = thinning_factor
         self.threshold = threshold
         self.training_var = training_var
         self.epsilon = epsilon
@@ -946,7 +943,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
 
     def load_target(self):
         epsilon = self.epsilon
-        thinning_factor = self.thinning_factor
         rank_zero_info(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file, decode_times=False)
         data = ds[self.target_var].squeeze()
@@ -1013,7 +1009,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
 
     def load_data(self):
         epsilon = self.epsilon
-        thinning_factor = self.thinning_factor
 
         identifier_name = "id"
         training_var = self.training_var
@@ -1121,10 +1116,12 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         self.normed_area = normed_area
 
     def return_original(self):
+        X = self.X
         if self.normalize_x:
-            return self.X * self.X_std + self.X_mean
-        else:
-            return self.X
+            X *= self.X_std
+            X += self.X_mean
+
+        return X
 
 
 class PISMInterpolatedDataset(Dataset):
@@ -1227,17 +1224,15 @@ class PISMInterpolatedDataset(Dataset):
             raise ValueError(f"Could not parse id from filename: {path}")
         return int(m.group(1))
 
-    # ---------- target / mask (with interpolation) ----------
     def _load_target_interp_and_mask(self) -> TargetData:
         cfg = self.cfg
 
         rank_zero_info(f"Loading target {cfg.target_file} (engine={cfg.target_engine})")
-        rank_zero_info("  Establishing reference grid from first training file")
+        rank_zero_info("   Establishing reference grid from first training file")
 
         if not cfg.training_files:
             raise FileNotFoundError("No training files provided")
 
-        # 1) Open first training file -> reference grid
         ref_path = cfg.training_files[0]
         dref = xr.open_dataset(ref_path, decode_times=False, engine=cfg.training_engine)
         if cfg.training_var not in dref:
@@ -1245,12 +1240,10 @@ class PISMInterpolatedDataset(Dataset):
             raise KeyError(f"'{cfg.training_var}' not found in {ref_path}")
         ref_da = dref[cfg.training_var]
 
-        # Determine y/x dims robustly using last two dims
         ref_y_dim, ref_x_dim = ref_da.dims[-2], ref_da.dims[-1]
         ny = int(ref_da.sizes[ref_y_dim])
         nx = int(ref_da.sizes[ref_x_dim])
 
-        # 2) Load target and interp_like onto ref grid
         dtgt = xr.open_dataset(
             cfg.target_file, decode_times=False, engine=cfg.target_engine
         )
@@ -1261,15 +1254,12 @@ class PISMInterpolatedDataset(Dataset):
 
         targ_da = dtgt[cfg.target_var].squeeze()
 
-        # Rename last two dims to match ref if needed
         tgt_y_dim, tgt_x_dim = targ_da.dims[-2], targ_da.dims[-1]
         if (tgt_y_dim, tgt_x_dim) != (ref_y_dim, ref_x_dim):
             targ_da = targ_da.rename({tgt_y_dim: ref_y_dim, tgt_x_dim: ref_x_dim})
 
-        # Interpolate (linear) onto the ref grid
         targ_interp = targ_da.interp_like(ref_da.squeeze())
 
-        # Optional extra masking via correlation field (interp it too, if present)
         mask = targ_interp.isnull()
         has_err = cfg.target_error_var in dtgt
         has_corr = cfg.target_corr_var in dtgt
@@ -1419,7 +1409,7 @@ class PISMInterpolatedDataset(Dataset):
                 tqdm_rank0(keep_ids, desc="Reading training files", unit="file")
             ):
                 response[row] = _read_one_nc4(
-                    files_by_id[i], cfg.training_var, step, idx1d, cfg.epsilon
+                    files_by_id[i], cfg.training_var, 1, idx1d, cfg.epsilon
                 )
 
         end_time = time()

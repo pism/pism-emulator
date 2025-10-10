@@ -253,10 +253,6 @@ def test_calc_bic_linear_regression():
 
     The test asserts that the computed BIC is a finite float value and
     that it behaves as expected (larger BIC for noisier models).
-
-    Returns
-    -------
-    None
     """
     np.random.seed(42)
     X = np.random.randn(100, 3)
@@ -281,10 +277,6 @@ def test_calc_bic_logistic_regression():
     the Bernoulli log-likelihood.
 
     The test asserts that BIC is finite and that the function runs without errors.
-
-    Returns
-    -------
-    None
     """
     np.random.seed(123)
     X = np.random.randn(200, 4)
@@ -307,10 +299,6 @@ def test_calc_bic_random_forest_regressor():
     calc_bic() uses a heuristic based on residual sum of squares (RSS)
     and an inferred number of parameters. This test ensures that
     the function executes successfully and returns a valid finite BIC.
-
-    Returns
-    -------
-    None
     """
     np.random.seed(999)
     X = np.random.randn(150, 5)

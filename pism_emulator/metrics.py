@@ -20,7 +20,6 @@
 Metrics Module
 """
 
-from typing import Any
 
 import torch
 from torch import Tensor
@@ -208,7 +207,8 @@ def _absolute_error_compute(_absolute_error) -> Tensor:
 
 def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
     """
-    Computes squared absolute error
+    Computes squared absolute error.
+
     Args:
         preds: estimated labels
         target: ground truth labels

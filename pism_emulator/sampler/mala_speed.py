@@ -83,7 +83,7 @@ def main():
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument("--burn", type=int, default=1000)
-    parser.add_argument("--samples", type=int, default=100000)
+    parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--y_lim", nargs=2, type=float, default=[0.1, 10e3])
@@ -95,7 +95,6 @@ def main():
         "--target_file",
         default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
-    parser.add_argument("--thin", type=int, default=1)
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
     parser.add_argument("MODEL_FILE", nargs=1, help="Emulator ckpt")
 
@@ -123,7 +122,6 @@ def main():
     out_format = args.out_format
     samples_file = args.samples_file
     target_file = args.target_file
-    thin = args.thin
     training_files = args.TRAINING_FILES
     model_file = args.MODEL_FILE[0]
     target_var = args.target_var
@@ -146,7 +144,6 @@ def main():
         training_files=training_files,
         samples_file=samples_file,
         target_file=target_file,
-        thin=thin,
         target_corr_threshold=0,
         target_error_var=target_error_var,
         target_var=target_var,
@@ -175,7 +172,7 @@ def main():
     sigma = torch.clamp(sigma, min=1e-4)
 
     rho = 1.0 / (1e4**2)
-    point_area = (dataset.target.grid_resolution * thin) ** 2
+    point_area = (dataset.target.grid_resolution) ** 2
     K = point_area * rho
     sigma_hat = np.sqrt(sigma**2 / K**2)
 
@@ -229,13 +226,14 @@ def main():
         )
     )
 
+    print(chains)
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     stats = run_sampling(sampler, inits, accelerator=accelerator)
     samples = stats["samples"]  # (C, S, D)
     lp = stats.get("lp")  # (C, S) or None
     step = stats.get("step_size")  # (C, S) or None
     accept = stats.get("accept")  # (C, S) or None
-    rank_zero_info("\n\n\n\n\n\n\n\n\n\n\n\n")
+    rank_zero_info("\n\n\n\n")
     end = time.time()
     time_elapsed = end - start
     rank_zero_info(f"Sampling took {time_elapsed:.0f}s")

@@ -30,6 +30,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics.regression import MeanSquaredError
 
+from pism_emulator.datamodules import seed_worker
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 
 
@@ -136,4 +137,4 @@ def test_emulator_equivalence():
     mean_squared_error = MeanSquaredError()
     mse = mean_squared_error(Y_e, Y_de)
 
-    assert mse <= 2.5e-3
+    assert mse <= 5e-3

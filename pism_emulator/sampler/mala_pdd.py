@@ -219,6 +219,9 @@ def make_fake_climate_2d(filename=None):
 
 
 def draw_samples(n_samples=1_0000, random_seed=2):
+    """
+    Draw samples.
+    """
     np.random.seed(random_seed)
 
     distributions = {
@@ -229,15 +232,6 @@ def draw_samples(n_samples=1_0000, random_seed=2):
         "temp_snow": uniform(loc=-2.0, scale=2.0),  # uniform between 0 and 1
         "temp_rain": uniform(loc=0.0, scale=2.0),  # uniform between 0 and 1
     }
-
-    # distributions = {
-    #     "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
-    #     "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-    #     "refreeze_snow": uniform(loc=0.25, scale=0.5),  # uniform between 0 and 1
-    #     "refreeze_ice": uniform(loc=0.0, scale=0.25),  # uniform between 0 and 1
-    #     "temp_snow": uniform(loc=0.0, scale=1.0),  # uniform between 0 and 1
-    #     "temp_rain": uniform(loc=1.0, scale=1.0),  # uniform between 0 and 1
-    # }
 
     # Names of all the variables
     keys = [x for x in distributions.keys()]
@@ -265,22 +259,21 @@ def draw_samples(n_samples=1_0000, random_seed=2):
 
 
 def main():
+    """
+    Main.
+    """
     parser = ArgumentParser()
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
-    tmp, _ = parser.parse_known_args()
     parser.add_argument("--accelerator", type=str, default="auto")
-    parser.add_argument("--checkpoint", default=False, action="store_true")
     parser.add_argument("--chains", type=int, default=1)
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--burn", type=int, default=1000)
-    parser.add_argument("--samples", type=int, default=100000)
+    parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--alpha", type=float, default=0.01)
 
     args = parser.parse_args()
     hparams = vars(args)
 
     accelerator = args.accelerator
-    checkpoint = args.checkpoint
     alpha = args.alpha
     model_index = args.model_index
     chains = args.chains
@@ -301,6 +294,8 @@ def main():
     print("")
 
     prior_df = draw_samples(n_samples=10_000)
+    X_keys = prior_df.columns
+
     ds = make_fake_climate_2d()
     predictor_vars = ["accumulation", "melt", "runoff", "refreeze", "smb"]
 
@@ -309,15 +304,6 @@ def main():
     sd = ds["stdv"].to_numpy()
     model_true = PDD(temp, precip, sd)
     model = PDD(temp, precip, sd, predictor_vars=predictor_vars)
-
-    X_keys = [
-        "f_snow",
-        "f_ice",
-        "refreeze_snow",
-        "refreeze_ice",
-        "temp_snow",
-        "temp_rain",
-    ]
 
     f_snow_val = 3.2
     f_ice_val = 8.5
@@ -345,7 +331,7 @@ def main():
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
-    sigma = 0.01
+    sigma = 0.1
     sh = torch.ones_like(Y_true)
     sigma_hat = sh * torch.tensor([sigma])
 

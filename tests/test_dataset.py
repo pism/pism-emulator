@@ -23,9 +23,9 @@ import numpy as np
 from numpy.testing import assert_array_almost_equal, assert_equal
 
 from pism_emulator.datasets import (
+    LegacyPISMDataset,
     PISMDataset,
     PISMInterpolatedDataset,
-    LegacyPISMDataset,
 )
 
 

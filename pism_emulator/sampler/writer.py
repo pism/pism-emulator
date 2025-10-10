@@ -22,17 +22,13 @@ Write predictions to disk
 
 from __future__ import annotations
 
-import datetime as dt
-import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
+from typing import Any, Iterable
 
 import lightning as pl
 import torch
-from lightning.pytorch.callbacks import BasePredictionWriter, Timer
-from lightning.pytorch.utilities.rank_zero import rank_zero_info
+from lightning.pytorch.callbacks import BasePredictionWriter
 from torch import Tensor
-from torch.utils.data import DataLoader
 
 
 class DiskPredictionWriter(BasePredictionWriter):
@@ -99,7 +95,7 @@ class DiskPredictionWriter(BasePredictionWriter):
         if prediction is None:
             return
 
-        preds: Iterable[Dict[str, Any]]
+        preds: Iterable[dict[str, Any]]
         preds = prediction if isinstance(prediction, (list, tuple)) else [prediction]
         rank = int(getattr(trainer, "global_rank", 0))
 
@@ -109,7 +105,7 @@ class DiskPredictionWriter(BasePredictionWriter):
             chain = int(p["chain"])
             samples: Tensor = p["samples"]  # (S, D) CPU tensor
 
-            rec: Dict[str, Any] = {"chain": chain, "rank": rank, "samples": samples}
+            rec: dict[str, Any] = {"chain": chain, "rank": rank, "samples": samples}
             for key in ("lp", "step_size", "accept"):
                 if key in p and p[key] is not None:
                     rec[key] = p[key]  # (S,) CPU tensors
@@ -153,7 +149,7 @@ def load_pred_dir(pred_dir: str | Path, expected_chains: int | None = None) -> T
 
 def load_pred_dir_with_stats(
     pred_dir: str | Path, expected_chains: int | None = None
-) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None, Tensor | None, Tensor | None]:
     """Load per-chain predictions and optional statistics from disk.
 
     Parameters
