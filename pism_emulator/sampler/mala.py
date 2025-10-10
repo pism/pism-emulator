@@ -441,38 +441,84 @@ class MALASamplerModule(pl.LightningModule):
 
     @torch.enable_grad()
     def _local_geometry(
-        self, X: Tensor
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        self, X: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Compute local geometry at ``X``: negative log-posterior, gradient and Hessian.
-
-        Parameters
-        ----------
-        X : torch.Tensor
-            Current state (requires grad).
-
-        Returns
-        -------
-        tuple
-            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)``.
+        Compute local geometry at X: (log_pi, g, Hpos, Hinv, log_det_Hinv),
+        without using torch.linalg.eigh (MPS-safe).
         """
+        # 1) Negative log-posterior and gradient
         log_pi = self.neg_log_prob(X)
         self.hessian_counter += 1
 
         g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=False)[0]
+
+        # 2) Hessian (symmetrize for safety)
         H = torch.autograd.functional.hessian(
             self.neg_log_prob, X, vectorize=False, create_graph=False
         )
         H = 0.5 * (H + H.T)
 
-        # Eigen decomposition (symmetric)
-        lam, Q = torch.linalg.eigh(H)
-        lam = lam.real
-        Q = Q.real
-        lam_p = torch.sqrt(lam * lam + self._eps_eig)
-        Hpos = Q @ torch.diag(lam_p) @ Q.T
-        Hinv = Q @ torch.diag(1.0 / lam_p) @ Q.T
-        log_det_Hinv = torch.sum(torch.log(1.0 / lam_p))
+        # 3) Build SPD matrix S = H^2 + eps*I (but we’ll add eps adaptively below)
+        d = X.numel()
+        I = torch.eye(d, device=H.device, dtype=H.dtype)
+        S = H @ H
+        S = 0.5 * (S + S.T)  # enforce symmetry to reduce numerical asymmetry
+
+        # ---- helper: Newton–Schulz matrix sqrt & inverse sqrt (all on-device) ----
+        def _mat_sqrt_inv_sqrt(
+            A: torch.Tensor, iters: int = 6
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            # Scale for better convergence (Frobenius norm is fine and MPS-supported)
+            scale = A.norm(p="fro").clamp_min(1e-12)
+            As = A / scale
+
+            Y = As.clone()  # approx sqrt(As)
+            Z = torch.eye(d, device=A.device, dtype=A.dtype)  # approx invsqrt(As)
+
+            for _ in range(iters):
+                T = 0.5 * (3.0 * I - Z @ Y)
+                Y = Y @ T
+                Z = T @ Z
+
+            root = Y * torch.sqrt(scale)
+            invrt = Z / torch.sqrt(scale)
+            return root, invrt
+
+        # 4) Adaptive jitter so Cholesky(S + eps I) succeeds for log-det
+        eps = float(getattr(self, "_eps_eig", 1e-8))
+        growth = 10.0
+        max_tries = 6
+
+        Hpos = Hinv = log_det_Hinv = None  # will be set below
+
+        for _ in range(max_tries):
+            S_eps = S + eps * I
+            try:
+                # Cholesky is fast/stable and implemented on MPS
+                L = torch.linalg.cholesky(S_eps)
+                # Now compute √ and √⁻¹ with NS iteration (matmuls only → MPS OK)
+                Hpos, Hinv = _mat_sqrt_inv_sqrt(S_eps, iters=6)
+                # log|Hinv| = -1/2 * log|S_eps|
+                log_det_S = 2.0 * torch.log(torch.diagonal(L)).sum()
+                log_det_Hinv = -0.5 * log_det_S
+                break
+            except RuntimeError:
+                # Leading minor not PD or other numeric issue: increase jitter
+                eps *= growth
+        else:
+            # Final fallback: get logdet robustly on CPU via slogdet (dimension is tiny)
+            S_cpu = (S + eps * I).detach().cpu()
+            sign, logabs = torch.linalg.slogdet(S_cpu)  # works for SPD/PSD
+            if sign.item() <= 0:
+                eps *= growth
+                sign, logabs = torch.linalg.slogdet(
+                    (S_cpu + eps * torch.eye(d)).contiguous()
+                )
+            log_det_Hinv = (-0.5 * logabs).to(S.device)
+            # Still produce Hpos/Hinv on-device
+            Hpos, Hinv = _mat_sqrt_inv_sqrt(S + eps * I, iters=7)
+
         return log_pi, g, Hpos, Hinv, log_det_Hinv
 
     @staticmethod

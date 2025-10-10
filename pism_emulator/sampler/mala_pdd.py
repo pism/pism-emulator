@@ -27,7 +27,6 @@ from os.path import join
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Sequence
 
-import xarray as xr
 import arviz as az
 import lightning as pl
 import matplotlib as mpl
@@ -35,20 +34,18 @@ import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
 import torch
+import xarray as xr
 from joblib import Parallel, delayed
 from lightning import LightningModule
 from lightning.pytorch.callbacks import Timer
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+from pyDOE3 import lhs
 from pyfiglet import Figlet
 from scipy.stats import beta
+from scipy.stats.distributions import uniform
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-
-from scipy.stats import beta
-from scipy.stats.distributions import uniform
-from pyDOE3 import lhs
-
 
 from pism_emulator.models.pdd import PDD
 from pism_emulator.sampler.mala import ChainInitDataset, MALASamplerModule, run_sampling
@@ -303,7 +300,7 @@ def main():
     print("-" * 80)
     print("")
 
-    prior_df = draw_samples(n_samples=20_000)
+    prior_df = draw_samples(n_samples=10_000)
     ds = make_fake_climate_2d()
     predictor_vars = ["accumulation", "melt", "runoff", "refreeze", "smb"]
 
@@ -312,6 +309,15 @@ def main():
     sd = ds["stdv"].to_numpy()
     model_true = PDD(temp, precip, sd)
     model = PDD(temp, precip, sd, predictor_vars=predictor_vars)
+
+    X_keys = [
+        "f_snow",
+        "f_ice",
+        "refreeze_snow",
+        "refreeze_ice",
+        "temp_snow",
+        "temp_rain",
+    ]
 
     f_snow_val = 3.2
     f_ice_val = 8.5
@@ -392,35 +398,25 @@ def main():
     chains_np = [np.asarray(c) for c in samples]  # each (S, D)
     arr = np.stack(chains_np, axis=0)  # (C, S, D)
 
-    # Denorm once
-    X_mean = np.asarray(dataset.samples.X_mean.cpu().numpy(), dtype=np.float32)
-    X_std = np.asarray(dataset.samples.X_std.cpu().numpy(), dtype=np.float32)
-    arr_denorm = arr * X_std[None, None, :] + X_mean[None, None, :]
-
-    C, S, D = arr_denorm.shape
+    C, S, D = arr.shape
     coords = {"chain": np.arange(C), "draw": np.arange(S)}
-    dims = {name: ["chain", "draw"] for name in dataset.samples.X_keys}
+    dims = {name: ["chain", "draw"] for name in X_keys}
 
-    posterior = {
-        name: arr_denorm[:, :, i] for i, name in enumerate(dataset.samples.X_keys)
-    }
+    posterior = {name: arr[:, :, i] for i, name in enumerate(X_keys)}
 
     S_prior_total, D = X_prior.shape
     C_prior = C  # match posterior chains
     assert S_prior_total % C_prior == 0, "prior samples must split evenly across chains"
     S_prior = S_prior_total // C_prior
 
-    X_prior_reshaped = (
-        X_prior.reshape(C_prior, S_prior, D) * X_std[None, None, :]
-        + X_mean[None, None, :]
-    )
+    X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
 
     prior_coords = {"chain": np.arange(C_prior), "draw": np.arange(S_prior)}
-    prior_dims = {name: ["chain", "draw"] for name in dataset.samples.X_keys}
+    prior_dims = {name: ["chain", "draw"] for name in X_keys}
 
     prior = {
         name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)
-        for i, name in enumerate(dataset.samples.X_keys)
+        for i, name in enumerate(X_keys)
     }
 
     idata = az.from_dict(posterior=posterior, prior=prior)
@@ -469,10 +465,10 @@ def main():
     az.style.use(["arviz-white", "arviz-greenish"])
     with mpl.rc_context(rc=rcparams):
         # variance across chain & draw
-        var_all = np.nanvar(arr_denorm, axis=(0, 1))
+        var_all = np.nanvar(arr, axis=(0, 1))
         keep = var_all > 1e-12
         if np.any(keep):
-            var_names = [dataset.samples.X_keys[i] for i in np.flatnonzero(keep)]
+            var_names = [X_keys[i] for i in np.flatnonzero(keep)]
             axes = az.plot_trace(
                 idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
             )  # <-- key fix: kind/hist_kwargs at top level
