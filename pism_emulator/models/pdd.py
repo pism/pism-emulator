@@ -950,10 +950,6 @@ class PDD(pl.LightningModule):
             Number of time points to interpolate to over a year (>=1). Default is 12.
         interpolate_rule : str, optional
             Interpolation kind for 1D interpolation (e.g., ``"linear"``, ``"cubic"``).
-        temp_snow : float, optional
-            Temperature (°C) at/below which all precipitation is snow. Default -1.0.
-        temp_rain : float, optional
-            Temperature (°C) at/above which all precipitation is rain. Default 3.0.
         """
         super().__init__()
 
@@ -994,20 +990,29 @@ class PDD(pl.LightningModule):
 
     def forward(self, x: Sequence[Tensor], **kwargs) -> tuple[Tensor, Tensor]:
         """
-        Forward pass placeholder.
+        Compute PDD melt and snowfall accumulation from parameter tensors.
 
         Parameters
         ----------
-        x : sequence of Tensor
-            Parameter tensors in the order:
+        x : Sequence[torch.Tensor]
+            Ordered sequence of six parameter tensors:
             ``(pdd_factor_snow, pdd_factor_ice, refreeze_snow, refreeze_ice, temp_snow, temp_rain)``.
+            Tensors are broadcast-compatible; each may be scalar-like or have shape ``(...)``.
+        **kwargs
+            Additional keyword arguments accepted for API compatibility.
+            Currently unused.
 
         Returns
         -------
-        tuple of Tensor
-            Example return of (pdd, accumulation). Implement as needed.
-        """
+        tuple of torch.Tensor
+            ``(pdd, accumulation)`` where each tensor has the broadcasted shape of the inputs.
 
+        Notes
+        -----
+        * ``temp_snow`` and ``temp_rain`` define the linear transition for the snowfall
+          fraction in ``[temp_snow, temp_rain]`` (clamped outside).
+        * Gradients flow through the linear region; clamps have zero gradients outside.
+        """
         (
             pdd_factor_snow,
             pdd_factor_ice,
@@ -1113,24 +1118,52 @@ class PDD(pl.LightningModule):
         return torch.clamp(teff, min=0.0) * 365.242198781
 
     def accumulation_rate(
-        self, temp: Tensor, precip: Tensor, temp_snow, temp_rain
+        self,
+        temp: Tensor,
+        precip: Tensor,
+        temp_snow: float | Tensor,
+        temp_rain: float | Tensor,
     ) -> Tensor:
         """
-        Compute snowfall accumulation rate from temperature and precipitation.
+        Compute snowfall accumulation rate from air temperature and precipitation.
 
-        The snow fraction decreases linearly from 1→0 between ``temp_snow`` and ``temp_rain``.
+        The snowfall fraction decreases linearly from 1 to 0 as temperature rises
+        from ``temp_snow`` to ``temp_rain``; values are clamped to ``[0, 1]``.
+        For ``temp <= temp_snow`` all precipitation is snow; for
+        ``temp >= temp_rain`` none is snow.
 
         Parameters
         ----------
-        temp : Tensor
-            Near-surface air temperature (°C).
-        precip : Tensor
-            Precipitation rate (m yr⁻¹).
+        temp : torch.Tensor
+            Near-surface air temperature (°C). Arbitrary shape ``(...)``.
+        precip : torch.Tensor
+            Precipitation rate (m yr⁻¹). Must be broadcast-compatible with ``temp``.
+        temp_snow : float or torch.Tensor
+            Temperature (°C) below which precipitation is entirely snow (fraction = 1).
+            Can be a scalar or broadcast-compatible tensor.
+        temp_rain : float or torch.Tensor
+            Temperature (°C) above which precipitation is entirely rain (fraction = 0).
+            Must satisfy ``temp_rain > temp_snow`` and be broadcast-compatible.
 
         Returns
         -------
-        Tensor
-            Accumulation rate (m yr⁻¹).
+        torch.Tensor
+            Snowfall accumulation rate (m yr⁻¹), same broadcasted shape and device
+            as the inputs.
+
+        Notes
+        -----
+        The snow fraction is
+        ``snowfrac = clamp((temp_rain - temp) / (temp_rain - temp_snow), 0, 1)``.
+        Gradients flow through the linear segment; the clamp introduces zero
+        gradients outside ``[temp_snow, temp_rain]``.
+
+        Examples
+        --------
+        >>> temp = torch.tensor([-5.0, 0.0, 2.0, 5.0])
+        >>> precip = torch.tensor([1.0, 1.0, 1.0, 1.0])  # m/yr
+        >>> accumulation_rate(temp, precip, temp_snow=-2.0, temp_rain=2.0)
+        tensor([1.0000, 0.5000, 0.0000, 0.0000])
         """
         reduced_temp = (temp_rain - temp) / (temp_rain - temp_snow)
         snowfrac = torch.clamp(reduced_temp, 0.0, 1.0)

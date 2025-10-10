@@ -305,8 +305,8 @@ def main():
     model_true = PDD(temp, precip, sd)
     model = PDD(temp, precip, sd, predictor_vars=predictor_vars)
 
-    f_snow_val = 3.2
-    f_ice_val = 8.5
+    f_snow_val = 4.2
+    f_ice_val = 8.0
     refreeze_snow_val = 0.6
     refreeze_ice_val = 0.2
     temp_snow_val = 0.0
