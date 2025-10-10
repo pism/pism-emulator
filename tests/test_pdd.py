@@ -22,7 +22,7 @@ import torch
 import xarray as xr
 from numpy.testing import assert_array_almost_equal
 
-from pism_emulator.models.pdd import ReferencePDDModel, TorchPDDModel
+from pism_emulator.models.pdd import PDD, ReferencePDDModel, TorchPDDModel
 
 
 def make_fake_climate() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -238,33 +238,50 @@ def test_torch_model():
     """
     temp, precip, sd = make_fake_climate()
 
+    pdd_factor_snow = 3.0
+    pdd_factor_ice = 8.0
+    refreeze_snow = 0.6
+    refreeze_ice = 0.1
+    temp_snow = 0.0
+    temp_rain = 2.0
+
     pdd_ref = ReferencePDDModel(
-        pdd_factor_snow=0.003,
-        pdd_factor_ice=0.008,
-        refreeze_snow=0.6,
-        refreeze_ice=0.1,
-        temp_snow=0.0,
-        temp_rain=2.0,
+        pdd_factor_snow=pdd_factor_snow / 1e3,
+        pdd_factor_ice=pdd_factor_ice / 1e3,
+        refreeze_snow=refreeze_snow,
+        refreeze_ice=refreeze_ice,
+        temp_snow=temp_snow,
+        temp_rain=temp_rain,
         interpolate_rule="linear",
-        interpolate_n=52,
+        interpolate_n=12,
     )
     result_ref = pdd_ref(temp, precip, sd)
 
     pdd_torch = TorchPDDModel(
-        pdd_factor_snow=3.0,
-        pdd_factor_ice=8.0,
-        refreeze_snow=0.6,
-        refreeze_ice=0.1,
-        temp_snow=0.0,
-        temp_rain=2.0,
+        pdd_factor_snow=pdd_factor_snow,
+        pdd_factor_ice=pdd_factor_ice,
+        refreeze_snow=refreeze_snow,
+        refreeze_ice=refreeze_ice,
+        temp_snow=temp_snow,
+        temp_rain=temp_rain,
         interpolate_rule="linear",
-        interpolate_n=52,
+        interpolate_n=12,
     )
     result_torch = pdd_torch.forward(temp, precip, sd)
 
+    pdd_torch_pl = PDD(temp, precip, sd)
+    x = torch.tensor(
+        [
+            pdd_factor_snow,
+            pdd_factor_ice,
+            refreeze_snow,
+            refreeze_ice,
+            temp_snow,
+            temp_rain,
+        ]
+    )
+    result_pl = pdd_torch_pl.forward(x)
     for m_var in [
-        "temp",
-        "prec",
         "accumulation_rate",
         "inst_pdd",
         "snow_depth",
@@ -275,6 +292,7 @@ def test_torch_model():
     ]:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
+        assert_array_almost_equal(result_ref[m_var], result_pl[m_var], decimal=3)
 
 
 def test_torch_model_2d():
@@ -287,33 +305,50 @@ def test_torch_model_2d():
     precip = ds["prec"].to_numpy()
     sd = ds["stdv"].to_numpy()
 
+    pdd_factor_snow = 3.0
+    pdd_factor_ice = 8.0
+    refreeze_snow = 0.6
+    refreeze_ice = 0.1
+    temp_snow = 0.0
+    temp_rain = 2.0
+
     pdd_ref = ReferencePDDModel(
-        pdd_factor_snow=0.003,
-        pdd_factor_ice=0.008,
-        refreeze_snow=0.6,
-        refreeze_ice=0.1,
-        temp_snow=0.0,
-        temp_rain=2.0,
+        pdd_factor_snow=pdd_factor_snow / 1e3,
+        pdd_factor_ice=pdd_factor_ice / 1e3,
+        refreeze_snow=refreeze_snow,
+        refreeze_ice=refreeze_ice,
+        temp_snow=temp_snow,
+        temp_rain=temp_rain,
         interpolate_rule="linear",
-        interpolate_n=52,
+        interpolate_n=12,
     )
     result_ref = pdd_ref(temp, precip, sd)
 
     pdd_torch = TorchPDDModel(
-        pdd_factor_snow=3.0,
-        pdd_factor_ice=8.0,
-        refreeze_snow=0.6,
-        refreeze_ice=0.1,
-        temp_snow=0.0,
-        temp_rain=2.0,
+        pdd_factor_snow=pdd_factor_snow,
+        pdd_factor_ice=pdd_factor_ice,
+        refreeze_snow=refreeze_snow,
+        refreeze_ice=refreeze_ice,
+        temp_snow=temp_snow,
+        temp_rain=temp_rain,
         interpolate_rule="linear",
-        interpolate_n=52,
+        interpolate_n=12,
     )
     result_torch = pdd_torch.forward(temp, precip, sd)
 
+    pdd_torch_pl = PDD(temp, precip, sd)
+    x = torch.tensor(
+        [
+            pdd_factor_snow,
+            pdd_factor_ice,
+            refreeze_snow,
+            refreeze_ice,
+            temp_snow,
+            temp_rain,
+        ]
+    )
+    result_pl = pdd_torch_pl.forward(x)
     for m_var in [
-        "temp",
-        "prec",
         "accumulation_rate",
         "inst_pdd",
         "snow_depth",
@@ -324,6 +359,7 @@ def test_torch_model_2d():
     ]:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
+        assert_array_almost_equal(result_ref[m_var], result_pl[m_var], decimal=3)
 
 
 def test_snow_accumulation():

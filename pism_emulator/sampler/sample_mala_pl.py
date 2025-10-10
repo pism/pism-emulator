@@ -81,7 +81,6 @@ def main():
     parser.add_argument("--chains", type=int, default=1)
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_iterations", type=int, default=100000)
     parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
     parser.add_argument("--burn", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=100000)
@@ -212,7 +211,7 @@ def main():
         X_0,
     )
 
-    X_map = X_map.detach().to(dtype=torch.float32, device="cpu")
+    X_map = X_map.detach().to(dtype=torch.float32)
     rank_zero_info("-" * 80)
     rank_zero_info("MAP Point")
     rank_zero_info("-" * 80)

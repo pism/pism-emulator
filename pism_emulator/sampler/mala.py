@@ -31,6 +31,7 @@ from typing import Callable, Iterable, Literal, Optional, Sequence
 import lightning as pl
 import numpy as np
 import torch
+from lightning.pytorch.callbacks import Timer
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
@@ -641,7 +642,7 @@ class MALASamplerModule(pl.LightningModule):
         torch.Tensor
             The optimized MAP point (same device as module buffers).
         """
-        X = X.detach().to(self.device, dtype=torch.float32).requires_grad_(True)
+        X = X.detach().to(device=self.device, dtype=torch.float32).requires_grad_(True)
 
         def closure() -> Tensor:
             """
@@ -1116,7 +1117,7 @@ def run_sampling(
         )
         _ = trainer.predict(sampler, dl, return_predictions=False)
         wall_secs = time.perf_counter() - wall_start
-        print(
+        rank_zero_info(
             f"[predict/ddp_spawn] Elapsed: {wall_secs:.2f}s "
             f"({str(dt.timedelta(seconds=int(wall_secs)))})"
         )

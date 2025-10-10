@@ -15,7 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-
+"""
+Test DEBM.
+"""
 
 import numpy as np
 import torch
@@ -42,7 +44,7 @@ def test_year_fraction():
 
 def test_CalovGreveIntegrand():
     """
-    Test the CalovGreveIntegrand
+    Test the CalovGreveIntegrand.
     """
 
     sigma = np.array([2.0, 0.0, 1.0])
@@ -61,7 +63,7 @@ def test_CalovGreveIntegrand():
 
 def test_hour_angle():
     """
-    Test the calculation of the hour angle
+    Test the calculation of the hour angle.
     """
 
     phi = np.array([0.0, np.pi / 4.0, np.pi / 2.0])
@@ -81,7 +83,7 @@ def test_hour_angle():
 
 def test_solar_longitude():
     """
-    Test solar longitude
+    Test solar longitude.
     """
     year_fraction = np.array([0.0, 1.0 / 12.0, 1.0])
     eccentricity = np.array([0.9, 1.0, 1.0])
@@ -106,7 +108,7 @@ def test_solar_longitude():
 
 def test_solar_declination_present_day():
     """
-    Test solar declination present day
+    Test solar declination present day.
     """
     year_fraction = np.array([0.0, 1.0 / 12.0, 1.0])
 
@@ -125,7 +127,7 @@ def test_solar_declination_present_day():
 
 def test_solar_declination_paleo():
     """
-    Test solar declination paleo
+    Test solar declination paleo.
     """
 
     obliquity = np.array([np.pi / 4])
@@ -142,7 +144,7 @@ def test_solar_declination_paleo():
 
 def test_distance_factor_present_day():
     """
-    Test distance factor present day
+    Test distance factor present day.
     """
     year_fraction = np.array([0.0, 1.0 / 12.0, 1.0])
 
@@ -157,7 +159,7 @@ def test_distance_factor_present_day():
 
 def test_distance_factor_paleo():
     """
-    Test distance factor paleo
+    Test distance factor paleo.
     """
 
     eccentricity = np.array([0.0167, 0.03])
@@ -175,7 +177,7 @@ def test_distance_factor_paleo():
 
 def test_insolation():
     """
-    Test insolation
+    Test insolation.
     """
 
     solar_constant = np.array([1361.0])
@@ -199,7 +201,7 @@ def test_insolation():
 
 def test_orbital_parameters():
     """
-    Test orbital parameters
+    Test orbital parameters.
     """
     time = np.array([2022.25])
 
@@ -242,7 +244,7 @@ def test_orbital_parameters():
 
 def test_albedo():
     """
-    Test albedo
+    Test albedo.
     """
 
     debm: DEBMModel = DEBMModel()
@@ -258,7 +260,7 @@ def test_albedo():
 
 def test_atmospshere_transmissivity():
     """
-    Test atmosphere transmissivity
+    Test atmosphere transmissivity.
     """
 
     elevation = np.array([0.0, 1000.0, 2000.0])
@@ -270,7 +272,7 @@ def test_atmospshere_transmissivity():
 
 def test_melt():
     """
-    Test melt function
+    Test melt function.
     """
 
     year_fraction = 0
@@ -312,7 +314,7 @@ def test_melt():
 
 def test_snow_accumulation():
     """
-    The snow accumulation function
+    The snow accumulation function.
     """
 
     T = np.array([-10, -5, 0, 1, 4, 8]) + 273.15
@@ -335,7 +337,7 @@ def test_snow_accumulation():
 
 def test_step():
     """
-    Test step
+    Test step.
     """
 
     max_melt = np.array([2.0, 0.0, 12.0])
@@ -367,7 +369,7 @@ def test_step():
 
 def test_debm():
     """
-    The snow accumulation function
+    The snow accumulation function.
     """
 
     T = (

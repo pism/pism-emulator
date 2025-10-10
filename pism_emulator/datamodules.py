@@ -189,7 +189,6 @@ class PISMDataModule(pl.LightningDataModule):
             generator=self._dl_generator,
             persistent_workers=True,
             pin_memory=True,
-            prefetch_factor=2,
         )
 
     def train_dataloader(self) -> DataLoader:
@@ -309,10 +308,6 @@ class PDDConfig:
         Input features of shape ``(N_samples, N_features)``.
     Y : torch.Tensor
         Targets of shape ``(N_samples, ...)`` (scalars or fields).
-    omegas : torch.Tensor
-        Per-sample weights, shape ``(N_samples,)`` or ``(N_samples, 1)``.
-    omegas_0 : torch.Tensor
-        Optional auxiliary weights per sample (same length as ``omegas``).
     batch_size : int, default=128
         Batch size for train/val.
     train_size : float, default=0.9
@@ -323,8 +318,6 @@ class PDDConfig:
 
     X: Tensor
     Y: Tensor
-    omegas: Tensor
-    omegas_0: Tensor
     batch_size: int = 128
     train_size: float = 0.9
     num_workers: int = 0
@@ -342,7 +335,7 @@ class PDDDataModule(pl.LightningDataModule):
 
     Parameters
     ----------
-    X, Y, omegas, omegas_0 : torch.Tensor
+    X, Y : torch.Tensor
         See `PDDConfig` for shapes.
     batch_size : int, default=128
         Batch size for all DataLoaders.
@@ -405,10 +398,9 @@ class PDDDataModule(pl.LightningDataModule):
         stage : str or None, optional
             Lightning stage hint (``'fit'``, ``'validate'``, etc.). Unused here.
         """
-        all_data = TensorDataset(
-            self.cfg.X, self.cfg.Y, self.cfg.omegas, self.cfg.omegas_0
-        )
-        self._all = all_data
+        all_data = TensorDataset(self.cfg.X, self.cfg.Y)
+        self._all = ds_all
+        self._train, self._val = ds_all, ds_all
 
         train_ds, val_ds = train_test_split(
             all_data, train_size=self.cfg.train_size, random_state=0

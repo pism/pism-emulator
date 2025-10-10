@@ -25,12 +25,7 @@ from numpy.testing import assert_array_almost_equal
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression
 
-from pism_emulator.stats import (
-    calc_bic,
-    gelman_rubin,
-    kl_divergence,
-    stepwise_bic,
-)
+from pism_emulator.stats import calc_bic, gelman_rubin, kl_divergence, stepwise_bic
 
 # Test data from DeConto and Pollard (2016):
 # Contribution of Antarctica to past and future sea-level rise
