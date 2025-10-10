@@ -52,11 +52,6 @@ from tqdm.auto import tqdm as _tqdm
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
 
 
-def _thin_sel(self) -> dict[str, slice]:
-    s = self.cfg.thin
-    return {"x": slice(None, None, s), "y": slice(None, None, s)}
-
-
 def _sniff_engine(path: str) -> str:
     """
     Heuristically choose an xarray engine based on file signature.
@@ -362,9 +357,9 @@ class TargetData:
     Attributes
     ----------
     ny : int
-        Number of grid points in the ``y`` dimension after thinning.
+        Number of grid points in the ``y`` dimension.
     nx : int
-        Number of grid points in the ``x`` dimension after thinning.
+        Number of grid points in the ``x`` dimension.
     mask_2d : numpy.ndarray
         Boolean mask of shape ``(ny, nx)`` where ``True`` indicates masked cells
         (NaN or below correlation threshold).
@@ -468,8 +463,6 @@ class DatasetConfig:
         Optional per-node uncertainty variable in the target file.
     target_corr_threshold : float, default=25.0
         Threshold applied to ``target_corr_var``; values below this are masked.
-    thin : int, default=1
-        Spatial stride for downsampling along ``y`` and ``x`` when reading arrays.
     normalize_x : bool, default=True
         If ``True``, z-score normalize feature columns (per column mean/std).
     log_y : bool, default=True
@@ -499,7 +492,6 @@ class DatasetConfig:
     target_corr_var: str = "thickness"
     target_error_var: str = "velsurf_mag_error"
     target_corr_threshold: float = 25.0
-    thin: int = 1
     normalize_x: bool = True
     log_y: bool = True
     y_lim: tuple = (1, 100e3)
@@ -541,8 +533,6 @@ class PISMDataset(Dataset):
         Optional per-node error variable in the target file.
     target_corr_threshold : float, default=25.0
         Threshold for masking based on ``target_corr_var``.
-    thin : int, default=1
-        Spatial stride (downsampling) for the y/x dimensions.
     normalize_x : bool, default=True
         If True, z-score normalize the features (per column).
     log_y : bool, default=True
@@ -580,7 +570,6 @@ class PISMDataset(Dataset):
         target_corr_var: str = "thickness",
         target_error_var: str = "velsurf_mag_error",
         target_corr_threshold: float = 25.0,
-        thin: int = 1,
         normalize_x: bool = True,
         log_y: bool = True,
         y_lim: tuple = (1, 100e3),
@@ -616,7 +605,6 @@ class PISMDataset(Dataset):
             target_corr_var=target_corr_var,
             target_error_var=target_error_var,
             target_corr_threshold=float(target_corr_threshold),
-            thin=int(thin),
             normalize_x=bool(normalize_x),
             log_y=bool(log_y),
             y_lim=tuple(y_lim),
@@ -651,7 +639,6 @@ class PISMDataset(Dataset):
             f"n_parameters={smp.n_parameters}, "
             f"grid={tgt.ny}x{tgt.nx}, "
             f"observed_nodes={tgt.sparse_idx_1d.size}, "
-            f"thin={cfg.thin}, "
             f"normalize_x={cfg.normalize_x}, "
             f"log_y={cfg.log_y}, "
             f"training_var='{cfg.training_var}', "
@@ -683,7 +670,7 @@ class PISMDataset(Dataset):
             f"  target_file={repr(cfg.target_file)},\n"
             f"  training_var={repr(cfg.training_var)}, target_var={repr(cfg.target_var)},\n"
             f"  target_corr_var={repr(cfg.target_corr_var)}, target_error_var={repr(cfg.target_error_var)},\n"
-            f"  target_corr_threshold={cfg.target_corr_threshold}, thin={cfg.thin}, y_lim={cfg.y_lim},\n"
+            f"  target_corr_threshold={cfg.target_corr_threshold}, y_lim={cfg.y_lim},\n"
             f"  normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, epsilon={cfg.epsilon}, parallel={cfg.parallel},\n"
             f"  engines=(target={repr(cfg.target_engine)}, training={repr(cfg.training_engine)}),\n"
             f"  # Derived/runtime\n"
@@ -711,7 +698,7 @@ class PISMDataset(Dataset):
 
         ds = xr.open_dataset(
             cfg.target_file, decode_times=False, engine=cfg.target_engine
-        ).isel(**self._thin_sel())
+        )
 
         if cfg.target_var not in ds:
             raise KeyError(f"'{cfg.target_var}' not found in target file")
@@ -842,7 +829,6 @@ class PISMDataset(Dataset):
         n_nodes = tgt.sparse_idx_1d.size
         response = np.empty((n_runs, n_nodes), dtype=np.float32)
 
-        step = cfg.thin
         idx1d = tgt.sparse_idx_1d
 
         start_time = time()
@@ -855,7 +841,7 @@ class PISMDataset(Dataset):
                         _read_one_nc4,
                         files_by_id[i],
                         cfg.training_var,
-                        step,
+                        1,
                         idx1d,
                         cfg.epsilon,
                     ): row
@@ -917,17 +903,6 @@ class PISMDataset(Dataset):
         )
 
 
-def preprocess(ds, thinning_factor: int = 1, mapplane_vars: list[str] = ["x", "y"]):
-    """
-    Select slices from dataset
-    """
-    slices = {key: slice(0, value, thinning_factor) for key, value in ds.sizes.items()}
-    drop_dims = [key for (key, val) in slices.items() if key not in mapplane_vars]
-    for d in drop_dims:
-        del slices[d]
-    return ds.isel(slices)
-
-
 class LegacyPISMDataset(torch.utils.data.Dataset):
     def __init__(
         self,
@@ -974,7 +949,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         thinning_factor = self.thinning_factor
         rank_zero_info(f"Loading target {self.target_file}")
         ds = xr.open_dataset(self.target_file, decode_times=False)
-        ds = preprocess(ds, thinning_factor=thinning_factor)
         data = ds[self.target_var].squeeze()
         mask = data.isnull()
         data = np.nan_to_num(
@@ -1082,7 +1056,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0], decode_times=False)
-        ds0 = preprocess(ds0, thinning_factor=thinning_factor)
         _, ny, nx = ds0.variables[self.target_var].values.shape
 
         ds0.close()
@@ -1105,7 +1078,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
             enumerate(training_files), total=len(training_files)
         ):
             ds = xr.open_dataset(m_file, decode_times=False)
-            ds = preprocess(ds, thinning_factor=thinning_factor)
             data = np.squeeze(
                 np.nan_to_num(
                     ds.variables[training_var].values,
@@ -1158,7 +1130,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
 class PISMInterpolatedDataset(Dataset):
     """
     Like PISMDataset, but interpolates the target onto the first training file's grid
-    (after thinning) using xarray.interp_like, then builds the sparse node index
+    using xarray.interp_like, then builds the sparse node index
     from the interpolated target.
 
     Behavior mirrors PISMDataset for:
@@ -1179,7 +1151,6 @@ class PISMInterpolatedDataset(Dataset):
         target_corr_var: str = "thickness",
         target_error_var: str = "velsurf_mag_error",
         target_corr_threshold: float = 25.0,
-        thin: int = 1,
         normalize_x: bool = True,
         log_y: bool = True,
         y_lim: tuple = (1, 100e3),
@@ -1213,7 +1184,6 @@ class PISMInterpolatedDataset(Dataset):
             target_corr_var=target_corr_var,
             target_error_var=target_error_var,
             target_corr_threshold=float(target_corr_threshold),
-            thin=int(thin),
             normalize_x=bool(normalize_x),
             log_y=bool(log_y),
             y_lim=tuple(y_lim),
@@ -1245,15 +1215,10 @@ class PISMInterpolatedDataset(Dataset):
             "PISMInterpolatedDataset("
             f"n_samples={smp.n_samples}, n_parameters={smp.n_parameters}, "
             f"grid={tgt.ny}x{tgt.nx}, observed_nodes={tgt.sparse_idx_1d.size}, "
-            f"thin={cfg.thin}, normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, "
+            f"normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, "
             f"training_var='{cfg.training_var}', target_var='{cfg.target_var}', "
             f"engines=(target='{cfg.target_engine}', training='{cfg.training_engine}'))"
         )
-
-    # -------------------- Internals --------------------
-    def _thin_sel(self) -> dict[str, slice]:
-        s = self.cfg.thin
-        return {"x": slice(None, None, s), "y": slice(None, None, s)}
 
     @staticmethod
     def _parse_id(path: str) -> int:
@@ -1272,15 +1237,13 @@ class PISMInterpolatedDataset(Dataset):
         if not cfg.training_files:
             raise FileNotFoundError("No training files provided")
 
-        # 1) Open first training file -> reference grid (after thinning)
+        # 1) Open first training file -> reference grid
         ref_path = cfg.training_files[0]
         dref = xr.open_dataset(ref_path, decode_times=False, engine=cfg.training_engine)
         if cfg.training_var not in dref:
             dref.close()
             raise KeyError(f"'{cfg.training_var}' not found in {ref_path}")
-        ref_da = dref[cfg.training_var].isel(
-            **self._thin_sel()
-        )  # may be (y,x) or (..., y, x)
+        ref_da = dref[cfg.training_var]
 
         # Determine y/x dims robustly using last two dims
         ref_y_dim, ref_x_dim = ref_da.dims[-2], ref_da.dims[-1]
@@ -1303,7 +1266,7 @@ class PISMInterpolatedDataset(Dataset):
         if (tgt_y_dim, tgt_x_dim) != (ref_y_dim, ref_x_dim):
             targ_da = targ_da.rename({tgt_y_dim: ref_y_dim, tgt_x_dim: ref_x_dim})
 
-        # Interpolate (linear) onto the *thinned* ref grid
+        # Interpolate (linear) onto the ref grid
         targ_interp = targ_da.interp_like(ref_da.squeeze())
 
         # Optional extra masking via correlation field (interp it too, if present)
@@ -1424,7 +1387,6 @@ class PISMInterpolatedDataset(Dataset):
         n_nodes = tgt.sparse_idx_1d.size
         response = np.empty((n_runs, n_nodes), dtype=np.float32)
 
-        step = cfg.thin
         idx1d = tgt.sparse_idx_1d
 
         start_time = time()
@@ -1438,7 +1400,7 @@ class PISMInterpolatedDataset(Dataset):
                         _read_one_nc4,  # <-- same helper you already use
                         files_by_id[i],
                         cfg.training_var,
-                        step,
+                        1,
                         idx1d,
                         cfg.epsilon,
                     ): row
