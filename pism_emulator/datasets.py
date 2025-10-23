@@ -51,45 +51,6 @@ from tqdm.auto import tqdm as _tqdm
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
 
 
-def _sniff_engine(path: str) -> str:
-    """
-    Heuristically choose an xarray engine based on file signature.
-
-    Reads the first 8 bytes and returns an engine string suitable for
-    ``xarray.open_dataset``:
-
-    - NetCDF-4/HDF5 (magic ``\\x89HDF\\r\\n\\x1a\\n`` or ``b\"HDF\"``) → ``"h5netcdf"``
-    - NetCDF-3 (magic ``b\"CDF\\x01\"`` or ``b\"CDF\\x02\"``) → ``"scipy"``
-    - Fallback → ``"h5netcdf"``
-
-    Parameters
-    ----------
-    path : str
-        Path to the NetCDF file.
-
-    Returns
-    -------
-    str
-        Engine name: one of ``"h5netcdf"`` or ``"scipy"``.
-
-    Notes
-    -----
-    ``"h5netcdf"`` is preferred over ``"netcdf4"`` for NetCDF-4/HDF5 files for
-    improved stability and fewer dependency issues in many environments.
-    """
-    # HDF5 magic: \x89HDF\r\n\x1a\n ; NetCDF3: b"CDF\001" or b"CDF\002"
-    with open(path, "rb") as f:
-        sig = f.read(8)
-    if sig.startswith(b"\x89HDF") or sig.startswith(b"HDF"):
-        return (
-            "h5netcdf"  # NetCDF-4/HDF5 -> open with h5netcdf over netcdf4 for stability
-        )
-    if sig.startswith(b"CDF"):
-        return "scipy"  # NetCDF-3 -> scipy engine
-    # fallback: try h5netcdf first
-    return "h5netcdf"
-
-
 def _is_global_zero() -> bool:
     """
     Check whether the current process is global rank 0.
@@ -471,10 +432,8 @@ class DatasetConfig:
         Value used to replace NaNs after CF decode and masking.
     verbose : bool, default=False
         If ``True``, emit rank-0 progress messages.
-    target_engine : str or None, default=None
-        xarray engine for ``target_file``. If ``None``, detected via file signature.
-    training_engine : str or None, default=None
-        Engine hint for training files. Defaults to ``"h5netcdf"`` for stability.
+    engine : str, default="netcdf4"
+        xarray engine.
     parallel : bool, default=True
         If ``True``, read training files in parallel via a process pool.
     chunks_after : dict[str, int] or None, default=None
@@ -496,8 +455,7 @@ class DatasetConfig:
     y_lim: tuple = (1, 100e3)
     epsilon: float = 0.0
     verbose: bool = False
-    target_engine: str | None = None
-    training_engine: str | None = None
+    engine: str = "netcdf4"
     parallel: bool = True
     chunks_after: dict[str, int] | None = None
     dask_scheduler: str | None = None
@@ -540,10 +498,8 @@ class PISMDataset(Dataset):
         Replace NaNs with this epsilon when reading arrays.
     verbose : bool, default=False
         Print rank-0 progress.
-    target_engine : str or None, default=None
-        xarray engine for the target file; if None, chosen via signature sniffing.
-    training_engine : str or None, default=None
-        Engine for multi-file training reads; defaults to ``"h5netcdf"``.
+    target_engine : str, default="netcdf4"
+        xarray engine.
     parallel : bool, default=True
         If True, read training files in parallel with a process pool.
     chunks_after : dict or None, default=None
@@ -574,8 +530,7 @@ class PISMDataset(Dataset):
         y_lim: tuple = (1, 100e3),
         epsilon: float = 0.0,
         verbose: bool = False,
-        target_engine: str | None = None,
-        training_engine: str | None = None,
+        target_engine: str = "netcdf4",
         parallel: bool = True,
         chunks_after: dict[str, int] | None = None,
         dask_scheduler: str | None = None,
@@ -609,8 +564,7 @@ class PISMDataset(Dataset):
             y_lim=tuple(y_lim),
             epsilon=float(epsilon),
             verbose=bool(verbose),
-            target_engine=target_engine or _sniff_engine(target_file),
-            training_engine=training_engine or "h5netcdf",
+            engine=engine,
             parallel=bool(parallel),
             chunks_after=chunks_after or {},
             dask_scheduler=dask_scheduler,
@@ -642,7 +596,7 @@ class PISMDataset(Dataset):
             f"log_y={cfg.log_y}, "
             f"training_var='{cfg.training_var}', "
             f"target_var='{cfg.target_var}', "
-            f"engines=(target='{cfg.target_engine}', training='{cfg.training_engine}'))"
+            f"engines=(target='{cfg.engine}', training='{cfg.engine}'))"
         )
 
     def __repr__(self) -> str:
@@ -671,7 +625,7 @@ class PISMDataset(Dataset):
             f"  target_corr_var={repr(cfg.target_corr_var)}, target_error_var={repr(cfg.target_error_var)},\n"
             f"  target_corr_threshold={cfg.target_corr_threshold}, y_lim={cfg.y_lim},\n"
             f"  normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, epsilon={cfg.epsilon}, parallel={cfg.parallel},\n"
-            f"  engines=(target={repr(cfg.target_engine)}, training={repr(cfg.training_engine)}),\n"
+            f"  engines=(target={repr(cfg.engine)}, training={repr(cfg.engine)}),\n"
             f"  # Derived/runtime\n"
             f"  n_samples={smp.n_samples}, n_parameters={smp.n_parameters}, n_grid_points={smp.n_grid_points},\n"
             f"  grid_shape=({tgt.ny}, {tgt.nx}), observed_nodes={tgt.sparse_idx_1d.size}, "
@@ -692,11 +646,11 @@ class PISMDataset(Dataset):
         cfg = self.cfg
         if cfg.verbose:
             rank_zero_info(
-                f"Loading target {cfg.target_file} (engine={cfg.target_engine})"
+                f"Loading target {cfg.target_file} (engine={cfg.engine})"
             )
 
         ds = xr.open_dataset(
-            cfg.target_file, decode_times=False, engine=cfg.target_engine
+            cfg.target_file, decode_times=False, engine=cfg.engine
         )
 
         if cfg.target_var not in ds:
@@ -1152,8 +1106,7 @@ class PISMInterpolatedDataset(Dataset):
         log_y: bool = True,
         y_lim: tuple = (1, 100e3),
         epsilon: float = 0.0,
-        target_engine: str | None = None,
-        training_engine: str | None = None,
+        engine: str = "netcdf4",
         parallel: bool = True,
         chunks_after: dict[str, int] | None = None,
         dask_scheduler: str | None = None,
@@ -1185,8 +1138,7 @@ class PISMInterpolatedDataset(Dataset):
             log_y=bool(log_y),
             y_lim=tuple(y_lim),
             epsilon=float(epsilon),
-            target_engine=target_engine or _sniff_engine(target_file),
-            training_engine=training_engine or "h5netcdf",
+            engine=engine,
             parallel=bool(parallel),
             chunks_after=chunks_after or {},
             dask_scheduler=dask_scheduler,
@@ -1214,7 +1166,7 @@ class PISMInterpolatedDataset(Dataset):
             f"grid={tgt.ny}x{tgt.nx}, observed_nodes={tgt.sparse_idx_1d.size}, "
             f"normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, "
             f"training_var='{cfg.training_var}', target_var='{cfg.target_var}', "
-            f"engines=(target='{cfg.target_engine}', training='{cfg.training_engine}'))"
+            f"engines=(target='{cfg.engine}', training='{cfg.engine}'))"
         )
 
     @staticmethod
@@ -1227,14 +1179,14 @@ class PISMInterpolatedDataset(Dataset):
     def _load_target_interp_and_mask(self) -> TargetData:
         cfg = self.cfg
 
-        rank_zero_info(f"Loading target {cfg.target_file} (engine={cfg.target_engine})")
+        rank_zero_info(f"Loading target {cfg.target_file} (engine={cfg.engine})")
         rank_zero_info("   Establishing reference grid from first training file")
 
         if not cfg.training_files:
             raise FileNotFoundError("No training files provided")
 
         ref_path = cfg.training_files[0]
-        dref = xr.open_dataset(ref_path, decode_times=False, engine=cfg.training_engine)
+        dref = xr.open_dataset(ref_path, decode_times=False, engine=cfg.engine)
         if cfg.training_var not in dref:
             dref.close()
             raise KeyError(f"'{cfg.training_var}' not found in {ref_path}")
@@ -1245,7 +1197,7 @@ class PISMInterpolatedDataset(Dataset):
         nx = int(ref_da.sizes[ref_x_dim])
 
         dtgt = xr.open_dataset(
-            cfg.target_file, decode_times=False, engine=cfg.target_engine
+            cfg.target_file, decode_times=False, engine=cfg.engine
         )
         if cfg.target_var not in dtgt:
             dref.close()

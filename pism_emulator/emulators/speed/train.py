@@ -193,6 +193,7 @@ def main():
     parser.add_argument("--cutoff", type=float, default=None)
     parser.add_argument("--devices", default="auto")
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--engine", default="netcdf4")
     parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=1)
@@ -236,6 +237,7 @@ def main():
     cutoff = args.cutoff
     devices = args.devices
     emulator_dir = args.emulator_dir
+    engine = args.engine
     model_index = args.model_index
     num_workers = args.num_workers
     max_epochs = args.max_epochs
@@ -265,7 +267,7 @@ def main():
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        target_engine="netcdf4",
+        engine=engine,
         y_lim=y_lim,
         log_y=True,
         parallel=True,
