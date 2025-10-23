@@ -265,6 +265,7 @@ def main():
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
+        target_engine="netcdf4",
         y_lim=y_lim,
         log_y=True,
         parallel=True,

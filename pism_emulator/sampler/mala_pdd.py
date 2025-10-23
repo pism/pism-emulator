@@ -227,10 +227,10 @@ def draw_samples(n_samples=1_0000, random_seed=2):
     distributions = {
         "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0.0, scale=0.6),  # uniform between 0 and 1
-        "refreeze_ice": uniform(loc=0.0, scale=0.01),  # uniform between 0 and 1
+        "refreeze_snow": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 1
+        "refreeze_ice": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 1
         "temp_snow": uniform(loc=-2.0, scale=2.0),  # uniform between 0 and 1
-        "temp_rain": uniform(loc=0.0, scale=2.0),  # uniform between 0 and 1
+        "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
     }
 
     # Names of all the variables
@@ -309,8 +309,8 @@ def main():
     f_ice_val = 8.0
     refreeze_snow_val = 0.6
     refreeze_ice_val = 0.2
-    temp_snow_val = 0.0
-    temp_rain_val = 2.0
+    temp_snow_val = -0.5
+    temp_rain_val = 1.6
     x_true = torch.tensor(
         [
             f_snow_val,
@@ -342,6 +342,7 @@ def main():
         X_max,
         Y_true,
         sigma_hat,
+        alpha=alpha,
         log_y=False,
         metric_mode="current",
         delayed_accept=False,

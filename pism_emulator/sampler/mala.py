@@ -440,6 +440,42 @@ class MALASamplerModule(pl.LightningModule):
         return -(self.alpha * log_like + log_prior)
 
     @torch.enable_grad()
+    def _local_geometry_eig(
+        self, X: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """
+        Compute local geometry at ``X``: negative log-posterior, gradient and Hessian.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (requires grad).
+
+        Returns
+        -------
+        tuple
+            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)``.
+        """
+        log_pi = self.neg_log_prob(X)
+        self.hessian_counter += 1
+
+        g = torch.autograd.grad(log_pi, X, retain_graph=True, create_graph=False)[0]
+        H = torch.autograd.functional.hessian(
+            self.neg_log_prob, X, vectorize=False, create_graph=False
+        )
+        H = 0.5 * (H + H.T)
+
+        # Eigen decomposition (symmetric)
+        lam, Q = torch.linalg.eigh(H)
+        lam = lam.real
+        Q = Q.real
+        lam_p = torch.sqrt(lam * lam + self._eps_eig)
+        Hpos = Q @ torch.diag(lam_p) @ Q.T
+        Hinv = Q @ torch.diag(1.0 / lam_p) @ Q.T
+        log_det_Hinv = torch.sum(torch.log(1.0 / lam_p))
+        return log_pi, g, Hpos, Hinv, log_det_Hinv
+
+    @torch.enable_grad()
     def _local_geometry(
         self, X: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
