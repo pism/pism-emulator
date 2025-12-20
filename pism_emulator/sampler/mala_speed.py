@@ -72,7 +72,9 @@ rcparams = {
 }
 
 
-def main():
+if __name__ == "__main__":
+    __spec__ = None  # type: ignore
+
     parser = ArgumentParser()
     parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
     tmp, _ = parser.parse_known_args()
@@ -133,12 +135,12 @@ def main():
 
     f = Figlet(font="standard")
     banner = f.renderText("pism-emulator")
-    print("=" * 80)
-    print(banner)
-    print("=" * 80)
-    print(f"MALA Sampler")
-    print("-" * 80)
-    print("")
+    rank_zero_info("=" * 80)
+    rank_zero_info(banner)
+    rank_zero_info("=" * 80)
+    rank_zero_info(f"MALA Sampler")
+    rank_zero_info("-" * 80)
+    rank_zero_info("")
 
     dataset = PISMDataset(
         training_files=training_files,
@@ -226,7 +228,6 @@ def main():
         )
     )
 
-    print(chains)
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     stats = run_sampling(sampler, inits, accelerator=accelerator)
     samples = stats["samples"]  # (C, S, D)
@@ -332,8 +333,3 @@ def main():
             plt.close("all")
         else:
             rank_zero_info("All parameters are (near) constant; skipping trace plot.")
-
-
-if __name__ == "__main__":
-    __spec__ = None  # type: ignore
-    main()

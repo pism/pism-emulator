@@ -25,9 +25,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from sklearn.base import BaseEstimator, clone
 from sklearn.linear_model import LinearRegression
+
+ArrayLike = npt.NDArray[np.floating] | npt.NDArray[np.integer]
 
 
 def _as_df(
@@ -112,7 +115,7 @@ def calc_bic(
 
     Returns
     -------
-    BIC : float
+    float
         Bayesian Information Criterion (smaller is better).
 
     Notes
@@ -392,67 +395,135 @@ def stepwise_bic(
     return selected, model_curr, X_curr, history
 
 
-def gelman_rubin(p: np.ndarray, q: np.ndarray):
+def gelman_rubin(p: npt.ArrayLike, q: npt.ArrayLike) -> float:
     r"""
-    Returns estimate of R for a set of two traces.
-    The Gelman-Rubin diagnostic tests for lack of convergence by comparing
-    the variance between multiple chains to the variance within each chain.
-    If convergence has been achieved, the between-chain and within-chain
-    variances should be identical. To be most effective in detecting evidence
-    for nonconvergence, each chain should have been initialized to starting
-    values that are dispersed relative to the target distribution.
+    Compute the Gelman–Rubin convergence diagnostic (:math:`\hat{R}`) for two chains.
+
+    The Gelman–Rubin diagnostic (also called the potential scale reduction factor)
+    tests for lack of convergence by comparing variance **between** chains to the
+    variance **within** chains. When both chains have converged to the same target
+    distribution, the within-chain and between-chain variance components should
+    be similar, and :math:`\hat{R}` approaches 1.
 
     Parameters
     ----------
-    p, q : ndarray
-           Arrays containing the 2 traces of a stochastic parameter. That is, an array of dimension m x 2, where m is the number of traces, n the number of samples.
+    p : array_like
+        First Markov chain trace of a scalar parameter with shape ``(n_samples,)``.
+    q : array_like
+        Second Markov chain trace of a scalar parameter with shape ``(n_samples,)``.
 
     Returns
     -------
-    Rhat : float
-           Return the potential scale reduction factor, :math:`\hat{R}`.
+    float
+        Potential scale reduction factor :math:`\hat{R}`.
+
+    Raises
+    ------
+    ValueError
+        If the two input chains have different lengths or contain fewer than two
+        samples.
 
     Notes
     -----
-    The diagnostic is computed by:
-      .. math:: \hat{R} = \sqrt{\frac{\hat{V}}{W}}
-    where :math:`W` is the within-chain variance and :math:`\hat{V}` is
-    the posterior variance estimate for the pooled traces. This is the
-    potential scale reduction factor, which converges to unity when each
-    of the traces is a sample from the target posterior. Values greater
-    than one indicate that one or more chains have not yet converged.
+    This implementation follows the two-chain version of the classic statistic:
+
+    .. math::
+
+        \hat{R} = \sqrt{\frac{\hat{V}}{W}}
+
+    where :math:`W` is the within-chain variance (here computed from the two chains)
+    and :math:`\hat{V}` is the pooled posterior variance estimate.
+
+    This simplified implementation assumes exactly two chains and a scalar parameter.
 
     References
     ----------
-    Brooks and Gelman (1998)
-    Gelman and Rubin (1992)
-    """
+    Gelman, A. and Rubin, D. B. (1992).
+    Brooks, S. P. and Gelman, A. (1998).
 
-    n = len(p)
-    W = p.std() ** 2 + q.std() ** 2
-    P_mean = p.mean()
-    Q_mean = q.mean()
-    mean = (P_mean + Q_mean) / 2
+    Examples
+    --------
+    >>> p = np.random.default_rng(0).normal(size=1000)
+    >>> q = np.random.default_rng(1).normal(size=1000)
+    >>> gelman_rubin(p, q)  # doctest: +ELLIPSIS
+    1.0...
+    """
+    p_arr = np.asarray(p, dtype=float).ravel()
+    q_arr = np.asarray(q, dtype=float).ravel()
+
+    if p_arr.shape[0] != q_arr.shape[0]:
+        raise ValueError("Chains p and q must have the same length")
+    n = int(p_arr.shape[0])
+    if n < 2:
+        raise ValueError("Chains must contain at least two samples")
+
+    # Within-chain variance component (sum of chain variances)
+    W = p_arr.std(ddof=1) ** 2 + q_arr.std(ddof=1) ** 2
+    if W == 0.0:
+        # Both chains are constant; treat as perfectly converged.
+        return 1.0
+
+    P_mean = float(p_arr.mean())
+    Q_mean = float(q_arr.mean())
+    mean = (P_mean + Q_mean) / 2.0
+
+    # Between-chain variance component
     B = n * ((P_mean - mean) ** 2 + (Q_mean - mean) ** 2)
-    V = (1 - 1 / n) * W + 1 / n * B
-    R = V / W
-    return np.sqrt(R)
+
+    # Pooled posterior variance estimate
+    V_hat = (1.0 - 1.0 / n) * W + (1.0 / n) * B
+
+    R_hat_sq = V_hat / W
+    return float(np.sqrt(R_hat_sq))
 
 
-def kl_divergence(p, q):
+def kl_divergence(p: ArrayLike, q: ArrayLike) -> float:
     r"""
-    Kullback-Leibler divergence
+    Compute the Kullback–Leibler (KL) divergence :math:`D_{KL}(P \,\|\, Q)`.
 
-    From https://en.wikipedia.org/wiki/Kullback–Leibler_divergence:
+    The KL divergence measures how one probability distribution ``p`` diverges
+    from a second distribution ``q``. It is commonly interpreted as the expected
+    log difference between the probabilities under ``p`` and ``q``:
 
-    In the context of machine learning, {isplaystyle D_{\text{KL}}(P\parallel Q)} is often called the information gain achieved if Q is used instead of P. By analogy with information theory, it is also called the relative entropy of P with respect to Q. In the context of coding theory, {\displaystyle D_{\text{KL}}(P\parallel Q)} can be constructed by measuring the expected number of extra bits required to code samples from P using a code optimized for Q rather than the code optimized for.
+    .. math::
 
-    Expressed in the language of Bayesian inference, {\displaystyle D_{\text{KL}}(P\parallel Q)} is a measure of the information gained when one revises one's beliefs from the prior probability distribution Q to the posterior probability distribution P. In other words, it is the amount of information lost when Q is used to approximate P. In applications, P typically represents the "true" distribution of data, observations, or a precisely calculated theoretical distribution, while Q typically represents a theory, model, description, or approximation of P. In order to find a distribution Q that is closest to P, we can minimize KL divergence and compute an information projection.
+        D_{KL}(P \,\|\, Q) = \sum_i p_i \log\left(\frac{p_i}{q_i}\right)
+
+    Parameters
+    ----------
+    p : numpy.ndarray
+        Discrete probability distribution :math:`P`. Must be broadcast-compatible
+        with ``q``. Values should be non-negative; typically ``p.sum() == 1``.
+    q : numpy.ndarray
+        Discrete probability distribution :math:`Q`. Must be broadcast-compatible
+        with ``p``. Values should be non-negative; typically ``q.sum() == 1``.
+
+    Returns
+    -------
+    float
+        The KL divergence :math:`D_{KL}(P \,\|\, Q)` computed with natural logarithms.
+
+    Notes
+    -----
+    This implementation follows the standard discrete definition but treats terms
+    with ``p == 0`` or ``q == 0`` (or non-finite ``p/q``) as contributing zero.
+    If you prefer stricter behavior (e.g., returning ``inf`` when ``q_i == 0`` and
+    ``p_i > 0``), adjust the masking logic accordingly.
+
+    References
+    ----------
+    Wikipedia: Kullback–Leibler divergence.
+
+    Examples
+    --------
+    >>> p = np.array([0.5, 0.5])
+    >>> q = np.array([0.9, 0.1])
+    >>> kl_divergence(p, q)  # doctest: +ELLIPSIS
+    0.5108...
     """
-    return np.sum(
-        np.where(
-            np.logical_and(np.logical_and(p != 0, q != 0), np.isfinite(p / q)),
-            p * np.log(p / q),
-            0,
-        )
-    )
+    p_arr = np.asarray(p, dtype=float)
+    q_arr = np.asarray(q, dtype=float)
+
+    ratio = p_arr / q_arr
+    mask = (p_arr != 0) & (q_arr != 0) & np.isfinite(ratio)
+    return float(np.sum(np.where(mask, p_arr * np.log(ratio), 0.0)))

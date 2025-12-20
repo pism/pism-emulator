@@ -22,10 +22,10 @@ Test metrics.
 import torch
 from numpy.testing import assert_almost_equal
 
-from pism_emulator.metrics import AbsoluteError, AreaAbsoluteError
+from pism_emulator.metrics import AreaWeightedError
 
 
-def test_AreaAbsoluteError():
+def test_AreaWeightedError():
     """
     Test AreaAbsoluteError.
     """
@@ -33,18 +33,6 @@ def test_AreaAbsoluteError():
     y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
     o = torch.tensor([0.25, 0.25, 0.3, 0.2])
     a = torch.tensor([0.25, 0.25])
-    aae = AreaAbsoluteError()
+    aae = AreaWeightedError()
     ae = aae(x, y, o, a)
     assert_almost_equal(ae, 0.4000, decimal=12)
-
-
-def test_AbsoluteError():
-    """
-    Test AbsoluteError.
-    """
-    x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-    y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-    o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-    aae = AbsoluteError()
-    ae = aae(x, y, o)
-    assert_almost_equal(ae, 1.6000, decimal=12)

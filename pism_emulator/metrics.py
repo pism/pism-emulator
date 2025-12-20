@@ -17,7 +17,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 # pylint: disable=arguments-differ
 """
-Metrics Module
+Metrics Module.
 """
 
 
@@ -27,7 +27,7 @@ from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 
 
-def _area_absolute_error_update(
+def _area_weighted_error_update(
     preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
 ) -> Tensor:
     """
@@ -58,35 +58,28 @@ def _area_absolute_error_update(
     torch.Tensor
         Scalar tensor containing the accumulated area-weighted error over the batch.
 
-    Notes
-    -----
-    Despite the name "absolute error", this implementation uses a **squared**
-    difference (i.e., an area-weighted L2 error) via ``diff * diff``.
-    If you intended an L1 (absolute) error, replace
-    ``diff * diff`` with ``torch.abs(diff)``.
-
     Raises
     ------
     ValueError
         If ``preds`` and ``target`` do not have the same shape.
-
     """
     _check_same_shape(preds, target)
-    diff = torch.abs(preds - target)
-    # If L1 is desired, use: sum_abs_error = torch.sum(diff * area, dim=1)
-    sum_abs_error = torch.sum(diff * diff * area, dim=1)  # spatial reduction
-    _absolute_error = torch.sum(sum_abs_error * omegas.squeeze())  # batch reduction
-    return _absolute_error
+    diff = preds - target
+    sum_weighted_error = torch.sum(diff * diff * area, dim=1)  # spatial reduction
+    _weighted_error = torch.sum(
+        sum_weighted_error * omegas.squeeze()
+    )  # batch reduction
+    return _weighted_error
 
 
-def _area_absolute_error_compute(_absolute_error: Tensor) -> Tensor:
+def _area_weighted_error_compute(_weighted_error: Tensor) -> Tensor:
     """
     Finalize the area-weighted error reduction.
 
     Parameters
     ----------
-    _absolute_error : torch.Tensor
-        Scalar tensor produced by :func:`_area_absolute_error_update`.
+    _weighted_error : torch.Tensor
+        Scalar tensor produced by :func:`_area_weighted_error_update`.
 
     Returns
     -------
@@ -99,14 +92,14 @@ def _area_absolute_error_compute(_absolute_error: Tensor) -> Tensor:
     PyTorch-Lightning metrics. If you switch to a stateful Metric class, this
     would return the aggregated state instead.
     """
-    return _absolute_error
+    return _weighted_error
 
 
-def area_absolute_error(
+def area_weighted_error(
     preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
 ) -> Tensor:
     """
-    Compute the area absolute error between the predicted and target tensors.
+    Compute the area weighted error between the predicted and target tensors.
 
     Parameters
     ----------
@@ -122,164 +115,100 @@ def area_absolute_error(
     Returns
     -------
     Tensor
-        The area absolute error as a PyTorch Tensor.
+        The area weighted error as a PyTorch Tensor.
 
     Notes
     -----
-    This function uses the '_area_absolute_error_update' and '_area_absolute_error_compute' functions
-    to calculate the area absolute error.
+    This function uses the '_area_weighted_error_update' and '_area_weighted_error_compute' functions
+    to calculate the area weighted error.
     """
-    sum_abs_error = _area_absolute_error_update(preds, target, omegas, area)
-    return _area_absolute_error_compute(sum_abs_error)
+    sum_weighted_error = _area_weighted_error_update(preds, target, omegas, area)
+    return _area_weighted_error_compute(sum_weighted_error)
 
 
-class AreaAbsoluteError(Metric):
+class AreaWeightedError(Metric):
     """
     Area-weighted error aggregated over a batch (TorchMetrics-compatible).
 
-    The discrepancy is computed in :func:`_area_absolute_error_update`. If that
-    helper uses ``(preds - target)**2 * area`` this behaves like an area-weighted
-    L2 error; if it uses ``abs(preds - target) * area`` it is true L1.
+    This metric accumulates an area-weighted discrepancy between ``preds`` and
+    ``target`` over updates, and returns the aggregated value in :meth:`compute`.
+
+    The actual per-batch discrepancy is delegated to
+    :func:`_area_weighted_error_update`. Depending on that helper's definition,
+    this metric behaves as an area-weighted L1 or L2-style error.
 
     Parameters
     ----------
     dist_sync_on_step : bool, optional
-        Synchronize state across processes at each step. Default is ``False``.
+        If True, synchronizes internal state across distributed processes at each
+        step. Default is False.
 
     Attributes
     ----------
-    sum_abs_error : torch.Tensor
-        Running total of the (area-weighted) error, reduced with ``sum`` across
-        processes in DDP.
+    sum_weighted_error : torch.Tensor
+        Running total of the area-weighted error. Reduced across DDP processes
+        using ``sum``.
     full_state_update : bool
-        Hint that per-batch updates are independent (set to ``False``).
+        TorchMetrics hint that per-batch updates are independent. Set to False.
     """
 
     full_state_update: bool = False
-    sum_abs_error: Tensor
+    sum_weighted_error: Tensor
 
-    def __init__(self, dist_sync_on_step=False):
-        # call `self.add_state`for every internal state that is needed for the metrics computations
-        # dist_reduce_fx indicates the function that should be used to reduce
-        # state from multiple processes
+    def __init__(self, dist_sync_on_step: bool = False) -> None:
         super().__init__(dist_sync_on_step=dist_sync_on_step)
-        self.sum_abs_error: Tensor = torch.tensor(0.0)
+        self.add_state(
+            "sum_weighted_error", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
 
-        self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
+    def update(
+        self, preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
+    ) -> None:
+        """
+        Update metric state with a new batch.
 
-    def update(self, preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor):
-        """
-        Update state with predictions and targets, and area.
-        Args:
-            preds: Predictions from model
-            target: Ground truth values
-            omegas: Weights
-            area: Area of each cell
-        """
-        sum_abs_error = _area_absolute_error_update(preds, target, omegas, area)
-        self.sum_abs_error += sum_abs_error
+        Parameters
+        ----------
+        preds : torch.Tensor
+            Model predictions with shape ``(batch, n_nodes)`` (or broadcast-compatible
+            with ``target``).
+        target : torch.Tensor
+            Reference/ground-truth values with the same shape as ``preds``.
+        omegas : torch.Tensor
+            Per-sample weights with shape ``(B,)`` or ``(B, 1)``. Will be squeezed.
+        area : torch.Tensor
+            Per-node area weights, shape ``(n_nodes,)`` (or broadcast-compatible).
 
-    def compute(self):
+        Returns
+        -------
+        None
+            Updates internal state in place.
         """
-        Computes absolute error over state.
+        self.sum_weighted_error = self.sum_weighted_error + _area_weighted_error_update(
+            preds, target, omegas, area
+        )
+
+    def compute(self) -> Tensor:
         """
-        return _area_absolute_error_compute(self.sum_abs_error)
+        Compute the aggregated metric value.
+
+        Returns
+        -------
+        torch.Tensor
+            Aggregated area-weighted error as computed by
+            :func:`_area_weighted_error_compute`.
+        """
+        return _area_weighted_error_compute(self.sum_weighted_error)
 
     @property
-    def is_differentiable(self):
+    def is_differentiable(self) -> bool:
         """
-        Check if differentiable.
+        Indicate whether the metric is differentiable.
+
+        Returns
+        -------
+        bool
+            True. (Note: TorchMetrics may still treat some metrics as non-differentiable
+            depending on internal operations).
         """
-        return True
-
-
-def _absolute_error_update(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
-    _check_same_shape(preds, target)
-    diff = torch.abs(preds - target)
-    sum_abs_error = torch.sum(diff * diff, axis=1)
-    _absolute_error = torch.sum(sum_abs_error * omegas.squeeze())
-    return _absolute_error
-
-
-def _absolute_error_compute(_absolute_error) -> Tensor:
-    return _absolute_error
-
-
-def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
-    """
-    Computes squared absolute error.
-
-    Args:
-        preds: estimated labels
-        target: ground truth labels
-        omegas: weights
-    Return:
-        Tensor with absolute error
-    Example:
-        >>> x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-        >>> y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-        >>> o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-        >>> absolute_error(x, y, o)
-        tensor(0.4000)
-    """
-    sum_abs_error = _absolute_error_update(preds, target, omegas)
-    return _absolute_error_compute(sum_abs_error)
-
-
-class AbsoluteError(Metric):  # pylint: disable=arguments-differ
-    """
-    Error aggregated over a batch (TorchMetrics-compatible).
-
-    The discrepancy is computed in :func:`_area_absolute_error_update`. If that
-    helper uses ``(preds - target)**2 * area`` this behaves like an area-weighted
-    L2 error; if it uses ``abs(preds - target) * area`` it is true L1.
-
-    Parameters
-    ----------
-    dist_sync_on_step : bool, optional
-        Synchronize state across processes at each step. Default is ``False``.
-
-    Attributes
-    ----------
-    sum_abs_error : torch.Tensor
-        Running total of the (area-weighted) error, reduced with ``sum`` across
-        processes in DDP.
-    full_state_update : bool
-        Hint that per-batch updates are independent (set to ``False``).
-    """
-
-    full_state_update: bool = False
-
-    def __init__(self, dist_sync_on_step=False):
-        # call `self.add_state`for every internal state that is needed for the metrics computations
-        # dist_reduce_fx indicates the function that should be used to reduce
-        # state from multiple processes
-        super().__init__(dist_sync_on_step=dist_sync_on_step)
-        self.sum_abs_error: Tensor = torch.tensor(0.0)
-
-        self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
-
-    def update(self, preds: Tensor, target: Tensor, omegas: Tensor):
-        """
-        Update state with predictions and targets, and area.
-        Args:
-            preds: Predictions from model
-            target: Ground truth values
-            omegas: Weights
-        """
-        sum_abs_error = _absolute_error_update(preds, target, omegas)
-        self.sum_abs_error += sum_abs_error
-
-    def compute(self):
-        """
-        Computes absolute error over state.
-        """
-        return _absolute_error_compute(self.sum_abs_error)
-
-    @property
-    def is_differentiable(self):
-        """
-        Check if differentiable.
-        """
-
         return True

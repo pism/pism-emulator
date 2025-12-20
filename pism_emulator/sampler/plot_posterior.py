@@ -17,6 +17,10 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+"""
+Plot posteriors.
+"""
+
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
@@ -61,7 +65,27 @@ rcparams = {
 }
 
 
-def _group_to_df(ds, label, cols):
+def _group_to_df(ds: xr.Dataset, label: str, cols: Sequence[str]) -> pd.DataFrame:
+    """
+    Convert an ArviZ group dataset to a tidy DataFrame and annotate its ensemble label.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset corresponding to a single ArviZ group (e.g., ``idata.posterior``).
+        Expected to include sampling dimensions such as ``chain`` and ``draw``.
+    label : str
+        Label identifying the ensemble/model this dataset came from.
+    cols : Sequence[str]
+        Variable names in ``ds`` to include in the output DataFrame.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Tidy DataFrame with sampling coordinates (e.g., ``chain``, ``draw``) and
+        the requested variables in columns, plus an ``ensemble`` column set to
+        ``label``.
+    """
     df = ds[cols].to_dataframe().reset_index()  # gives columns: chain, draw, <vars>
     df["ensemble"] = label
     return df
@@ -73,8 +97,46 @@ def load_and_stack_idatas(
     dim_name: str = "model",
 ) -> az.InferenceData:
     """
-    Load multiple InferenceData .nc files and stack them along a new dimension (e.g. 'model').
-    Concatenates all present groups (posterior, prior, sample_stats, …) across files.
+    Load multiple ArviZ InferenceData NetCDF files and stack them along a new dimension.
+
+    Each input file is loaded with :func:`arviz.from_netcdf`. For every group present
+    in each :class:`arviz.InferenceData` (e.g., ``posterior``, ``prior``,
+    ``sample_stats``), this function inserts a new length-1 dimension named
+    ``dim_name`` (default: ``"model"``) with coordinate value given by the
+    corresponding entry in ``labels``. Groups are then concatenated across inputs
+    along ``dim_name``.
+
+    Parameters
+    ----------
+    paths : Sequence[str or pathlib.Path]
+        Paths to ArviZ InferenceData NetCDF files (``.nc``).
+    labels : Sequence[str], optional
+        Labels corresponding to each path. These become the coordinate values for
+        the new dimension ``dim_name``. If None (default), labels are generated as
+        ``"0"``, ``"1"``, ..., ``str(len(paths)-1)``.
+    dim_name : str, optional
+        Name of the new dimension used to stack/concatenate the InferenceData
+        objects. Default is ``"model"``.
+
+    Returns
+    -------
+    arviz.InferenceData
+        A single InferenceData object whose groups have been concatenated along
+        ``dim_name``. Only groups present in at least one input are included.
+
+    Raises
+    ------
+    ValueError
+        If ``labels`` is provided and ``len(labels) != len(paths)``.
+
+    Notes
+    -----
+    * This function iterates over the groups reported by the private attribute
+      ``idata._groups_all``. If ArviZ changes its internal API, this may need to
+      be updated. A more future-proof approach is to use the public group names
+      available via ``idata.groups()`` when appropriate.
+    * If different files contain different sets of groups, groups are concatenated
+      only where they exist; missing groups are simply omitted for that file.
     """
     paths = [Path(p) for p in paths]
     if labels is None:
@@ -82,8 +144,22 @@ def load_and_stack_idatas(
     if len(labels) != len(paths):
         raise ValueError("labels and paths must have the same length")
 
-    # Expand each idata by adding a new length-1 dim (dim_name)
     def _expanded(idata: az.InferenceData, label: str) -> az.InferenceData:
+        """
+        Add a new length-1 stacking dimension to every group dataset in an InferenceData.
+
+        Parameters
+        ----------
+        idata : arviz.InferenceData
+            Input inference data.
+        label : str
+            Coordinate value to use for the new dimension ``dim_name``.
+
+        Returns
+        -------
+        arviz.InferenceData
+            New InferenceData with group datasets expanded along ``dim_name``.
+        """
         group_ds: dict[str, xr.Dataset] = {}
         for group in idata._groups_all:
             ds = getattr(idata, group, None)
@@ -95,7 +171,6 @@ def load_and_stack_idatas(
 
     expanded = [_expanded(az.from_netcdf(p), lab) for p, lab in zip(paths, labels)]
 
-    # Concatenate per group along the new dim
     groups = set().union(*(set(e._groups_all) for e in expanded))
     concatenated: dict[str, xr.Dataset] = {}
     for g in groups:

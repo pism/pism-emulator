@@ -124,18 +124,51 @@ class EigCache:
 
 class PISMDataModule(pl.LightningDataModule):
     """
-    Lightning DataModule for PISM emulator training/evaluation.
+    Lightning DataModule for PISM emulator training and evaluation.
+
+    This DataModule wraps in-memory tensors into a :class:`~torch.utils.data.TensorDataset`,
+    computes an eigenglacier basis (and mean-centered fields) once in
+    :meth:`prepare_data`, and provides deterministic DataLoaders.
 
     Parameters
     ----------
-    X, F, omegas, omegas_0 : torch.Tensor
-        See original docstring.
-    batch_size : int, default=128
-    num_workers : int, default=1
-    seed : int, default=42
+    X : torch.Tensor
+        Input/parameter tensor with leading sample dimension ``N`` (shape ``(N, P)``).
+    F : torch.Tensor
+        Model response tensor with leading sample dimension ``N`` (shape ``(N, G)``),
+        where ``G`` is the number of grid points/nodes.
+    omegas : torch.Tensor
+        Quadrature/area weights used to compute weighted means and inner products.
+        Must be broadcast-compatible with ``F`` along the grid dimension
+        (typically shape ``(G,)`` or ``(G, 1)``).
+    omegas_0 : torch.Tensor
+        Auxiliary weight tensor stored alongside samples for downstream use.
+        Included in the dataset returned by DataLoaders.
+    batch_size : int, optional
+        Batch size for DataLoaders. Default is 128.
+    seed : int, optional
+        Seed used for deterministic DataLoader behavior. Default is 42.
+    num_workers : int, optional
+        Number of DataLoader worker processes. Default is 0.
+
+    Attributes
+    ----------
+    cfg : DataConfig
+        Configuration container storing tensors and DataLoader settings.
+    eig : EigCache
+        Cache holding the eigenglacier basis and derived tensors produced by
+        :meth:`get_eigenglaciers`.
+
+    Notes
+    -----
+    * :meth:`prepare_data` computes and caches eigenglacier quantities
+      (or loads them from disk if ``cache_path`` is provided).
+    * :meth:`setup` currently builds a single dataset; train/val splitting is not
+      implemented in the shown code and both loaders iterate over the same dataset.
+      If you intend a train/val split, you should add it in :meth:`setup`.
     """
 
-    # pylint: disable=too-many-instance-attributes  # (remove after refactor if under threshold)
+    # pylint: disable=too-many-instance-attributes  # remove after refactor if under threshold
 
     def __init__(
         self,
@@ -147,8 +180,31 @@ class PISMDataModule(pl.LightningDataModule):
         batch_size: int = 128,
         seed: int = 42,
         num_workers: int = 0,
-    ):
+    ) -> None:
+        """
+        Initialize the DataModule.
+
+        Parameters
+        ----------
+        X, F, omegas, omegas_0 : torch.Tensor
+            See class docstring.
+        batch_size : int, optional
+            Batch size for DataLoaders. Default is 128.
+        seed : int, optional
+            Seed for deterministic DataLoader behavior. Default is 42.
+        num_workers : int, optional
+            Number of worker processes. Default is 0.
+
+        Raises
+        ------
+        ValueError
+            If ``X`` and ``F`` have mismatched leading dimensions.
+        """
         super().__init__()
+
+        if X.shape[0] != F.shape[0]:
+            raise ValueError("X and F must have the same number of samples")
+
         self.cfg = DataConfig(X, F, omegas, omegas_0, batch_size, num_workers)
         self.eig = EigCache()
 
@@ -156,12 +212,25 @@ class PISMDataModule(pl.LightningDataModule):
         self._dl_generator.manual_seed(seed)
 
         # only the splits are kept; loaders are created on demand
-        self._train = None
-        self._val = None
-        self._all = None
+        self._train: TensorDataset | None = None
+        self._val: TensorDataset | None = None
+        self._all: TensorDataset | None = None
 
     def prepare_data(self, **kwargs) -> None:
-        """Compute eigenglaciers once (or load from cache)."""
+        """
+        Compute eigenglaciers once (or load from cache).
+
+        Parameters
+        ----------
+        **kwargs
+            Forwarded to :meth:`get_eigenglaciers`. This allows configuration of
+            basis size, cutoff, SVD mode, and caching.
+
+        Notes
+        -----
+        Lightning calls this hook once per node. Computed tensors are stored in
+        :attr:`eig` for use in :meth:`setup`.
+        """
         V_hat, F_bar, F_mean, eigs_vals = self.get_eigenglaciers(**kwargs)
         self.eig.V_hat, self.eig.F_bar, self.eig.F_mean, self.eig.eigs_vals = (
             V_hat,
@@ -171,8 +240,23 @@ class PISMDataModule(pl.LightningDataModule):
         )
 
     def setup(self, stage: str | None = None) -> None:
-        """Split into train/val and stage datasets."""
-        # use cached F_bar from prepare_data
+        """
+        Build datasets for the requested stage.
+
+        Parameters
+        ----------
+        stage : str or None, optional
+            Lightning stage hint (e.g., ``"fit"``, ``"validate"``, ``"test"``).
+            This implementation does not specialize by stage but accepts the
+            argument for Lightning compatibility.
+
+        Notes
+        -----
+        This method uses the cached mean-centered field ``F_bar`` computed in
+        :meth:`prepare_data`. Train/validation splitting is not implemented here;
+        both :meth:`train_dataloader` and :meth:`val_dataloader` will iterate over
+        the same dataset unless you add a split.
+        """
         ds_all = TensorDataset(
             self.cfg.X, self.eig.F_bar, self.cfg.omegas, self.cfg.omegas_0
         )
@@ -180,6 +264,21 @@ class PISMDataModule(pl.LightningDataModule):
         self._train, self._val = ds_all, ds_all
 
     def _build_loader(self, ds: TensorDataset, *, shuffle: bool) -> DataLoader:
+        """
+        Construct a DataLoader with consistent seeding/worker configuration.
+
+        Parameters
+        ----------
+        ds : torch.utils.data.TensorDataset
+            Dataset to wrap.
+        shuffle : bool
+            Whether to shuffle samples each epoch.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Configured DataLoader.
+        """
         return DataLoader(
             dataset=ds,
             batch_size=self.cfg.batch_size,
@@ -192,9 +291,34 @@ class PISMDataModule(pl.LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
+        """
+        Create the training DataLoader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader over the training dataset.
+
+        Notes
+        -----
+        This implementation currently sets ``shuffle=False``. If you want typical
+        SGD behavior, set ``shuffle=True``.
+        """
+        if self._train is None:
+            self.setup("fit")
         return self._build_loader(self._train, shuffle=False)
 
     def val_dataloader(self) -> DataLoader:
+        """
+        Create the validation DataLoader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader over the validation dataset.
+        """
+        if self._val is None:
+            self.setup("validate")
         return self._build_loader(self._val, shuffle=False)
 
     # -------------------- Eigenglaciers --------------------
@@ -208,15 +332,48 @@ class PISMDataModule(pl.LightningDataModule):
         cache_path: str | Path | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """
-        Compute/load the eigenglacier basis and mean-centered responses.
+        Compute or load the eigenglacier basis and mean-centered responses.
 
-        All parameters are keyword-only to avoid R0917.
+        Given a set of responses ``F`` and weights ``omegas``, this method computes
+        the weighted mean field ``F_mean`` and mean-centered anomalies ``F_bar``.
+        It then constructs an eigenglacier basis ``V_hat`` using either a low-rank
+        SVD or an explicit eigen-decomposition.
+
+        Parameters
+        ----------
+        q : int, optional
+            Target rank/basis size when ``cutoff`` is None. Default is 10.
+        cutoff : float, optional
+            If provided, choose the number of modes such that the cumulative
+            explained variance reaches ``cutoff`` (e.g., 0.95 for 95%).
+            When set, ``q`` is ignored for truncation. Default is None.
+        svd_lowrank : bool, optional
+            If True, use :func:`torch.svd_lowrank` on a weighted anomaly matrix.
+            If False, form the weighted covariance matrix and use
+            :func:`torch.linalg.eigh`. Default is True.
+        cache_path : str or pathlib.Path, optional
+            If provided, attempt to load cached tensors from this path. If the
+            file does not exist, computed results are saved to this location.
 
         Returns
         -------
-        V_hat, F_bar, F_mean, eigs_vals : tuple[Tensor, Tensor, Tensor, Tensor]
-        """
+        V_hat : torch.Tensor
+            Eigenglacier basis matrix. Shape depends on truncation choice
+            (typically ``(G, r)`` where ``G`` is number of grid points).
+        F_bar : torch.Tensor
+            Mean-centered anomalies, ``F - F_mean``. Shape ``(N, G)``.
+        F_mean : torch.Tensor
+            Weighted mean field across runs. Shape ``(G,)`` (or broadcastable).
+        eigs_vals : torch.Tensor
+            Eigenvalues (variance captured by each mode). Shape ``(r,)``.
 
+        Notes
+        -----
+        * Results are cached in-memory in :attr:`eig`. If already computed in the
+          current process, cached values are returned immediately.
+        * When ``cutoff`` is provided, the effective rank is determined by the
+          cumulative explained variance fraction.
+        """
         if self.eig.ready:
             return self.eig.V_hat, self.eig.F_bar, self.eig.F_mean, self.eig.eigs_vals
 
@@ -250,18 +407,16 @@ class PISMDataModule(pl.LightningDataModule):
             F = self.cfg.F
             omegas = self.cfg.omegas
             n_grid_points = F.shape[1]
+
             F_mean = (F * omegas).sum(axis=0)
             F_bar = F - F_mean  # Eq. 28
 
-            if cutoff is not None:
-                q_r = F.shape[0]
-            else:
-                q_r = q
+            q_r = F.shape[0] if cutoff is not None else q
 
             if svd_lowrank:
                 Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
                 _, S, V = torch.svd_lowrank(Z @ F_bar, q=q_r)
-                lamda = S**2 / (n_grid_points)
+                lamda = S**2 / n_grid_points
             else:
                 S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar
                 lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
@@ -271,14 +426,15 @@ class PISMDataModule(pl.LightningDataModule):
                 cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
                 lamda_truncated = lamda.detach()[:cutoff_index]
                 rank_zero_info(
-                    f"Generating eigenglaciers using the first {cutoff_index} eigen values for {cutoff * 100}% fidelity"
+                    "Generating eigenglaciers using the first "
+                    f"{cutoff_index} eigenvalues for {cutoff * 100}% fidelity"
                 )
                 V_hat = V.detach()[:, :cutoff_index] @ torch.diag(
-                    torch.sqrt(lamda.detach()[:cutoff_index])
+                    torch.sqrt(lamda_truncated)
                 )
             else:
                 rank_zero_info(
-                    f"Generating eigenglaciers using the first {q_r} eigen values"
+                    f"Generating eigenglaciers using the first {q_r} eigenvalues"
                 )
                 V_hat = V.detach() @ torch.diag(torch.sqrt(lamda.detach()))
 
@@ -325,27 +481,51 @@ class PDDConfig:
 
 class PDDDataModule(pl.LightningDataModule):
     """
-    Lightning DataModule for PDD-style training/evaluation (refactored).
+    Lightning DataModule for PDD-style training and evaluation.
 
-    This version:
-    - Stores inputs in a small `PDDConfig` (fewer instance attributes).
-    - Builds train/val DataLoaders lazily via a helper.
-    - Keeps Lightning hook signatures (`prepare_data`, `setup`, loaders) clean.
-    - Uses keyword-only parameters on internal helpers to avoid `R0917`.
+    This DataModule wraps in-memory tensors into a :class:`~torch.utils.data.TensorDataset`,
+    splits them into training/validation subsets, and constructs PyTorch DataLoaders
+    with deterministic seeding.
 
     Parameters
     ----------
-    X, Y : torch.Tensor
-        See `PDDConfig` for shapes.
-    batch_size : int, default=128
-        Batch size for all DataLoaders.
-    train_size : float, default=0.9
-        Train split fraction.
-    num_workers : int, default=0
-        DataLoader workers.
+    X : torch.Tensor
+        Predictor/features tensor. Shape must be compatible with indexing along
+        the leading sample dimension (``(N, ...)``).
+    Y : torch.Tensor
+        Target tensor aligned with ``X``. Must have the same leading sample
+        dimension as ``X`` (``Y.shape[0] == X.shape[0]``).
+    omegas : torch.Tensor
+        Auxiliary tensor stored in the config for downstream use (not currently
+        included in the DataLoaders in this implementation).
+    omegas_0 : torch.Tensor
+        Auxiliary tensor stored in the config for downstream use (not currently
+        included in the DataLoaders in this implementation).
+    batch_size : int, optional
+        Batch size for all DataLoaders. Default is 128.
+    seed : int, optional
+        Seed used for deterministic DataLoader shuffling/worker seeding. Default is 42.
+    train_size : float, optional
+        Fraction of samples to use for training. Must be in ``(0, 1)``.
+        Default is 0.9.
+    num_workers : int, optional
+        Number of DataLoader worker processes. Default is 0.
+
+    Attributes
+    ----------
+    cfg : PDDConfig
+        Configuration container holding input tensors and DataLoader settings.
+
+    Notes
+    -----
+    * This module assumes tensors are already materialized in memory.
+    * DataLoaders are built lazily; calling :meth:`train_dataloader` or
+      :meth:`val_dataloader` will trigger :meth:`setup` if needed.
+    * ``pin_memory=True`` is enabled; on CPU-only runs it is harmless but may not
+      provide benefit.
     """
 
-    # pylint: disable=too-many-instance-attributes  # trimmed; but safe to remove if below threshold
+    # pylint: disable=too-many-instance-attributes  # safe to remove if below threshold
 
     def __init__(
         self,
@@ -359,7 +539,35 @@ class PDDDataModule(pl.LightningDataModule):
         train_size: float = 0.9,
         num_workers: int = 0,
     ) -> None:
+        """
+        Initialize the DataModule.
+
+        Parameters
+        ----------
+        X, Y, omegas, omegas_0 : torch.Tensor
+            See class docstring.
+        batch_size : int, optional
+            Batch size for DataLoaders. Default is 128.
+        seed : int, optional
+            Seed for deterministic DataLoader behavior. Default is 42.
+        train_size : float, optional
+            Train split fraction in ``(0, 1)``. Default is 0.9.
+        num_workers : int, optional
+            Number of worker processes. Default is 0.
+
+        Raises
+        ------
+        ValueError
+            If ``train_size`` is not in ``(0, 1)`` or if ``X`` and ``Y`` have
+            mismatched leading dimensions.
+        """
         super().__init__()
+
+        if not (0.0 < train_size < 1.0):
+            raise ValueError("train_size must be in (0, 1)")
+        if X.shape[0] != Y.shape[0]:
+            raise ValueError("X and Y must have the same number of samples")
+
         self.cfg = PDDConfig(
             X=X,
             Y=Y,
@@ -369,6 +577,7 @@ class PDDDataModule(pl.LightningDataModule):
             train_size=train_size,
             num_workers=num_workers,
         )
+
         self._dl_generator = torch.Generator(device="cpu")
         self._dl_generator.manual_seed(seed)
 
@@ -381,26 +590,32 @@ class PDDDataModule(pl.LightningDataModule):
 
     def prepare_data(self) -> None:
         """
-        One-time data preparation hook (no-op here).
+        Perform one-time data preparation (no-op for in-memory tensors).
 
         Notes
         -----
-        Kept for API symmetry with other modules; nothing to precompute.
+        Kept for API symmetry with other Lightning modules. All tensors are passed
+        directly at initialization, so there is nothing to download or preprocess.
         """
         return
 
     def setup(self, stage: str | None = None) -> None:
         """
-        Split into train/val and stage datasets.
+        Create the underlying dataset and split into train/validation subsets.
 
         Parameters
         ----------
         stage : str or None, optional
-            Lightning stage hint (``'fit'``, ``'validate'``, etc.). Unused here.
+            Lightning stage hint (e.g., ``"fit"``, ``"validate"``, ``"test"``).
+            This implementation does not specialize behavior by stage, but the
+            argument is accepted for Lightning compatibility.
+
+        Notes
+        -----
+        Splitting is performed using :func:`sklearn.model_selection.train_test_split`.
         """
         all_data = TensorDataset(self.cfg.X, self.cfg.Y)
-        self._all = ds_all
-        self._train, self._val = ds_all, ds_all
+        self._all = all_data
 
         train_ds, val_ds = train_test_split(
             all_data, train_size=self.cfg.train_size, random_state=0
@@ -410,7 +625,21 @@ class PDDDataModule(pl.LightningDataModule):
     # -------------------- DataLoaders (lazy) --------------------
 
     def _build_loader(self, ds: TensorDataset, *, shuffle: bool) -> DataLoader:
-        """Create a DataLoader with consistent seeding/worker config."""
+        """
+        Construct a DataLoader with consistent seeding and worker configuration.
+
+        Parameters
+        ----------
+        ds : torch.utils.data.TensorDataset
+            Dataset to wrap.
+        shuffle : bool
+            Whether to shuffle samples each epoch.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Configured DataLoader.
+        """
         return DataLoader(
             dataset=ds,
             batch_size=self.cfg.batch_size,
@@ -423,7 +652,7 @@ class PDDDataModule(pl.LightningDataModule):
 
     def train_dataloader(self) -> DataLoader:
         """
-        Training DataLoader.
+        Create the training DataLoader.
 
         Returns
         -------
@@ -432,11 +661,11 @@ class PDDDataModule(pl.LightningDataModule):
         """
         if self._train is None:  # defensive, in case setup hasn't run
             self.setup("fit")
-        return self._build_loader(self._train, shuffle=False)
+        return self._build_loader(self._train, shuffle=True)
 
     def val_dataloader(self) -> DataLoader:
         """
-        Validation DataLoader.
+        Create the validation DataLoader.
 
         Returns
         -------

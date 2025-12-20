@@ -188,18 +188,41 @@ def test_gelman_rubin(pq):
     assert_array_almost_equal(gelman_rubin(q, p), 0.816496580927726)
 
 
-def test_stepwise_bic(dp16data):
+def test_stepwise_bic(dp16data: pd.DataFrame) -> None:
     """
-    Test with and without first-order interactions
+    Verify stepwise BIC selection with and without first-order interactions.
 
-    Replicates Edwards et al (2019) model
+    This test checks that :func:`stepwise_bic` reproduces the predictor sets used
+    in Edwards et al. (2019) for the DP16-style example when modeling the
+    ``RCP85_2100`` response from four main-effect predictors, both:
 
+    1. restricting the search to main effects only, and
+    2. allowing first-order interaction terms.
+
+    Parameters
+    ----------
+    dp16data : pandas.DataFrame
+        Input dataset fixture containing the required predictor columns
+        ``["OCFAC", "CREVLIQ", "VCLIF", "BIAS"]`` and the target column
+        ``["RCP85_2100"]``.
+
+    Raises
+    ------
+    AssertionError
+        If the selected variable set returned by :func:`stepwise_bic` does not
+        match the expected set for the corresponding configuration.
+
+    Notes
+    -----
+    The expected selections are:
+
+    * Without interactions: ``["OCFAC", "CREVLIQ", "VCLIF", "BIAS"]``
+    * With interactions:
+      ``["OCFAC", "CREVLIQ", "VCLIF", "BIAS", "CREVLIQ*VCLIF", "OCFAC*BIAS", "OCFAC*VCLIF"]``
     """
-
     X = dp16data[["OCFAC", "CREVLIQ", "VCLIF", "BIAS"]]
     Y = dp16data[["RCP85_2100"]]
 
-    # From Edwards et al (2019)
     dp16_no_interactions = ["OCFAC", "CREVLIQ", "VCLIF", "BIAS"]
     dp16_with_interactions = [
         "OCFAC",
@@ -211,34 +234,33 @@ def test_stepwise_bic(dp16data):
         "OCFAC*VCLIF",
     ]
 
-    # Write Assertion exceptions and useful error messages
+    selected, model, X_final, history = stepwise_bic(
+        X,
+        Y,
+        varnames=list(X.columns) if isinstance(X, pd.DataFrame) else None,
+        estimator=LinearRegression(),
+        direction="both",
+        interactions=False,
+        start="main",
+        tol=0.0,
+        max_steps=None,
+        verbose=True,
+        calc_bic_fn=calc_bic,
+    )
+    assert selected == dp16_no_interactions
 
     selected, model, X_final, history = stepwise_bic(
         X,
         Y,
         varnames=list(X.columns) if isinstance(X, pd.DataFrame) else None,
-        estimator=LinearRegression(),  # or any sklearn regressor/classifier
-        direction="both",  # 'forward' | 'backward' | 'both'
-        interactions=False,  # consider first-order interactions
-        start="main",  # start with all main effects
-        tol=0.0,  # require strict BIC decrease
-        max_steps=None,  # or cap steps if desired
+        estimator=LinearRegression(),
+        direction="both",
+        interactions=True,
+        start="main",
+        tol=0.0,
+        max_steps=None,
         verbose=True,
-        calc_bic_fn=calc_bic,  # <-- your function from the prompt
-    )
-    assert selected == dp16_no_interactions
-    selected, model, X_final, history = stepwise_bic(
-        X,
-        Y,
-        varnames=list(X.columns) if isinstance(X, pd.DataFrame) else None,
-        estimator=LinearRegression(),  # or any sklearn regressor/classifier
-        direction="both",  # 'forward' | 'backward' | 'both'
-        interactions=True,  # consider first-order interactions
-        start="main",  # start with all main effects
-        tol=0.0,  # require strict BIC decrease
-        max_steps=None,  # or cap steps if desired
-        verbose=True,
-        calc_bic_fn=calc_bic,  # <-- your function from the prompt
+        calc_bic_fn=calc_bic,
     )
     assert selected == dp16_with_interactions
 

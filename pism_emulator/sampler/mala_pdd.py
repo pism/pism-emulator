@@ -68,19 +68,43 @@ rcparams = {
 }
 
 
-def make_fake_climate_2d(filename=None):
-    """Create an artificial temperature and precipitation file.
-
-    This function is used if pypdd.py is called as a script without an input
-    file. The file produced contains an idealized, three-dimensional (t, x, y)
-    distribution of near-surface air temperature, precipitation rate and
-    standard deviation of near-surface air temperature to be read by
-    `PDDModel.nco`.
-
-    filename: str, optional
-        Name of output file.
+def make_fake_climate_2d(filename: str | None = None) -> xr.Dataset:
     """
+    Create an idealized 2D synthetic climate dataset for tests.
 
+    This generates an artificial monthly (12-point) climatology on a Cartesian
+    grid with dimensions ``(time, x, y)``. The resulting dataset contains
+    near-surface air temperature (``temp``), precipitation rate (``prec``), and
+    temperature standard deviation (``stdv``), along with CF-style coordinate
+    metadata and a ``time_bounds`` coordinate.
+
+    Parameters
+    ----------
+    filename : str, optional
+        If provided, write the dataset to this NetCDF file via ``to_netcdf``.
+        If None (default), no file is written.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with data variables:
+
+        - ``temp`` : near-surface air temperature (degC), shape ``(time, x, y)``
+        - ``prec`` : ice-equivalent precipitation rate (m yr-1), shape ``(time, x, y)``
+        - ``stdv`` : standard deviation of near-surface air temperature (K),
+          shape ``(time, x, y)``
+
+        And coordinates:
+
+        - ``time`` : monthly midpoints in fractional years, shape ``(time,)``
+        - ``x`` / ``y`` : Cartesian coordinates in meters, shapes ``(x,)`` and ``(y,)``
+        - ``time_bounds`` : bounds for ``time``, shape ``(time, 2)``
+
+    Notes
+    -----
+    The construction order, dtype casts, and transposes are intentionally kept
+    stable to preserve legacy test behavior (e.g., reproducibility checksums).
+    """
     ATTRIBUTES = {
         # coordinate variables
         "x": {
@@ -214,48 +238,68 @@ def make_fake_climate_2d(filename=None):
     if filename is not None:
         ds.to_netcdf(filename)
 
-    # return dataset
     return ds
 
 
-def draw_samples(n_samples=1_0000, random_seed=2):
+def draw_samples(n_samples: int = 10_000, random_seed: int = 2) -> pd.DataFrame:
     """
-    Draw samples.
+    Draw Latin-hypercube samples for PDD model parameters.
+
+    Samples are generated in the unit hypercube using Latin Hypercube Sampling
+    (LHS) and then transformed to user-specified parameter distributions using
+    each distribution's percent-point function (PPF; inverse CDF).
+
+    Parameters
+    ----------
+    n_samples : int, optional
+        Number of parameter sets to draw. Default is 10_000.
+    random_seed : int, optional
+        Seed for NumPy's random number generator used by the sampling routine.
+        Default is 2.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with shape ``(n_samples, 6)`` containing the sampled parameters.
+        Columns (in order) are:
+
+        - ``pdd_factor_snow`` : snow degree-day factor (uniform in [1, 6])
+        - ``pdd_factor_ice``  : ice degree-day factor (uniform in [3, 15])
+        - ``refreeze_snow``   : snow refreezing fraction (uniform in [0, 0.8])
+        - ``refreeze_ice``    : ice refreezing fraction (uniform in [0, 0.8])
+        - ``temp_snow``       : snow/rain transition lower bound in °C (uniform in [-2, 0])
+        - ``temp_rain``       : snow/rain transition upper bound in °C (uniform in [0, 4])
+
+    Notes
+    -----
+    * LHS produces stratified samples over each dimension of the unit hypercube,
+      which can improve space-filling relative to simple Monte Carlo sampling.
+    * This function calls ``np.random.seed`` to ensure deterministic output given
+      ``random_seed``.
     """
     np.random.seed(random_seed)
 
     distributions = {
         "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
         "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 1
-        "refreeze_ice": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 1
-        "temp_snow": uniform(loc=-2.0, scale=2.0),  # uniform between 0 and 1
-        "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 1
+        "refreeze_snow": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 0.8
+        "refreeze_ice": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 0.8
+        "temp_snow": uniform(loc=-2.0, scale=2.0),  # uniform between -2 and 0
+        "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 4
     }
 
-    # Names of all the variables
-    keys = [x for x in distributions.keys()]
+    keys = list(distributions.keys())
 
-    # Describe the Problem
+    # Describe the problem (kept for compatibility; not used further here)
     problem = {"num_vars": len(keys), "names": keys, "bounds": [[0, 1]] * len(keys)}
 
-    # Generate uniform samples (i.e. one unit hypercube)
     unif_sample = lhs(len(keys), n_samples)
-
-    # To hold the transformed variables
     dist_sample = np.zeros_like(unif_sample)
 
-    # Now transform the unit hypercube to the prescribed distributions
-    # For each variable, transform with the inverse of the CDF (inv(CDF)=ppf)
     for i, key in enumerate(keys):
         dist_sample[:, i] = distributions[key].ppf(unif_sample[:, i])
 
-    # Save to CSV file using Pandas DataFrame and to_csv method
-    header = keys
-    # Convert to Pandas dataframe, append column headers, output as csv
-    df = pd.DataFrame(data=dist_sample, columns=header)
-
-    return df
+    return pd.DataFrame(data=dist_sample, columns=keys)
 
 
 def main():

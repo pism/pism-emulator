@@ -17,7 +17,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 """
-Write predictions to disk
+Write predictions to disk.
 """
 
 from __future__ import annotations
@@ -32,7 +32,8 @@ from torch import Tensor
 
 
 class DiskPredictionWriter(BasePredictionWriter):
-    """Write each chain's predictions (and optional stats) to disk during predict.
+    """
+    Write each chain's predictions (and optional stats) to disk during predict.
 
     This callback is compatible with multi-process CPU runs (e.g. DDP spawn).
     Each process writes its own ``rankXX_chainYYYYYY.pt`` file containing a dict
@@ -63,7 +64,8 @@ class DiskPredictionWriter(BasePredictionWriter):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        """Handle predictions at the end of each batch.
+        """
+        Handle predictions at the end of each batch.
 
         Lightning passes through whatever the model's ``predict_step`` returned.
         We support either a single dict or an iterable of dicts. Each dict must
@@ -115,7 +117,8 @@ class DiskPredictionWriter(BasePredictionWriter):
 
 
 def load_pred_dir(pred_dir: str | Path, expected_chains: int | None = None) -> Tensor:
-    """Load per-chain prediction files and stack samples into a tensor.
+    """
+    Load per-chain prediction files and stack samples into a tensor.
 
     Parameters
     ----------
@@ -150,7 +153,8 @@ def load_pred_dir(pred_dir: str | Path, expected_chains: int | None = None) -> T
 def load_pred_dir_with_stats(
     pred_dir: str | Path, expected_chains: int | None = None
 ) -> tuple[Tensor, Tensor | None, Tensor | None, Tensor | None]:
-    """Load per-chain predictions and optional statistics from disk.
+    """
+    Load per-chain predictions and optional statistics from disk.
 
     Parameters
     ----------

@@ -33,7 +33,7 @@ from os.path import join
 from pathlib import Path
 from re import Pattern
 from time import time
-from typing import Final, Sequence, cast
+from typing import Final, Literal, Sequence, cast
 
 import dask
 
@@ -49,6 +49,285 @@ from torch.utils.data import Dataset, get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
 ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
+
+YTransformName = Literal["none", "log10", "robust"]
+
+
+def inverse_y_transform_np(
+    Yt: np.ndarray,
+    *,
+    name: str,
+    y_lim: tuple[float, float] | None = None,
+    params: dict[str, object] | None = None,
+) -> np.ndarray:
+    """
+    Invert the Y transform.
+
+    Parameters
+    ----------
+    Yt : numpy.ndarray
+        Transformed array with shape ``(..., n_nodes)``.
+    name : {"none", "log10", "robust"}
+        Transform name to invert.
+    y_lim : tuple[float, float] or None, optional
+        Optional clamp range in physical units applied after inversion.
+    params : dict[str, object] or None, optional
+        Transform parameters. For ``"robust"`` this must contain:
+
+        - ``"center"`` : array-like, shape ``(n_nodes,)``
+        - ``"scale"``  : array-like, shape ``(n_nodes,)``
+
+    Returns
+    -------
+    numpy.ndarray
+        Inverted array in physical units with shape ``(..., n_nodes)``.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is unknown or if ``name=="robust"`` but required parameters are missing.
+    """
+
+    params = params or {}
+
+    if name == "none":
+        Y = Yt
+
+    elif name == "log10":
+        # Forward was log10(clamp(Y, *y_lim)); inverse is 10**Yt
+        Y = np.power(10.0, Yt)
+
+    elif name == "robust":
+        center = params.get("center", None)
+        scale = params.get("scale", None)
+        if center is None or scale is None:
+            raise ValueError(
+                "robust inverse needs params['center'] and params['scale']"
+            )
+        center = np.asarray(center)
+        scale = np.asarray(scale)
+        Y = Yt * scale + center
+
+    else:
+        raise ValueError(f"Unknown y_transform={name!r}")
+
+    if y_lim is not None:
+        Y = np.clip(Y, y_lim[0], y_lim[1])
+
+    return Y
+
+
+def _fit_robust_params(
+    Y: torch.Tensor,
+    *,
+    with_centering: bool = True,
+    with_scaling: bool = True,
+    quantile_range: tuple[float, float] = (25.0, 75.0),
+    unit_variance: bool = False,  # kept for API parity; see notes
+    eps: float = 1e-6,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Fit robust centering and scaling parameters for a per-feature affine transform.
+
+    This computes a per-feature (e.g., per-grid-node) ``center`` and ``scale`` for
+    robust normalization of a response matrix ``Y``. It is designed to mimic the
+    core behavior of :class:`sklearn.preprocessing.RobustScaler`:
+
+    * If ``with_centering=True``, the center is the per-feature median.
+    * If ``with_scaling=True``, the scale is the inter-quantile range (IQR-like)
+      computed from ``quantile_range``.
+
+    Parameters
+    ----------
+    Y : torch.Tensor
+        Input tensor of responses with shape ``(n_runs, n_features)`` (e.g., runs × nodes).
+    with_centering : bool, optional
+        If True, compute ``center`` as the per-feature median. If False, ``center``
+        is all zeros. Default is True.
+    with_scaling : bool, optional
+        If True, compute ``scale`` as ``q_hi - q_lo`` per feature using
+        ``quantile_range``. If False, ``scale`` is all ones. Default is True.
+    quantile_range : tuple[float, float], optional
+        Quantile range (in percent) used to compute the scaling. Default is
+        ``(25.0, 75.0)`` (i.e., IQR).
+    unit_variance : bool, optional
+        Placeholder for API parity with scikit-learn's RobustScaler. This
+        implementation currently does **not** apply the additional rescaling to
+        achieve unit variance under a normality assumption. Default is False.
+    eps : float, optional
+        Minimum allowed scale. Features with ``scale < eps`` are assigned ``1``
+        to avoid division by near-zero values. Default is 1e-6.
+
+    Returns
+    -------
+    center : torch.Tensor
+        Per-feature centering vector with shape ``(n_features,)``.
+    scale : torch.Tensor
+        Per-feature scaling vector with shape ``(n_features,)``.
+
+    Raises
+    ------
+    ValueError
+        If ``quantile_range`` is invalid (e.g., not length 2, or lo >= hi).
+
+    Notes
+    -----
+    ``quantile_range`` is interpreted as percentiles in ``[0, 100]`` and passed to
+    :func:`torch.quantile` after conversion to fractions in ``[0, 1]``.
+
+    Examples
+    --------
+    >>> Y = torch.tensor([[0.0, 1.0], [2.0, 100.0], [4.0, 3.0]])
+    >>> center, scale = _fit_robust_params(Y)
+    >>> center.shape, scale.shape
+    (torch.Size([2]), torch.Size([2]))
+    """
+    if len(quantile_range) != 2:
+        raise ValueError("quantile_range must be a tuple of (low, high) percentiles")
+    q_lo, q_hi = quantile_range
+    if not (0.0 <= q_lo < q_hi <= 100.0):
+        raise ValueError("quantile_range must satisfy 0 <= low < high <= 100")
+
+    q_lo_t = q_lo / 100.0
+    q_hi_t = q_hi / 100.0
+
+    center = torch.zeros(Y.shape[1], dtype=Y.dtype, device=Y.device)
+    scale = torch.ones(Y.shape[1], dtype=Y.dtype, device=Y.device)
+
+    if with_centering:
+        center = torch.median(Y, dim=0).values
+
+    if with_scaling:
+        lo = torch.quantile(Y, q_lo_t, dim=0)
+        hi = torch.quantile(Y, q_hi_t, dim=0)
+        scale = hi - lo
+        scale = torch.where(scale < eps, torch.ones_like(scale), scale)
+
+    # NOTE: sklearn's RobustScaler(unit_variance=True) rescales to unit variance
+    # based on a normal distribution assumption; implementing that exactly is optional.
+    # If you want it later, we can add the same constant factor sklearn uses.
+
+    _ = unit_variance  # explicitly unused; kept for signature/API parity
+
+    return center, scale
+
+
+def _apply_affine(
+    Y: torch.Tensor, center: torch.Tensor, scale: torch.Tensor
+) -> torch.Tensor:
+    """
+    Apply an elementwise affine normalization.
+
+    Parameters
+    ----------
+    Y : torch.Tensor
+        Input tensor to transform.
+    center : torch.Tensor
+        Centering tensor to subtract from ``Y``. Must be broadcast-compatible with ``Y``.
+    scale : torch.Tensor
+        Scaling tensor to divide by after centering. Must be broadcast-compatible
+        with ``Y`` and should be non-zero.
+
+    Returns
+    -------
+    torch.Tensor
+        Transformed tensor ``(Y - center) / scale``.
+    """
+    return (Y - center) / scale
+
+
+def _apply_y_transform(
+    Y: torch.Tensor,
+    *,
+    name: str,
+    y_lim: tuple[float, float],
+    params: dict[str, object],
+) -> tuple[torch.Tensor, dict[str, object]]:
+    """
+    Apply a named transform to response/target tensors.
+
+    Supported transforms are:
+
+    - ``"none"``: no transform (identity).
+    - ``"log10"``: base-10 log of values clamped to ``y_lim``.
+    - ``"robust"``: robust affine scaling using a median/quantile-based center and
+      scale (similar to :class:`sklearn.preprocessing.RobustScaler`).
+
+    For ``"robust"``, this function can *fit* the transform parameters on the
+    provided ``Y`` if they are not already present in ``params``. The returned
+    ``params_used`` can then be reused to transform other tensors (e.g., the
+    observational target) consistently.
+
+    Parameters
+    ----------
+    Y : torch.Tensor
+        Input response tensor to transform. Typically has shape ``(N, G)`` for
+        training data (runs × grid points), but any shape is accepted.
+    name : str
+        Transform name. Must be one of ``{"none", "log10", "robust"}``.
+    y_lim : tuple[float, float]
+        Clamp range ``(ymin, ymax)`` used for the ``"log10"`` transform (and often
+        applied upstream in physical space). Values are clamped before taking
+        ``log10`` to avoid ``-inf``.
+    params : dict[str, object]
+        Transform configuration and/or fitted parameters.
+
+        For ``"robust"``, the following keys may be provided:
+
+        * ``with_centering`` : bool, optional
+        * ``with_scaling`` : bool, optional
+        * ``quantile_range`` : tuple[float, float], optional
+        * ``unit_variance`` : bool, optional
+        * ``center`` : torch.Tensor, optional (fitted)
+        * ``scale`` : torch.Tensor, optional (fitted)
+
+        If ``center`` and ``scale`` are absent, they are fit from ``Y``.
+
+    Returns
+    -------
+    Y_transformed : torch.Tensor
+        Transformed tensor.
+    params_used : dict[str, object]
+        Dictionary of parameters actually used. For ``"robust"`` this will include
+        fitted ``center`` and ``scale`` when they were computed.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not one of ``"none"``, ``"log10"``, or ``"robust"``.
+
+    Notes
+    -----
+    For ``"log10"``, this function applies::
+
+        log10(clamp(Y, ymin, ymax))
+
+    To invert the transform, use ``10 ** Y_transformed`` (or ``torch.pow(10, ...)``).
+    """
+    if name == "none":
+        return Y, params
+
+    if name == "log10":
+        return torch.log10(torch.clamp(Y, *y_lim)), params
+
+    if name == "robust":
+        # fit once on training Y, then reuse for target
+        if "center" not in params or "scale" not in params:
+            center, scale = _fit_robust_params(
+                Y,
+                with_centering=bool(params.get("with_centering", True)),
+                with_scaling=bool(params.get("with_scaling", True)),
+                quantile_range=tuple(params.get("quantile_range", (25.0, 75.0))),  # type: ignore[arg-type]
+                unit_variance=bool(params.get("unit_variance", False)),
+            )
+            params = dict(params)
+            params["center"] = center
+            params["scale"] = scale
+        return _apply_affine(Y, params["center"], params["scale"]), params
+
+    raise ValueError(
+        f"Unknown y_transform={name!r}; expected 'none', 'log10', or 'robust'"
+    )
 
 
 def _is_global_zero() -> bool:
@@ -148,7 +427,6 @@ def id_key(path: str | Path) -> int:
     ------
     ValueError
         If the pattern is not found in the basename.
-
     """
     m = ID_RE.search(Path(path).name)
     if m is None:
@@ -190,7 +468,38 @@ def parse_id_from_path(p: str | Path) -> int:
 
 
 def build_config_arrays(var) -> tuple[np.ndarray, np.ndarray]:
-    """Read attrs from variable 'pism_config' and return sorted (keys, values) arrays."""
+    """
+    Build sorted ``(keys, values)`` arrays from a NetCDF ``pism_config`` variable's attributes.
+
+    This helper reads all NetCDF attributes on ``var`` and filters out metadata
+    attributes whose names end with common suffixes (documentation/type/units/etc.).
+    The remaining attributes are treated as PISM configuration key/value pairs,
+    sorted by key, and returned as NumPy unicode arrays.
+
+    Parameters
+    ----------
+    var : netCDF4.Variable or xarray.DataArray
+        NetCDF variable object representing ``pism_config``. The object must
+        provide a ``ncattrs()`` method and allow attribute access via
+        ``getattr(var, name)``.
+
+    Returns
+    -------
+    pc_keys : numpy.ndarray
+        Sorted configuration keys as a 1D unicode array (dtype ``"U"``).
+    pc_vals : numpy.ndarray
+        Configuration values aligned with ``pc_keys`` as a 1D unicode array
+        (dtype ``"U"``).
+
+    Notes
+    -----
+    The following attribute-name suffixes are excluded from the configuration set:
+
+    ``("_doc", "_type", "_units", "_option", "_choices")``
+
+    If the key ``"geometry.front_retreat.prescribed.file"`` is missing, it is
+    added with the default value ``"false"``.
+    """
     suffixes_to_exclude = ("_doc", "_type", "_units", "_option", "_choices")
 
     attrs = {k: getattr(var, k) for k in var.ncattrs()}
@@ -451,7 +760,9 @@ class DatasetConfig:
     target_error_var: str = "velsurf_mag_error"
     target_corr_threshold: float = 25.0
     normalize_x: bool = True
-    log_y: bool = True
+    log_y: bool = False
+    y_transform: YTransformName | None = None
+    y_transform_kwargs: dict[str, object] | None = None
     y_lim: tuple = (1, 100e3)
     epsilon: float = 0.0
     verbose: bool = False
@@ -494,12 +805,15 @@ class PISMDataset(Dataset):
         If True, z-score normalize the features (per column).
     log_y : bool, default=True
         If True, apply ``log10`` to responses (match previous behavior).
+    y_lim : tuple, optional
+        Physical-space clamp range ``(ymin, ymax)`` applied to training responses
+        and the target vector *before* transformation. Default is ``(1e-1, 100e3)``.
     epsilon : float, default=0.0
         Replace NaNs with this epsilon when reading arrays.
     verbose : bool, default=False
         Print rank-0 progress.
-    target_engine : str, default="netcdf4"
-        xarray engine.
+    engine : str, default="netcdf4"
+        The xarray engine.
     parallel : bool, default=True
         If True, read training files in parallel with a process pool.
     chunks_after : dict or None, default=None
@@ -530,7 +844,7 @@ class PISMDataset(Dataset):
         y_lim: tuple = (1, 100e3),
         epsilon: float = 0.0,
         verbose: bool = False,
-        target_engine: str = "netcdf4",
+        engine: str = "netcdf4",
         parallel: bool = True,
         chunks_after: dict[str, int] | None = None,
         dask_scheduler: str | None = None,
@@ -582,7 +896,14 @@ class PISMDataset(Dataset):
         return min(self.samples.n_samples, self.samples.Y.shape[0])
 
     def __str__(self) -> str:
-        """Human-friendly one-liner."""
+        """
+        Human-friendly one-liner.
+
+        Returns
+        -------
+        str
+            Dataset Summary.
+        """
         cfg = self.cfg
         tgt = self.target
         smp = self.samples
@@ -600,7 +921,14 @@ class PISMDataset(Dataset):
         )
 
     def __repr__(self) -> str:
-        """Detailed, multi-line summary (compact even with many files)."""
+        """
+        Detailed, multi-line summary (compact even with many files).
+
+        Returns
+        -------
+        str
+            Dataset Summary.
+        """
         cfg = self.cfg
         tgt = self.target
         smp = self.samples
@@ -645,13 +973,9 @@ class PISMDataset(Dataset):
     def _load_target_and_mask(self) -> TargetData:
         cfg = self.cfg
         if cfg.verbose:
-            rank_zero_info(
-                f"Loading target {cfg.target_file} (engine={cfg.engine})"
-            )
+            rank_zero_info(f"Loading target {cfg.target_file} (engine={cfg.engine})")
 
-        ds = xr.open_dataset(
-            cfg.target_file, decode_times=False, engine=cfg.engine
-        )
+        ds = xr.open_dataset(cfg.target_file, decode_times=False, engine=cfg.engine)
 
         if cfg.target_var not in ds:
             raise KeyError(f"'{cfg.target_var}' not found in target file")
@@ -857,22 +1181,131 @@ class PISMDataset(Dataset):
 
 
 class LegacyPISMDataset(torch.utils.data.Dataset):
+    """
+    Legacy PyTorch Dataset for PISM ensemble training data and an observational target.
+
+    This class loads:
+
+    * A *target* field from ``target_file`` (e.g., observed velocity) and builds a
+      sparse index selecting valid grid cells (optionally filtered by a correlation/
+      quality field such as thickness).
+    * An ensemble of *training* fields from NetCDF files in ``data_dir`` and
+      extracts the values at the target's observed grid cells.
+    * A parameter/sample table from ``samples_file`` (CSV) aligned by run ``id``.
+    * Optional feature normalization for ``X`` and optional log10 transform for ``Y``.
+
+    Parameters
+    ----------
+    data_dir : str, optional
+        Directory containing training NetCDF files (globbed as ``*.nc``).
+        Default is ``"path/to/dir"``.
+    samples_file : str, optional
+        Path to a CSV file containing ensemble parameters and an ``id`` column.
+        Default is ``"path/to/file"``.
+    target_file : str or None, optional
+        Path to a NetCDF file containing the target/observational field.
+        If None, :meth:`load_target` will fail. Default is None.
+    target_var : str, optional
+        Variable name in ``target_file`` used as the target field (e.g.,
+        ``"velsurf_mag"``). Default is ``"velsurf_mag"``.
+    target_corr_threshold : float, optional
+        Threshold applied to ``target_corr_var`` to mask unreliable target cells.
+        Cells with ``target_corr_var < target_corr_threshold`` are masked.
+        Default is 25.0.
+    target_corr_var : str, optional
+        Variable name in ``target_file`` used to build an additional mask
+        (e.g., thickness). Default is ``"thickness"``.
+    target_error_var : str, optional
+        Optional variable name in ``target_file`` containing target error
+        (e.g., ``"velsurf_mag_error"``). Default is ``"velsurf_mag_error"``.
+    training_var : str, optional
+        Variable name in training NetCDF files used as the training response.
+        Default is ``"velsurf_mag"``.
+    normalize_x : bool, optional
+        If True, standardize ``X`` using mean/std computed from the retained
+        samples. Default is True.
+    log_y : bool, optional
+        If True, apply a base-10 log transform to training responses ``Y``.
+        Default is True.
+    threshold : float, optional
+        Upper bound used to filter out runs with extreme responses. Runs are
+        retained if their maximum response satisfies ``max(Y) < threshold``.
+        Default is 100e3.
+    epsilon : float, optional
+        Fill value used when replacing NaNs in target/training fields.
+        Default is 0.0.
+    verbose : bool, optional
+        If True, print additional info (e.g., missing run ids). Default is False.
+
+    Notes
+    -----
+    This is retained for backward compatibility. The newer dataset classes
+    (e.g., ``PISMDataset`` / ``PISMInterpolatedDataset``) provide a more explicit
+    configuration interface and more robust preprocessing.
+    """
+
     def __init__(
         self,
-        data_dir="path/to/dir",
-        samples_file="path/to/file",
-        target_file=None,
-        target_var="velsurf_mag",
-        target_corr_threshold=25.0,
-        target_corr_var="thickness",
-        target_error_var="velsurf_mag_error",
-        training_var="velsurf_mag",
-        normalize_x=True,
-        log_y=True,
-        threshold=100e3,
-        epsilon=0,
-        verbose=False,
-    ):
+        data_dir: str = "path/to/dir",
+        samples_file: str = "path/to/file",
+        target_file: str | None = None,
+        target_var: str = "velsurf_mag",
+        target_corr_threshold: float = 25.0,
+        target_corr_var: str = "thickness",
+        target_error_var: str = "velsurf_mag_error",
+        training_var: str = "velsurf_mag",
+        normalize_x: bool = True,
+        log_y: bool = True,
+        threshold: float = 100e3,
+        epsilon: float = 0.0,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Initialize the dataset and load target + training data.
+
+        Parameters
+        ----------
+        data_dir : str, optional
+            Directory containing training NetCDF files (globbed as ``*.nc``).
+            Default is ``"path/to/dir"``.
+        samples_file : str, optional
+            Path to a CSV file containing ensemble parameters and an ``id`` column.
+            Default is ``"path/to/file"``.
+        target_file : str or None, optional
+            Path to a NetCDF file containing the target/observational field.
+            If None, :meth:`load_target` will fail. Default is None.
+        target_var : str, optional
+            Variable name in ``target_file`` used as the target field (e.g.,
+            ``"velsurf_mag"``). Default is ``"velsurf_mag"``.
+        target_corr_threshold : float, optional
+            Threshold applied to ``target_corr_var`` to mask unreliable target cells.
+            Cells with ``target_corr_var < target_corr_threshold`` are masked.
+            Default is 25.0.
+        target_corr_var : str, optional
+            Variable name in ``target_file`` used to build an additional mask
+            (e.g., thickness). Default is ``"thickness"``.
+        target_error_var : str, optional
+            Optional variable name in ``target_file`` containing target error
+            (e.g., ``"velsurf_mag_error"``). Default is ``"velsurf_mag_error"``.
+        training_var : str, optional
+            Variable name in training NetCDF files used as the training response.
+            Default is ``"velsurf_mag"``.
+        normalize_x : bool, optional
+            If True, standardize ``X`` using mean/std computed from the retained
+            samples. Default is True.
+        log_y : bool, optional
+            If True, apply a base-10 log transform to training responses ``Y``.
+            Default is True.
+        threshold : float, optional
+            Upper bound used to filter out runs with extreme responses. Runs are
+            retained if their maximum response satisfies ``max(Y) < threshold``.
+            Default is 100e3.
+        epsilon : float, optional
+            Fill value used when replacing NaNs in target/training fields.
+            Default is 0.0.
+        verbose : bool, optional
+            If True, print additional info (e.g., missing run ids). Default is False.
+        """
         self.data_dir = data_dir
         self.samples_file = samples_file
         self.target_file = target_file
@@ -886,88 +1319,136 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         self.log_y = log_y
         self.normalize_x = normalize_x
         self.verbose = verbose
+
         self.load_target()
         self.load_data()
 
-    def __getitem__(self, i):
+    def __getitem__(self, i: int) -> tuple[Tensor, Tensor]:
+        """
+        Get one sample.
+
+        Parameters
+        ----------
+        i : int
+            Sample index.
+
+        Returns
+        -------
+        tuple of torch.Tensor
+            ``(X[i], Y[i])`` where ``X`` are normalized (if enabled) parameters and
+            ``Y`` are the corresponding training responses at observed grid cells.
+        """
         return tuple(d[i] for d in [self.X, self.Y])
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """
+        Return the number of samples.
+
+        Returns
+        -------
+        int
+            Number of samples in the dataset.
+        """
         return min(len(d) for d in [self.X, self.Y])
 
-    def load_target(self):
+    def load_target(self) -> None:
+        """
+        Load the target field and build sparse indices for observed grid cells.
+
+        This method reads ``target_var`` from ``target_file`` and creates a mask
+        of invalid cells using NaNs and (optionally) ``target_corr_var``. It then
+        stores:
+
+        * ``Y_target`` : target values at valid grid cells (1D tensor)
+        * ``Y_target_2d`` : masked 2D target field (numpy masked array)
+        * ``sparse_idx_2d`` / ``sparse_idx_1d`` : indices of valid cells
+        * Optional error/correlation fields if present.
+
+        Notes
+        -----
+        The target values are **not** transformed (e.g., no log scaling) in this
+        legacy implementation; only training ``Y`` may be log-transformed in
+        :meth:`load_data`.
+        """
         epsilon = self.epsilon
         rank_zero_info(f"Loading target {self.target_file}")
+
         ds = xr.open_dataset(self.target_file, decode_times=False)
         data = ds[self.target_var].squeeze()
         mask = data.isnull()
-        data = np.nan_to_num(
-            data.values,
-            nan=epsilon,
-        )
+        data = np.nan_to_num(data.values, nan=epsilon)
+
         ny, nx = data.shape
+
         self.target_has_error = False
         if self.target_error_var in ds.variables:
             data_error = ds[self.target_error_var].squeeze()
-            data_error = np.nan_to_num(
-                data_error.values,
-                nan=epsilon,
-            )
+            data_error = np.nan_to_num(data_error.values, nan=epsilon)
             self.target_has_error = True
 
         self.target_has_corr = False
         if self.target_corr_var in ds.variables:
             data_corr = ds[self.target_corr_var].squeeze()
-            data_corr = np.nan_to_num(
-                data_corr.values,
-                nan=epsilon,
-            )
+            data_corr = np.nan_to_num(data_corr.values, nan=epsilon)
             self.target_has_corr = True
             mask = mask.where(data_corr >= self.target_corr_threshold, True)
+
         mask = mask.values
 
         grid_resolution = np.abs(np.diff(ds["x"][0:2]))[0]
         self.grid_resolution = grid_resolution
+
         ds.close()
 
         idx = (mask == 0).nonzero()
 
         data = data[idx]
-        Y_target = torch.from_numpy(np.array(data.flatten(), dtype=np.float32))
-        self.Y_target = Y_target
+        self.Y_target = torch.from_numpy(np.array(data.flatten(), dtype=np.float32))
+
         if self.target_has_error:
             data_error = data_error[idx]
-            Y_target_error_2d = data_error
-            Y_target_error = torch.from_numpy(
+            self.Y_target_error_2d = data_error
+            self.Y_target_error = torch.from_numpy(
                 np.array(data_error.flatten(), dtype=np.float32)
             )
 
-            self.Y_target_error = Y_target_error
-            self.Y_target_error_2d = Y_target_error_2d
         if self.target_has_corr:
             data_corr = data_corr[idx]
-            Y_target_corr_2d = data_corr
-            Y_target_corr = torch.from_numpy(
+            self.Y_target_corr_2d = data_corr
+            self.Y_target_corr = torch.from_numpy(
                 np.array(data_corr.flatten(), dtype=np.float32)
             )
 
-            self.Y_target_corr = Y_target_corr
-            self.Y_target_corr_2d = Y_target_corr_2d
         self.mask_2d = mask
         self.sparse_idx_2d = idx
         self.sparse_idx_1d = np.ravel_multi_index(idx, mask.shape)
+
         data_2d = np.zeros((ny, nx))
         data_2d.put(self.sparse_idx_1d, data)
-        Y_target_2d = np.ma.array(data=data_2d, mask=self.mask_2d)
-        self.Y_target_2d = Y_target_2d
+        self.Y_target_2d = np.ma.array(data=data_2d, mask=self.mask_2d)
 
-    def load_data(self):
+    def load_data(self) -> None:
+        """
+        Load training responses and parameter samples, align by run id, and preprocess.
+
+        This method:
+
+        1. Finds all training NetCDF files in ``data_dir`` and extracts integer run
+           ids from filenames matching ``id_(\\d+)_``.
+        2. Loads the samples CSV from ``samples_file`` and drops any rows with ids
+           not present in the training file set.
+        3. Extracts the training response at the target's valid grid cells for each run.
+        4. Filters out runs whose maximum response exceeds ``threshold``.
+        5. Optionally log10-transforms responses (``log_y=True``) and normalizes
+           the sample parameters (``normalize_x=True``).
+        """
         epsilon = self.epsilon
 
         identifier_name = "id"
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
         training_files = list(OrderedDict.fromkeys(training_files))
+
         pat: Pattern[str] = re.compile(r"id_(\d+)_")
 
         ids: list[int] = []
@@ -975,6 +1456,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
             if (m := pat.search(f)) is None:
                 raise ValueError(f"Could not find id_..._ in filename: {f!r}")
             ids.append(int(m.group(1)))
+
         samples = (
             pd.read_csv(self.samples_file, delimiter=",", skipinitialspace=True)
             .squeeze("columns")
@@ -987,8 +1469,6 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         ids_df.index = ids_df[identifier_name]
         ids_df.index.name = None
 
-        # It is possible that not all ensemble simulations succeeded and returned a value
-        # so we must search for missing response values
         missing_ids = list(set(samples["id"]).difference(ids_df["id"]))
         if missing_ids:
             if self.verbose:
@@ -996,24 +1476,21 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
                     f"The following simulations are missing:\n   {missing_ids}"
                 )
                 rank_zero_info("  adjusting priors")
-            # and remove the missing samples and responses
-            samples_missing_removed = samples[~samples["id"].isin(missing_ids)]
-            samples = samples_missing_removed
+            samples = samples[~samples["id"].isin(missing_ids)]
 
         samples = samples.drop(samples.columns[0], axis=1)
-        m_samples, n_parameters = samples.shape
         self.X_keys = samples.keys()
 
         ds0 = xr.open_dataset(training_files[0], decode_times=False)
         _, ny, nx = ds0.variables[self.target_var].values.shape
-
         ds0.close()
+
         self.nx = nx
         self.ny = ny
-        response = np.zeros((m_samples, len(self.sparse_idx_1d)))
+
+        response = np.zeros((len(samples), len(self.sparse_idx_1d)))
 
         rank_zero_info("  Loading data sets...")
-        pat = re.compile(r"id_(\d+)_")
 
         def _id_key(path: str) -> int:
             m = pat.search(path)
@@ -1022,73 +1499,153 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
             return int(m.group(1))
 
         training_files.sort(key=_id_key)
+
         start_time = time()
         for idx, m_file in tqdm_rank0(
             enumerate(training_files), total=len(training_files)
         ):
             ds = xr.open_dataset(m_file, decode_times=False)
             data = np.squeeze(
-                np.nan_to_num(
-                    ds.variables[training_var].values,
-                    nan=epsilon,
-                )
+                np.nan_to_num(ds.variables[training_var].values, nan=epsilon)
             )
             response[idx, :] = data[self.sparse_idx_2d].flatten()
             ds.close()
+
         end_time = time()
         self.training_files = training_files
         rank_zero_info(f"Reading training data took {(end_time-start_time):.0f}s")
 
-        p = response.max(axis=1) < 100e3
+        keep = response.max(axis=1) < self.threshold
+
         if self.log_y:
             response = np.log10(response)
             response[np.isneginf(response)] = 0
 
-        X = torch.from_numpy(np.array(samples[p], dtype=np.float32))
-        Y = torch.from_numpy(np.array(response[p], dtype=np.float32))
+        X = torch.from_numpy(np.array(samples[keep], dtype=np.float32))
+        Y = torch.from_numpy(np.array(response[keep], dtype=np.float32))
 
-        X_mean = X.mean(axis=0)
-        X_std = X.std(axis=0)
-        self.X_mean = X_mean
-        self.X_std = X_std
+        self.X_mean = X.mean(axis=0)
+        self.X_std = X.std(axis=0)
 
         if self.normalize_x:
-            X = (X - X_mean) / X_std
+            X = (X - self.X_mean) / self.X_std
 
         self.X = X
         self.Y = Y
 
-        n_parameters = X.shape[1]
-        self.n_parameters = n_parameters
-        n_samples, n_grid_points = Y.shape
-        self.n_samples = n_samples
-        self.n_grid_points = n_grid_points
+        self.n_parameters = X.shape[1]
+        self.n_samples, self.n_grid_points = Y.shape
 
-        normed_area = np.ones(n_grid_points, dtype=np.float32)
-        normed_area = torch.tensor(normed_area)
-        normed_area /= normed_area.sum()
-        self.normed_area = normed_area
+        normed_area = torch.ones(self.n_grid_points, dtype=torch.float32)
+        self.normed_area = normed_area / normed_area.sum()
 
-    def return_original(self):
+    def return_original(self) -> Tensor:
+        """
+        Return parameters in original (unnormalized) space.
+
+        Returns
+        -------
+        torch.Tensor
+            Parameter tensor ``X`` in physical/original units. If normalization
+            was disabled, this simply returns ``self.X``.
+        """
         X = self.X
         if self.normalize_x:
-            X *= self.X_std
-            X += self.X_mean
-
+            X = X * self.X_std + self.X_mean
         return X
 
 
 class PISMInterpolatedDataset(Dataset):
     """
-    Like PISMDataset, but interpolates the target onto the first training file's grid
-    using xarray.interp_like, then builds the sparse node index
-    from the interpolated target.
+    Dataset for PISM emulator training with an interpolated observational target.
 
-    Behavior mirrors PISMDataset for:
-      - y_lim-based filtering (upper limit for run filtering; clamped for log),
-      - log_y transform (safe log10 with clamp to y_lim),
-      - feature normalization,
-      - DatasetConfig/TargetData/SamplesData usage.
+    This dataset is similar to :class:`PISMDataset`, but first interpolates the
+    target field onto the grid of the first training file using
+    :meth:`xarray.DataArray.interp_like`. After interpolation, it builds a sparse
+    index of "observed" grid cells (non-masked) and extracts training responses at
+    those cells for each ensemble run.
+
+    The dataset supports:
+    * feature normalization of parameters ``X`` (standard score per column),
+    * response/target transforms via ``y_transform`` (applied consistently to both
+      training responses and the target vector),
+    * masking based on missing target values and an optional correlation/quality
+      variable (e.g., thickness),
+    * optional extraction of target error and correlation fields.
+
+    Parameters
+    ----------
+    training_files : Sequence[str] or str
+        Either a sequence of NetCDF paths, or a glob pattern that resolves to the
+        training files. The first file is used as the reference grid for target
+        interpolation.
+    samples_file : str
+        Path to a CSV file containing ensemble parameters. Must include an ``id``
+        column matching training file run ids parsed from filenames.
+    target_file : str
+        Path to a NetCDF file containing the target/observational field.
+    training_var : str, optional
+        Variable name in training files used as the response field. Default is
+        ``"velsurf_mag"``.
+    target_var : str, optional
+        Variable name in ``target_file`` used as the target field. Default is
+        ``"velsurf_mag"``.
+    target_corr_var : str, optional
+        Optional variable name in ``target_file`` used to mask target cells based
+        on a correlation/quality threshold (e.g., ``"thickness"``). Default is
+        ``"thickness"``.
+    target_error_var : str, optional
+        Optional variable name in ``target_file`` containing target uncertainties.
+        Default is ``"velsurf_mag_error"``.
+    target_corr_threshold : float, optional
+        Threshold applied to ``target_corr_var`` when present. Cells with
+        ``target_corr_var < target_corr_threshold`` are masked. Default is 25.0.
+    normalize_x : bool, optional
+        If True, standardize ``X`` using mean/std over the retained samples.
+        Default is True.
+    y_transform : YTransformName or None, optional
+        Name of the response/target transform. If None, no transform is applied.
+        Typical values include ``"none"``, ``"log10"``, and ``"robust"``.
+        Default is None.
+    y_transform_kwargs : dict[str, object] or None, optional
+        Optional keyword arguments/parameters for the chosen transform. For
+        example, robust scaling may use pre-fit parameters (center/scale) or
+        configuration options. Default is None.
+    y_lim : tuple, optional
+        Physical-space clamp range ``(ymin, ymax)`` applied to training responses
+        and the target vector *before* transformation. Default is ``(1e-1, 100e3)``.
+    epsilon : float, optional
+        Fill value used when replacing missing target values or training values.
+        Default is 0.0.
+    engine : str, optional
+        Xarray backend engine used to read NetCDF files (e.g., ``"netcdf4"``).
+        Default is ``"netcdf4"``.
+    parallel : bool, optional
+        If True, read training files in parallel using a process pool. Default is True.
+    chunks_after : dict[str, int] or None, optional
+        Optional chunking dictionary applied after load (reserved for dask/xarray
+        workflows). Default is None.
+    dask_scheduler : str or None, optional
+        Optional Dask scheduler name to set via ``dask.config.set``. Default is None.
+
+    Attributes
+    ----------
+    cfg : DatasetConfig
+        Configuration object capturing file paths, variable names, and preprocessing
+        options.
+    target : TargetData
+        Target data container (mask, indices, target vector, and optional error/corr).
+    samples : SamplesData
+        Sample/response container storing normalized features ``X`` and responses ``Y``.
+
+    Notes
+    -----
+    * The target is clamped to ``y_lim`` during target loading, but **not**
+      transformed there; transforms are applied later in
+      :meth:`_load_training_and_samples` so that training and target transforms are
+      guaranteed to match.
+    * Run filtering uses the maximum value of each run's response in physical
+      space: a run is kept if ``max(response) < y_lim[1]``.
     """
 
     def __init__(
@@ -1103,14 +1660,88 @@ class PISMInterpolatedDataset(Dataset):
         target_error_var: str = "velsurf_mag_error",
         target_corr_threshold: float = 25.0,
         normalize_x: bool = True,
-        log_y: bool = True,
-        y_lim: tuple = (1, 100e3),
+        y_transform: YTransformName | None = None,
+        y_transform_kwargs: dict[str, object] | None = None,
+        y_lim: tuple = (1e-1, 100e3),
         epsilon: float = 0.0,
         engine: str = "netcdf4",
         parallel: bool = True,
         chunks_after: dict[str, int] | None = None,
         dask_scheduler: str | None = None,
     ) -> None:
+        """
+        Initialize the dataset, load the target (interpolated) and training samples.
+
+        See class docstring for parameter descriptions.
+
+        Parameters
+        ----------
+        training_files : Sequence[str] or str
+            Either a sequence of NetCDF paths, or a glob pattern that resolves to the
+            training files. The first file is used as the reference grid for target
+            interpolation.
+        samples_file : str
+            Path to a CSV file containing ensemble parameters. Must include an ``id``
+            column matching training file run ids parsed from filenames.
+        target_file : str
+            Path to a NetCDF file containing the target/observational field.
+        training_var : str, optional
+            Variable name in training files used as the response field. Default is
+            ``"velsurf_mag"``.
+        target_var : str, optional
+            Variable name in ``target_file`` used as the target field. Default is
+            ``"velsurf_mag"``.
+        target_corr_var : str, optional
+            Optional variable name in ``target_file`` used to mask target cells based
+            on a correlation/quality threshold (e.g., ``"thickness"``). Default is
+            ``"thickness"``.
+        target_error_var : str, optional
+            Optional variable name in ``target_file`` containing target uncertainties.
+            Default is ``"velsurf_mag_error"``.
+        target_corr_threshold : float, optional
+            Threshold applied to ``target_corr_var`` when present. Cells with
+            ``target_corr_var < target_corr_threshold`` are masked. Default is 25.0.
+        normalize_x : bool, optional
+            If True, standardize ``X`` using mean/std over the retained samples.
+            Default is True.
+        y_transform : YTransformName or None, optional
+            Name of the response/target transform. If None, no transform is applied.
+            Typical values include ``"none"``, ``"log10"``, and ``"robust"``.
+            Default is None.
+        y_transform_kwargs : dict[str, object] or None, optional
+            Optional keyword arguments/parameters for the chosen transform. For
+            example, robust scaling may use pre-fit parameters (center/scale) or
+            configuration options. Default is None.
+        y_lim : tuple, optional
+            Physical-space clamp range ``(ymin, ymax)`` applied to training responses
+            and the target vector *before* transformation. Default is ``(1e-1, 100e3)``.
+        epsilon : float, optional
+            Fill value used when replacing missing target values or training values.
+            Default is 0.0.
+        engine : str, optional
+            Xarray backend engine used to read NetCDF files (e.g., ``"netcdf4"``).
+            Default is ``"netcdf4"``.
+        parallel : bool, optional
+            If True, read training files in parallel using a process pool. Default is True.
+        chunks_after : dict[str, int] or None, optional
+            Optional chunking dictionary applied after load (reserved for dask/xarray
+            workflows). Default is None.
+        dask_scheduler : str or None, optional
+            Optional Dask scheduler name to set via ``dask.config.set``. Default is None.
+
+        Raises
+        ------
+        TypeError
+            If ``training_files`` is not a sequence of paths or a glob pattern string.
+        FileNotFoundError
+            If no training files are provided or resolved.
+        KeyError
+            If required variables are missing from the reference training file or
+            target file.
+        ValueError
+            If run ids cannot be parsed from training filenames.
+        """
+
         # Resolve training files (same logic as PISMDataset)
         if isinstance(training_files, (list, tuple)):
             tfiles = [str(p) for p in training_files]
@@ -1135,8 +1766,8 @@ class PISMInterpolatedDataset(Dataset):
             target_error_var=target_error_var,
             target_corr_threshold=float(target_corr_threshold),
             normalize_x=bool(normalize_x),
-            log_y=bool(log_y),
             y_lim=tuple(y_lim),
+            y_transform=y_transform if y_transform is not None else "none",
             epsilon=float(epsilon),
             engine=engine,
             parallel=bool(parallel),
@@ -1164,19 +1795,68 @@ class PISMInterpolatedDataset(Dataset):
             "PISMInterpolatedDataset("
             f"n_samples={smp.n_samples}, n_parameters={smp.n_parameters}, "
             f"grid={tgt.ny}x{tgt.nx}, observed_nodes={tgt.sparse_idx_1d.size}, "
-            f"normalize_x={cfg.normalize_x}, log_y={cfg.log_y}, "
+            f"normalize_x={cfg.normalize_x}, y_transform={cfg.y_transform}, "
             f"training_var='{cfg.training_var}', target_var='{cfg.target_var}', "
             f"engines=(target='{cfg.engine}', training='{cfg.engine}'))"
         )
 
     @staticmethod
     def _parse_id(path: str) -> int:
+        """
+        Parse the integer run id from a training filename.
+
+        Parameters
+        ----------
+        path : str
+            Path to a training file. The filename must contain a substring
+            matching ``id_(\\d+)_``.
+
+        Returns
+        -------
+        int
+            Parsed run id.
+
+        Raises
+        ------
+        ValueError
+            If the id cannot be parsed from the filename.
+        """
         m = re.search(r"id_(\d+)_", Path(path).name)
         if not m:
             raise ValueError(f"Could not parse id from filename: {path}")
         return int(m.group(1))
 
     def _load_target_interp_and_mask(self) -> TargetData:
+        """
+        Load the target file, interpolate it to the reference grid, and build masks/indices.
+
+        This method:
+        1. Opens the first training file to establish a reference grid.
+        2. Opens the target file and interpolates ``target_var`` to the reference grid
+           using :meth:`xarray.DataArray.interp_like`.
+        3. Constructs a boolean mask from NaNs and, if present, masks additional
+           cells where ``target_corr_var < target_corr_threshold``.
+        4. Builds sparse indices (2D and 1D) for non-masked grid cells and vectorizes
+           the interpolated target field at those cells.
+        5. Optionally extracts and vectorizes target error and correlation fields.
+
+        Returns
+        -------
+        TargetData
+            Target container including:
+            * ``Y_target`` (1D torch tensor on observed nodes),
+            * ``Y_target_2d`` (masked 2D numpy array),
+            * mask and sparse indices,
+            * optional error and correlation vectors/2D arrays.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no training files are available.
+        KeyError
+            If ``training_var`` is missing from the reference training file or if
+            ``target_var`` is missing from the target file.
+        """
         cfg = self.cfg
 
         rank_zero_info(f"Loading target {cfg.target_file} (engine={cfg.engine})")
@@ -1196,9 +1876,7 @@ class PISMInterpolatedDataset(Dataset):
         ny = int(ref_da.sizes[ref_y_dim])
         nx = int(ref_da.sizes[ref_x_dim])
 
-        dtgt = xr.open_dataset(
-            cfg.target_file, decode_times=False, engine=cfg.engine
-        )
+        dtgt = xr.open_dataset(cfg.target_file, decode_times=False, engine=cfg.engine)
         if cfg.target_var not in dtgt:
             dref.close()
             dtgt.close()
@@ -1239,11 +1917,8 @@ class PISMInterpolatedDataset(Dataset):
         )
         targ_vec = targ_vec[sparse_idx_1d]
         Y_target = torch.from_numpy(targ_vec.astype(np.float32))
-
-        # Apply same log scaling policy as PISMDataset
-        if cfg.log_y:
-            # Clamp to y_lim then log10, identical to PISMDataset
-            Y_target = torch.log10(torch.clamp(Y_target, *cfg.y_lim))
+        Y_target = torch.clamp(Y_target, *cfg.y_lim)
+        # DO NOT transform here anymore
 
         # Optional error/corr 2D fields (already on ref grid)
         Y_target_error = Y_target_error_2d = None
@@ -1304,6 +1979,33 @@ class PISMInterpolatedDataset(Dataset):
 
     # ---------- training + samples (same policy as PISMDataset) ----------
     def _load_training_and_samples(self) -> SamplesData:
+        """
+        Load training responses and parameter samples, apply filtering and transforms.
+
+        This method:
+        1. Parses run ids from training filenames and aligns them with the samples CSV.
+        2. Reads training responses at the target's observed nodes (optionally in parallel).
+        3. Filters out runs with extreme values using the physical-space upper bound
+           ``y_lim[1]``.
+        4. Builds tensors ``X`` (parameters) and ``Y`` (responses), clamps ``Y`` to
+           ``y_lim``, and applies ``y_transform`` to both ``Y`` and the target vector.
+        5. Optionally standardizes ``X`` (mean/std) when ``normalize_x=True``.
+
+        Returns
+        -------
+        SamplesData
+            Container with fields:
+            * ``X`` : feature tensor (normalized if enabled), shape ``(N, P)``
+            * ``Y`` : response tensor (transformed if enabled), shape ``(N, G_obs)``
+            * ``X_mean`` / ``X_std`` : feature normalization statistics
+            * ``normed_area`` : uniform normalized weights over observed nodes
+
+        Notes
+        -----
+        The same transform parameters ``params`` returned by ``_apply_y_transform`` are
+        reused to transform the target vector, ensuring the model is trained and
+        evaluated in a consistent response space.
+        """
         cfg, tgt = self.cfg, self.target
 
         rank_zero_info("  Loading samples & training responses (netCDF4 direct)")
@@ -1372,9 +2074,23 @@ class PISMInterpolatedDataset(Dataset):
         X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
         Y = torch.from_numpy(response.astype(np.float32)[good])
         Y = torch.clamp(Y, *cfg.y_lim)
-        # Same scaling policy: clamp to y_lim and log10 if requested
-        if cfg.log_y:
-            Y = torch.log10(Y)
+
+        name = cfg.y_transform
+        params = dict(cfg.y_transform_kwargs or {})
+
+        Y, params = _apply_y_transform(Y, name=name, y_lim=cfg.y_lim, params=params)
+
+        # Apply same transform to the target vector (already clamped in _load_target_and_mask)
+        tY = self.target.Y_target
+        tY, _ = _apply_y_transform(tY, name=name, y_lim=cfg.y_lim, params=params)
+        self.target.Y_target = tY
+
+        # Rebuild Y_target_2d so it matches transformed Y_target
+        y2d = np.zeros((self.target.ny, self.target.nx), dtype=np.float32)
+        y2d.flat[self.target.sparse_idx_1d] = (
+            self.target.Y_target.detach().cpu().numpy()
+        )
+        self.target.Y_target_2d = np.ma.array(data=y2d, mask=self.target.mask_2d)
 
         X_keys = list(samples.columns)
         X_mean = X.mean(dim=0)

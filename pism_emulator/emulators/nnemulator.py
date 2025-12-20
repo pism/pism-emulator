@@ -16,7 +16,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 """
-Neural Network Emulators
+Neural Network Emulators.
 """
 import math
 from argparse import ArgumentParser
@@ -31,11 +31,30 @@ from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, _LRScheduler
 
-from pism_emulator.metrics import AreaAbsoluteError, area_absolute_error
+from pism_emulator.metrics import AreaWeightedError, area_weighted_error
 
 
 def _kaiming_init(module: nn.Module) -> None:
-    """Kaiming-uniform init for Linear layers; zero-init biases."""
+    """
+    Initialize ``nn.Linear`` layers with Kaiming-uniform weights and zero biases.
+
+    This helper is intended to be passed to :meth:`torch.nn.Module.apply`, e.g.::
+
+        model.apply(_kaiming_init)
+
+    Parameters
+    ----------
+    module : torch.nn.Module
+        Module to initialize. If ``module`` is an instance of :class:`torch.nn.Linear`,
+        its ``weight`` is initialized with :func:`torch.nn.init.kaiming_uniform_` and
+        its ``bias`` (when present) is set to zeros. Other module types are left
+        unchanged.
+
+    Returns
+    -------
+    None
+        This function modifies ``module`` in place.
+    """
     if isinstance(module, nn.Linear):
         nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
         if module.bias is not None:
@@ -43,7 +62,34 @@ def _kaiming_init(module: nn.Module) -> None:
 
 
 class MLPBlock(nn.Module):
-    """A single MLP block: Linear -> Norm -> Dropout -> Activation."""
+    """
+    Feed-forward MLP block used in residual MLP emulators.
+
+    This block applies the following sequence:
+
+    ``Linear -> LayerNorm -> Dropout -> Activation``
+
+    Parameters
+    ----------
+    in_features : int
+        Number of input features.
+    out_features : int
+        Number of output features.
+    p_dropout : float, optional
+        Dropout probability applied after normalization. Default is 0.0.
+    activation : {"relu", "silu", "gelu"}, optional
+        Activation function name (case-insensitive). Default is ``"relu"``.
+
+    Raises
+    ------
+    ValueError
+        If ``activation`` is not one of ``{"relu", "silu", "gelu"}``.
+
+    Notes
+    -----
+    The forward order mirrors the legacy implementation:
+    ``Linear -> Norm -> Dropout -> Activation``.
+    """
 
     def __init__(
         self,
@@ -56,54 +102,143 @@ class MLPBlock(nn.Module):
         self.lin = nn.Linear(in_features, out_features)
         self.norm = nn.LayerNorm(out_features)
 
-        if activation.lower() == "relu":
+        act = activation.lower()
+        if act == "relu":
             self.act: nn.Module = nn.ReLU()
-        elif activation.lower() == "silu":
+        elif act == "silu":
             self.act = nn.SiLU()
-        elif activation.lower() == "gelu":
+        elif act == "gelu":
             self.act = nn.GELU()
         else:
             raise ValueError(f"Unknown activation '{activation}'")
 
         self.drop = nn.Dropout(p_dropout)
 
-    # mirror old order: Linear -> Norm -> Dropout -> ReLU
-    def forward(self, x: Tensor) -> Tensor:  # noqa: D401
-        """Forward pass."""
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Apply the block to an input tensor.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape ``(..., in_features)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor with shape ``(..., out_features)``.
+        """
         return self.act(self.drop(self.norm(self.lin(x))))
 
 
 class DNNEmulator(pl.LightningModule):
     """
-    A deeper residual MLP emulator that maps parameter vectors ``x``
-    to glacier field coefficients then back to physical space via
-    a fixed basis ``V_hat`` and optional mean ``F_mean``.
+    Deep neural network emulator for PISM glacier fields.
+
+    This model maps a vector of input parameters ``x`` to a set of coefficients in a
+    reduced basis (the "eigenglacier" basis), and reconstructs full fields in physical
+    space via a fixed matrix ``V_hat``:
+
+    .. math::
+
+        \\hat{F}(x) = c(x) V_{\\hat{}}^T \\, (+\\, F_{\\mathrm{mean}})
+
+    where ``c(x)`` are learned coefficients and ``F_mean`` is an optional mean field
+    added back during reconstruction.
+
+    Parameters
+    ----------
+    n_parameters : int
+        Number of input parameters (feature dimension of ``x``).
+    V_hat : torch.Tensor
+        Fixed basis matrix used to reconstruct fields from coefficients.
+        Shape ``(n_nodes, n_eigenglaciers)``.
+    F_mean : torch.Tensor
+        Mean field in physical space. Shape ``(n_nodes,)`` (or broadcastable
+        to ``(batch, n_nodes)``).
+    area : torch.Tensor
+        Per-node area weights used in area-weighted loss/metrics. Shape
+        ``(n_nodes,)`` (or broadcastable).
+    n_eigenglaciers : int or None, optional
+        Number of basis vectors / coefficient dimension. If None, inferred
+        from ``V_hat.shape[1]``. Default is None.
+    **hparams : object
+        Additional hyperparameters controlling the network and optimization.
+        Common keys include:
+
+        * ``width`` : int, hidden width (default 128)
+        * ``depth`` : int, number of residual blocks (default 4)
+        * ``dropout`` : float, dropout probability (default 0.5)
+        * ``activation`` : {"relu","silu","gelu"}, activation function (default "relu")
+        * ``learning_rate`` : float, optimizer learning rate (default 1e-2)
+        * ``compile`` : bool, whether to try :func:`torch.compile` (default False)
 
     Notes
     -----
-    - Uses residual skip inside each block (pre-activation style).
-    - ``V_hat`` and ``F_mean`` are stored as non-trainable buffers so they land in state_dict but are not optimized.
+    * ``V_hat``, ``F_mean``, and ``area`` are registered as buffers (non-trainable)
+      so they are stored in the model state but not optimized.
+    * Optionally compiles the forward pass with :func:`torch.compile` when available.
     """
 
     def __init__(
         self,
-        n_parameters,
-        V_hat,
+        n_parameters: int,
+        V_hat: Tensor,
         F_mean: Tensor,
-        area,
+        area: Tensor,
         n_eigenglaciers: int | None = None,
-        **hparams,
+        **hparams: object,
     ) -> None:
+        """
+        Initialize the emulator.
+
+        Parameters
+        ----------
+        n_parameters : int
+            Number of input parameters (feature dimension of ``x``).
+        V_hat : torch.Tensor
+            Fixed basis matrix used to reconstruct fields from coefficients.
+            Shape ``(n_nodes, n_eigenglaciers)``.
+        F_mean : torch.Tensor
+            Mean field in physical space. Shape ``(n_nodes,)`` (or broadcastable
+            to ``(batch, n_nodes)``).
+        area : torch.Tensor
+            Per-node area weights used in area-weighted loss/metrics. Shape
+            ``(n_nodes,)`` (or broadcastable).
+        n_eigenglaciers : int or None, optional
+            Number of basis vectors / coefficient dimension. If None, inferred
+            from ``V_hat.shape[1]``. Default is None.
+        **hparams : object
+            Additional hyperparameters controlling the network and optimization.
+            Common keys include:
+
+            * ``width`` : int, hidden width (default 128)
+            * ``depth`` : int, number of residual blocks (default 4)
+            * ``dropout`` : float, dropout probability (default 0.5)
+            * ``activation`` : {"relu","silu","gelu"}, activation function (default "relu")
+            * ``learning_rate`` : float, optimizer learning rate (default 1e-2)
+            * ``compile`` : bool, whether to try :func:`torch.compile` (default False)
+
+        Raises
+        ------
+        ValueError
+            If ``n_eigenglaciers`` is None and ``V_hat`` is None (cannot infer output size).
+
+        Notes
+        -----
+        Only scalar hyperparameters are saved directly; large tensors are stored as
+        buffers and also saved (CPU copies) in the hyperparameter dict for reproducibility.
+        """
         super().__init__()
         flat = vars(hparams) if hasattr(hparams, "__dict__") else dict(hparams)
 
-        # infer n_eigenglaciers if not provided
         if n_eigenglaciers is None:
             if V_hat is None:
                 raise ValueError(
                     "n_eigenglaciers is None and V_hat is None; cannot infer output size."
                 )
             n_eigenglaciers = int(V_hat.shape[1])
+
         self.save_hyperparameters(
             {
                 **flat,
@@ -120,69 +255,73 @@ class DNNEmulator(pl.LightningModule):
         p_drop: float = float(self.hparams.get("dropout", 0.5))
         activation: str = str(self.hparams.get("activation", "relu"))
 
-        # input projection
         self.inp = MLPBlock(n_parameters, width, 0.0, activation=activation)
-
-        # residual stack
         self.blocks = nn.ModuleList(
             [
                 MLPBlock(width, width, p_drop, activation=activation)
                 for _ in range(depth)
             ]
         )
-
-        # output head to coefficient space, then project back with V_hat
         self.head = nn.Linear(width, n_eigenglaciers)
 
-        # buffers (non-trainable, but saved with state)
         self.register_buffer("V_hat", V_hat, persistent=True)
         self.register_buffer("F_mean", F_mean, persistent=True)
         self.register_buffer("area", area, persistent=True)
 
-        # metrics
-        self.train_ae = AreaAbsoluteError()
-        self.test_ae = AreaAbsoluteError()
+        self.train_ae = AreaWeightedError()
+        self.test_ae = AreaWeightedError()
 
-        # init
         self.apply(_kaiming_init)
 
-        # optional torch.compile for speed on PyTorch ≥ 2.0
         self._compiled = False
         if bool(self.hparams.get("compile", False)) and hasattr(torch, "compile"):
             try:
                 self.forward = torch.compile(self.forward, dynamic=True)  # type: ignore[method-assign]
                 self._compiled = True
             except Exception:
-                # Fall back silently if not supported on the current platform
                 pass
 
     def forward(self, x: Tensor, add_mean: bool = False) -> Tensor:
         """
+        Compute reconstructed fields from input parameters.
+
         Parameters
         ----------
-        x : Tensor
-            Shape (batch, n_parameters).
-        add_mean : bool
-            If True, add ``F_mean`` back to the reconstruction.
+        x : torch.Tensor
+            Input parameter tensor with shape ``(batch, n_parameters)``.
+        add_mean : bool, optional
+            If True, add the stored mean field ``F_mean`` to the reconstruction.
+            Default is False.
 
         Returns
         -------
-        Tensor
-            Reconstructed fields ``F_pred`` of shape (batch, n_nodes).
+        torch.Tensor
+            Reconstructed fields with shape ``(batch, n_nodes)``.
         """
         z = self.inp(x)
         for block in self.blocks:
-            z = block(z) + z  # residual
-        coeffs = self.head(z)  # (batch, n_eigenglaciers)
-        F_pred = coeffs @ self.V_hat.T  # (batch, n_nodes)
+            z = block(z) + z
+        coeffs = self.head(z)
+        F_pred = coeffs @ self.V_hat.T
         if add_mean:
             F_pred = F_pred + self.F_mean
         return F_pred
 
-    # ----- Lightning plumbing -----
-
     @staticmethod
     def add_model_specific_args(parent_parser: ArgumentParser) -> ArgumentParser:
+        """
+        Add DNNEmulator-specific CLI arguments to an existing parser.
+
+        Parameters
+        ----------
+        parent_parser : argparse.ArgumentParser
+            Parser to which DNNEmulator arguments will be added.
+
+        Returns
+        -------
+        argparse.ArgumentParser
+            The updated parser with DNNEmulator options added.
+        """
         parser = parent_parser.add_argument_group("DNNEmulator")
         parser.add_argument("--width", type=int, default=128)
         parser.add_argument("--depth", type=int, default=4)
@@ -202,6 +341,16 @@ class DNNEmulator(pl.LightningModule):
     def configure_optimizers(
         self,
     ) -> tuple[list[Optimizer], list[dict[str, _LRScheduler]]]:
+        """
+        Configure optimizer and learning-rate scheduler.
+
+        Returns
+        -------
+        list[torch.optim.Optimizer]
+            List containing the configured optimizer.
+        list[dict[str, torch.optim.lr_scheduler._LRScheduler]]
+            List containing a scheduler configuration dictionary compatible with Lightning.
+        """
         opt = torch.optim.Adam(
             self.parameters(), lr=float(self.hparams.learning_rate), weight_decay=0.0
         )
@@ -211,15 +360,51 @@ class DNNEmulator(pl.LightningModule):
     def training_step(
         self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
     ) -> Tensor:
+        """
+        Lightning training step.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Batch tuple ``(x, f, o, o_0)`` where:
+
+            * ``x`` : input parameters, shape ``(batch, n_parameters)``
+            * ``f`` : target responses (mean-centered or transformed as configured),
+              shape ``(batch, n_nodes)``
+            * ``o`` : weights (e.g., omegas), broadcastable to ``f``
+            * ``o_0`` : auxiliary weights (unused here)
+
+        batch_idx : int
+            Batch index (unused).
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar loss tensor.
+        """
         x, f, o, _ = batch
         f_pred = self.forward(x)
-        area = self.area
-        loss = area_absolute_error(f_pred, f, o, area)
+        loss = area_weighted_error(f_pred, f, o, self.area)
         return loss
 
     def validation_step(
         self, batch: tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int
     ) -> dict[str, Tensor]:
+        """
+        Lightning validation step.
+
+        Parameters
+        ----------
+        batch : tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Batch tuple ``(x, f, o, o_0)`` (see :meth:`training_step`).
+        batch_idx : int
+            Batch index (unused).
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Dictionary of tensors useful for epoch-end hooks/logging.
+        """
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
 
@@ -241,7 +426,10 @@ class DNNEmulator(pl.LightningModule):
         )
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
-    def on_validation_epoch_end(self):
+    def on_validation_epoch_end(self) -> None:
+        """
+        Log aggregated validation metrics at the end of each validation epoch.
+        """
         self.log(
             "train_loss",
             self.train_ae,
@@ -310,8 +498,8 @@ class NNEmulator(pl.LightningModule):
         self.register_buffer("F_mean", F_mean, persistent=True)
         self.register_buffer("area", area, persistent=True)
 
-        self.train_ae = AreaAbsoluteError()
-        self.test_ae = AreaAbsoluteError()
+        self.train_ae = AreaWeightedError()
+        self.test_ae = AreaWeightedError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -367,7 +555,7 @@ class NNEmulator(pl.LightningModule):
         x, f, o, _ = batch
         f_pred = self.forward(x)
         area = self.area
-        loss = area_absolute_error(f_pred, f, o, area)
+        loss = area_weighted_error(f_pred, f, o, area)
 
         return loss
 
@@ -475,8 +663,8 @@ class NN5Emulator(pl.LightningModule):
         self.register_buffer("F_mean", F_mean, persistent=True)
         self.register_buffer("area", area, persistent=True)
 
-        self.train_ae = AreaAbsoluteError()
-        self.test_ae = AreaAbsoluteError()
+        self.train_ae = AreaWeightedError()
+        self.test_ae = AreaWeightedError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -537,7 +725,7 @@ class NN5Emulator(pl.LightningModule):
         x, f, o, _ = batch
         f_pred = self.forward(x)
         area = self.area
-        loss = area_absolute_error(f_pred, f, o, area)
+        loss = area_weighted_error(f_pred, f, o, area)
 
         return loss
 
@@ -631,8 +819,8 @@ class LegacyNNEmulator(pl.LightningModule):
 
         self.register_buffer("area", area)
 
-        self.train_ae = AreaAbsoluteError()
-        self.test_ae = AreaAbsoluteError()
+        self.train_ae = AreaWeightedError()
+        self.test_ae = AreaWeightedError()
 
     def forward(self, x, add_mean=False):
         # Pass the input tensor through each of our operations
@@ -690,7 +878,7 @@ class LegacyNNEmulator(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, f, o, _ = batch
         f_pred = self.forward(x)
-        loss = area_absolute_error(f_pred, f, o, self.area)
+        loss = area_weighted_error(f_pred, f, o, self.area)
 
         return loss
 

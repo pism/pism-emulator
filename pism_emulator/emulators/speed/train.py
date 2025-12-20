@@ -57,8 +57,6 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
 
 
 torch.use_deterministic_algorithms(True)
-torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
-
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
 
@@ -189,20 +187,20 @@ def main():
     tmp, _ = parser.parse_known_args()
 
     parser.add_argument("--accelerator", type=str, default="auto")
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--cutoff", type=float, default=None)
     parser.add_argument("--devices", default="auto")
-    parser.add_argument("--emulator_dir", default="emulator_ensemble")
+    parser.add_argument("--emulator-dir", default="emulator_ensemble")
     parser.add_argument("--engine", default="netcdf4")
-    parser.add_argument("--max_epochs", type=int, default=1000)
-    parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=1)
-    parser.add_argument("--n_layers", type=int, default=4)
+    parser.add_argument("--y-transform", default="log10")
+    parser.add_argument("--max-epochs", type=int, default=1000)
+    parser.add_argument("--model-index", type=int, default=0)
+    parser.add_argument("--num-workers", type=int, default=1)
     parser.add_argument("-q", type=int, default=100)
-    parser.add_argument("--drop_out", type=float, default=0.1)
-    parser.add_argument("--y_lim", type=float, nargs=2, default=[1, 10e3])
+    parser.add_argument("--drop-out", type=float, default=0.1)
+    parser.add_argument("--y-lim", type=float, nargs=2, default=[1, 10e3])
     parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_50.csv"
+        "--samples-file", default="../data/samples/velocity_calibration_samples_50.csv"
     )
     parser.add_argument(
         "--strategy",
@@ -210,12 +208,11 @@ def main():
         default="auto",
     )
     parser.add_argument(
-        "--target_file",
+        "--target-file",
         default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
-    parser.add_argument("--target_var", type=str, default="velsurf_mag")
-    parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
-    parser.add_argument("--thin", type=int, default=1)
+    parser.add_argument("--target-var", type=str, default="velsurf_mag")
+    parser.add_argument("--target-error-var", type=str, default="velsurf_mag_error")
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
     cls = EMULATORS[tmp.emulator]
@@ -238,6 +235,7 @@ def main():
     devices = args.devices
     emulator_dir = args.emulator_dir
     engine = args.engine
+    y_transform = args.y_transform
     model_index = args.model_index
     num_workers = args.num_workers
     max_epochs = args.max_epochs
@@ -248,7 +246,6 @@ def main():
     target_file = args.target_file
     target_var = args.target_var
     target_error_var = args.target_error_var
-    thin = args.thin
     tb_logs_dir = f"{emulator_dir}/tb_logs"
     training_files = args.TRAINING_FILES
     y_lim = args.y_lim
@@ -269,7 +266,7 @@ def main():
         target_error_var=target_error_var,
         engine=engine,
         y_lim=y_lim,
-        log_y=True,
+        y_transform=y_transform,
         parallel=True,
     )
     X = dataset.samples.X
@@ -285,9 +282,9 @@ def main():
 
     f = Figlet(font="standard")
     banner = f.renderText("pism-emulator")
-    print("=" * 80)
-    print(banner)
-    print("=" * 80)
+    rank_zero_info("=" * 80)
+    rank_zero_info(banner)
+    rank_zero_info("=" * 80)
 
     rank_zero_info(f"Training model {model_index}")
     omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples), random_state=model_index)).T
@@ -310,21 +307,8 @@ def main():
     F_mean = dm.eig.F_mean
     plot_eigenglaciers(dataset, dm, model_index, emulator_dir, q=q)
 
-    # checkpoint_callback = ModelCheckpoint(
-    #     dirpath=f"{emulator_dir}/emulator",
-    #     filename="emulator_{model_index}",
-    #     save_last=True,  # write only the final checkpoint
-    #     every_n_epochs=None,  # disable periodic-by-epoch saving
-    #     every_n_train_steps=None,  # disable periodic-by-step saving
-    #     train_time_interval=None,  # disable time-based saving
-    #     save_top_k=0,  # disable "best" checkpoints (no monitor)
-    #     save_on_train_epoch_end=False,  # don't save at each epoch end
-    # )
-    # checkpoint_callback.CHECKPOINT_NAME_LAST = f"emulator_{model_index}"
-    # callbacks.append(checkpoint_callback)
-
     dl = dm.train_dataloader()
-    print(
+    rank_zero_info(
         f"N={len(dl.dataset)}, batch_size={getattr(dl, 'batch_size', '?')}, "
         f"batches/epoch={len(dl)}"
     )

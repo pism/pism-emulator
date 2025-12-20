@@ -22,14 +22,33 @@ import torch
 import xarray as xr
 from numpy.testing import assert_array_almost_equal
 
-from pism_emulator.models.pdd import PDD, ReferencePDDModel, TorchPDDModel
+from pism_emulator.models.pdd import PDD, ReferencePDDModel
 
 
 def make_fake_climate() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Make fake climate to test surface models
-    """
+    Create a small 1D (monthly) synthetic climate time series for tests.
 
+    Returns 12-point climatologies intended for unit/integration tests of surface
+    mass-balance components (e.g., PDD-style models). Arrays are shaped
+    ``(12, 1)`` to be trivially broadcastable to larger grids.
+
+    Returns
+    -------
+    temp : numpy.ndarray
+        Monthly near-surface air temperature with shape ``(12, 1)`` and units °C.
+    precip : numpy.ndarray
+        Monthly precipitation rate with shape ``(12, 1)`` and units m yr⁻¹.
+        (Note: values are synthetic and may include small negative entries).
+    sd : numpy.ndarray
+        Monthly standard deviation of near-surface air temperature with shape
+        ``(12, 1)`` and units K.
+
+    Notes
+    -----
+    This function is intentionally deterministic and uses hard-coded values so
+    tests remain stable.
+    """
     temp = np.array(
         [
             [-3.12],
@@ -82,19 +101,43 @@ def make_fake_climate() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return temp, precip, sd
 
 
-def make_fake_climate_2d(filename=None):
-    """Create an artificial temperature and precipitation file.
-
-    This function is used if pypdd.py is called as a script without an input
-    file. The file produced contains an idealized, three-dimensional (t, x, y)
-    distribution of near-surface air temperature, precipitation rate and
-    standard deviation of near-surface air temperature to be read by
-    `PDDModel.nco`.
-
-    filename: str, optional
-        Name of output file.
+def make_fake_climate_2d(filename: str | None = None) -> xr.Dataset:
     """
+    Create an idealized 2D synthetic climate dataset for tests.
 
+    This generates an artificial monthly (12-point) climatology on a Cartesian
+    grid with dimensions ``(time, x, y)``. The resulting dataset contains
+    near-surface air temperature (``temp``), precipitation rate (``prec``), and
+    temperature standard deviation (``stdv``), along with CF-style coordinate
+    metadata and a ``time_bounds`` coordinate.
+
+    Parameters
+    ----------
+    filename : str, optional
+        If provided, write the dataset to this NetCDF file via ``to_netcdf``.
+        If None (default), no file is written.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with data variables:
+
+        - ``temp`` : near-surface air temperature (degC), shape ``(time, x, y)``
+        - ``prec`` : ice-equivalent precipitation rate (m yr-1), shape ``(time, x, y)``
+        - ``stdv`` : standard deviation of near-surface air temperature (K),
+          shape ``(time, x, y)``
+
+        And coordinates:
+
+        - ``time`` : monthly midpoints in fractional years, shape ``(time,)``
+        - ``x`` / ``y`` : Cartesian coordinates in meters, shapes ``(x,)`` and ``(y,)``
+        - ``time_bounds`` : bounds for ``time``, shape ``(time, 2)``
+
+    Notes
+    -----
+    The construction order, dtype casts, and transposes are intentionally kept
+    stable to preserve legacy test behavior (e.g., reproducibility checksums).
+    """
     ATTRIBUTES = {
         # coordinate variables
         "x": {
@@ -228,13 +271,12 @@ def make_fake_climate_2d(filename=None):
     if filename is not None:
         ds.to_netcdf(filename)
 
-    # return dataset
     return ds
 
 
 def test_torch_model():
     """
-    Test the TorchPDDModel by comparing it to the ReferencePDDModel
+    Test the Lightning PDD Model by comparing it to the ReferencePDDModel.
     """
     temp, precip, sd = make_fake_climate()
 
@@ -256,18 +298,6 @@ def test_torch_model():
         interpolate_n=12,
     )
     result_ref = pdd_ref(temp, precip, sd)
-
-    pdd_torch = TorchPDDModel(
-        pdd_factor_snow=pdd_factor_snow,
-        pdd_factor_ice=pdd_factor_ice,
-        refreeze_snow=refreeze_snow,
-        refreeze_ice=refreeze_ice,
-        temp_snow=temp_snow,
-        temp_rain=temp_rain,
-        interpolate_rule="linear",
-        interpolate_n=12,
-    )
-    result_torch = pdd_torch.forward(temp, precip, sd)
 
     pdd_torch_pl = PDD(temp, precip, sd)
     x = torch.tensor(
@@ -291,13 +321,12 @@ def test_torch_model():
         "smb",
     ]:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
-        assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
         assert_array_almost_equal(result_ref[m_var], result_pl[m_var], decimal=3)
 
 
 def test_torch_model_2d():
     """
-    Test the TorchPDDModel by comparing it to the ReferencePDDModel
+    Test the TorchPDDModel by comparing it to the ReferencePDDModel.
     """
     ds = make_fake_climate_2d()
 
@@ -324,18 +353,6 @@ def test_torch_model_2d():
     )
     result_ref = pdd_ref(temp, precip, sd)
 
-    pdd_torch = TorchPDDModel(
-        pdd_factor_snow=pdd_factor_snow,
-        pdd_factor_ice=pdd_factor_ice,
-        refreeze_snow=refreeze_snow,
-        refreeze_ice=refreeze_ice,
-        temp_snow=temp_snow,
-        temp_rain=temp_rain,
-        interpolate_rule="linear",
-        interpolate_n=12,
-    )
-    result_torch = pdd_torch.forward(temp, precip, sd)
-
     pdd_torch_pl = PDD(temp, precip, sd)
     x = torch.tensor(
         [
@@ -358,13 +375,12 @@ def test_torch_model_2d():
         "smb",
     ]:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
-        assert_array_almost_equal(result_ref[m_var], result_torch[m_var], decimal=3)
         assert_array_almost_equal(result_ref[m_var], result_pl[m_var], decimal=3)
 
 
 def test_snow_accumulation():
     """
-    The snow accumulation function
+    The snow accumulation function.
     """
 
     T = np.array([-10, -5, 0, 1, 4, 8])

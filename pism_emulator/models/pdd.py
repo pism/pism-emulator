@@ -17,89 +17,203 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import argparse
+from collections.abc import Callable
 from functools import wraps
 from types import SimpleNamespace
-from typing import Sequence, Union
+from typing import Any, Sequence, TypedDict, TypeVar, Union, cast
 
 import lightning as pl
 import numpy as np
+import numpy.typing as npt
 import scipy.special as sp
 import torch
 import xarray as xr
 from scipy.interpolate import interp1d
 from torch import Tensor
 
+ArrayLike = npt.ArrayLike
+NDArrayF = npt.NDArray[np.floating]
 
-def freeze_it(cls):
-    cls.__frozen = False
+_T = TypeVar("_T", bound=type)
 
-    def frozensetattr(self, key, value):
-        if self.__frozen and not hasattr(self, key):
-            print(
-                "Class {} is frozen. Cannot set {} = {}".format(
-                    cls.__name__, key, value
-                )
-            )
-        else:
-            object.__setattr__(self, key, value)
 
-    def init_decorator(func):
+def _as_float_array(x: ArrayLike) -> NDArrayF:
+    """
+    Convert input to a NumPy floating array.
+
+    Parameters
+    ----------
+    x : array_like
+        Input data.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``x`` converted to a floating-point :class:`numpy.ndarray`. A copy is made
+        only if required by the dtype conversion.
+    """
+    return np.asarray(x, dtype=float)
+
+
+def freeze_it(cls: _T) -> _T:
+    """
+    Class decorator that prevents adding new attributes after initialization.
+
+    After the decorated class finishes running its ``__init__``, the instance is
+    marked as "frozen". Subsequent attempts to set a **new** attribute (one that
+    does not already exist on the instance) will be rejected. Updating existing
+    attributes remains allowed.
+
+    Parameters
+    ----------
+    cls : type
+        Class to decorate.
+
+    Returns
+    -------
+    type
+        The same class with a wrapped ``__init__`` and an overridden ``__setattr__``.
+
+    Notes
+    -----
+    This decorator enforces a lightweight "no new attributes after init" policy.
+    It prints a message instead of raising an exception when rejecting an
+    attribute assignment.
+
+    Examples
+    --------
+    >>> @freeze_it
+    ... class A:
+    ...     def __init__(self) -> None:
+    ...         self.x = 1
+    ...
+    >>> a = A()
+    >>> a.x = 2      # allowed (existing attribute)
+    >>> a.y = 3      # rejected (new attribute), prints a message  # doctest: +SKIP
+    """
+    cls.__frozen = False  # type: ignore[attr-defined]
+
+    def frozensetattr(self: Any, key: str, value: Any) -> None:
+        if getattr(self, "__frozen", False) and not hasattr(self, key):
+            print(f"Class {cls.__name__} is frozen. Cannot set {key} = {value}")
+            return
+        object.__setattr__(self, key, value)
+
+    def init_decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
             func(self, *args, **kwargs)
-            self.__frozen = True
+            object.__setattr__(self, "__frozen", True)
 
         return wrapper
 
-    cls.__setattr__ = frozensetattr
-    cls.__init__ = init_decorator(cls.__init__)
+    cls.__setattr__ = frozensetattr  # type: ignore[assignment]
+    cls.__init__ = init_decorator(cls.__init__)  # type: ignore[method-assign]
 
     return cls
 
 
+class PDDResult(TypedDict):
+    """Return type for :meth:`ReferencePDDModel.__call__`."""
+
+    temp: NDArrayF
+    prec: NDArrayF
+    stdv: NDArrayF
+    inst_pdd: NDArrayF
+    accumulation_rate: NDArrayF
+    snow_melt_rate: NDArrayF
+    ice_melt_rate: NDArrayF
+    melt_rate: NDArrayF
+    runoff_rate: NDArrayF
+    inst_smb: NDArrayF
+    snow_depth: NDArrayF
+    pdd: NDArrayF
+    accumulation: NDArrayF
+    snow_melt: NDArrayF
+    ice_melt: NDArrayF
+    melt: NDArrayF
+    runoff: NDArrayF
+    smb: NDArrayF
+
+
 @freeze_it
 class ReferencePDDModel:
-    # Copyright (c) 2013--2018, Julien Seguinot <seguinot@vaw.baug.ethz.ch>
-    # GNU General Public License v3.0+ (https://www.gnu.org/licenses/gpl-3.0.txt)
+    """
+    Reference Positive Degree-Day (PDD) surface mass-balance model.
 
-    """Return a callable Positive Degree Day (PDD) model instance.
+    This is a reference implementation of a PDD model that computes
+    instantaneous and annually integrated fields including positive degree days,
+    accumulation, melt, runoff, and surface mass balance (SMB).
 
-    Reference implementation
+    Model parameters are stored as public attributes and can be set at
+    initialization.
 
-    Model parameters are held as public attributes, and can be set using
-    corresponding keyword arguments at initialization time:
+    Parameters
+    ----------
+    pdd_factor_snow : float, optional
+        Positive degree-day factor for snow melt (units depend on forcing
+        conventions; commonly m w.e. per (degC day) or equivalent). Default is 0.003.
+    pdd_factor_ice : float, optional
+        Positive degree-day factor for ice melt. Default is 0.008.
+    refreeze_snow : float, optional
+        Fraction of snow melt that refreezes (0–1). Default is 0.0.
+    refreeze_ice : float, optional
+        Fraction of ice melt that refreezes (0–1). Default is 0.0.
+    temp_snow : float, optional
+        Temperature threshold (°C) below which all precipitation is snow.
+        Default is 0.0.
+    temp_rain : float, optional
+        Temperature threshold (°C) above which all precipitation is rain.
+        Default is 2.0.
+    interpolate_rule : str, optional
+        Interpolation rule passed to :func:`scipy.interpolate.interp1d`.
+        Common values include ``"linear"``, ``"nearest"``, ``"zero"``,
+        ``"slinear"``, ``"quadratic"``, and ``"cubic"``. Default is ``"linear"``.
+    interpolate_n : int, optional
+        Number of points used to interpolate one annual cycle. Default is 12.
 
-    *pdd_factor_snow* : float
-        Positive degree-day factor for snow.
-    *pdd_factor_ice* : float
-        Positive degree-day factor for ice.
-    *refreeze_snow* : float
-        Refreezing fraction of melted snow.
-    *refreeze_ice* : float
-        Refreezing fraction of melted ice.
-    *temp_snow* : float
-        Temperature at which all precipitation falls as snow.
-    *temp_rain* : float
-        Temperature at which all precipitation falls as rain.
-    *interpolate_rule* : [ 'linear' | 'nearest' | 'zero' |
-                           'slinear' | 'quadratic' | 'cubic' ]
-        Interpolation rule passed to `scipy.interpolate.interp1d`.
-    *interpolate_n*: int
-        Number of points used in interpolations.
+    Notes
+    -----
+    Inputs to :meth:`__call__` are broadcast/expanded so that the largest input
+    array determines the working shape. The first dimension is interpreted as
+    time and treated as periodic for interpolation.
     """
 
     def __init__(
         self,
-        pdd_factor_snow=0.003,
-        pdd_factor_ice=0.008,
-        refreeze_snow=0.0,
-        refreeze_ice=0.0,
-        temp_snow=0.0,
-        temp_rain=2.0,
-        interpolate_rule="linear",
-        interpolate_n=12,
-    ):
-        # set pdd model parameters
+        pdd_factor_snow: float = 0.003,
+        pdd_factor_ice: float = 0.008,
+        refreeze_snow: float = 0.0,
+        refreeze_ice: float = 0.0,
+        temp_snow: float = 0.0,
+        temp_rain: float = 2.0,
+        interpolate_rule: str = "linear",
+        interpolate_n: int = 12,
+    ) -> None:
+        """
+        Initialize a reference PDD model.
+
+        Parameters
+        ----------
+        pdd_factor_snow : float, optional
+            Positive degree-day factor for snow melt. Default is 0.003.
+        pdd_factor_ice : float, optional
+            Positive degree-day factor for ice melt. Default is 0.008.
+        refreeze_snow : float, optional
+            Fraction of snow melt that refreezes (0–1). Default is 0.0.
+        refreeze_ice : float, optional
+            Fraction of ice melt that refreezes (0–1). Default is 0.0.
+        temp_snow : float, optional
+            Temperature threshold (°C) below which precipitation is entirely snow.
+            Default is 0.0.
+        temp_rain : float, optional
+            Temperature threshold (°C) above which precipitation is entirely rain.
+            Default is 2.0.
+        interpolate_rule : str, optional
+            Interpolation rule for :func:`scipy.interpolate.interp1d`. Default is ``"linear"``.
+        interpolate_n : int, optional
+            Number of time points to interpolate to across one year. Default is 12.
+        """
         self.pdd_factor_snow = pdd_factor_snow
         self.pdd_factor_ice = pdd_factor_ice
         self.refreeze_snow = refreeze_snow
@@ -109,61 +223,68 @@ class ReferencePDDModel:
         self.interpolate_rule = interpolate_rule
         self.interpolate_n = interpolate_n
 
-    def __call__(self, temp, prec, stdv=0.0):
-        """Run the positive degree day model.
-
-        Use temperature, precipitation, and standard deviation of temperature
-        to compute the number of positive degree days, accumulation and melt
-        surface mass fluxes, and the resulting surface mass balance.
-
-        *temp*: array_like
-            Input near-surface air temperature in degrees Celcius.
-        *prec*: array_like
-            Input precipitation rate in meter per year.
-        *stdv*: array_like (default 0.0)
-            Input standard deviation of near-surface air temperature in Kelvin.
-
-        By default, inputs are N-dimensional arrays whose first dimension is
-        interpreted as time and as periodic. Arrays of dimensions
-        N-1 are interpreted as constant in time and expanded to N dimensions.
-        Arrays of dimension 0 and numbers are interpreted as constant in time
-        and space and will be expanded too. The largest input array determines
-        the number of dimensions N.
-
-        Return the number of positive degree days ('pdd'), surface mass balance
-        ('smb'), and many other output variables in a dictionary.
+    def __call__(
+        self, temp: ArrayLike, prec: ArrayLike, stdv: ArrayLike = 0.0
+    ) -> PDDResult:
         """
+        Run the PDD model for the provided climate forcing.
 
-        # ensure numpy arrays
-        # FIXME use data arrays instead
-        temp = np.asarray(temp)
-        prec = np.asarray(prec)
-        stdv = np.asarray(stdv)
+        Parameters
+        ----------
+        temp : array_like
+            Near-surface air temperature in degrees Celsius. May be:
+            * time-varying with shape ``(T, Y, X)`` (or generally ``(T, ...)``),
+            * time-constant with shape ``(... )``,
+            * scalar-like.
+        prec : array_like
+            Precipitation rate in meters per year. Must be broadcast-compatible
+            with ``temp`` after expansion.
+        stdv : array_like, optional
+            Standard deviation of near-surface air temperature in Kelvin. Default is 0.0.
 
-        # expand arrays to the largest shape
-        # FIXME use xarray auto-broadcasting instead
-        maxshape = max(temp.shape, prec.shape, stdv.shape)
-        temp = self._expand(temp, maxshape)
-        prec = self._expand(prec, maxshape)
-        stdv = self._expand(stdv, maxshape)
+        Returns
+        -------
+        dict
+            Dictionary containing instantaneous time series and annual integrals.
+            Keys include:
 
-        # interpolate time-series
-        # FIXME propagate data arrays, coordinates
-        temp = self._interpolate(temp)
-        prec = self._interpolate(prec)
-        stdv = self._interpolate(stdv)
+            * ``"inst_pdd"``, ``"accumulation_rate"``, ``"snow_melt_rate"``,
+              ``"ice_melt_rate"``, ``"melt_rate"``, ``"runoff_rate"``, ``"inst_smb"``,
+              ``"snow_depth"`` (instantaneous, time axis leading)
+            * ``"pdd"``, ``"accumulation"``, ``"snow_melt"``, ``"ice_melt"``,
+              ``"melt"``, ``"runoff"``, ``"smb"`` (annual integrals)
 
-        # compute accumulation and pdd
-        accumulation_rate = self.accumulation_rate(temp, prec)
-        inst_pdd = self.inst_pdd(temp, stdv)
+        Raises
+        ------
+        ValueError
+            If the inputs cannot be expanded to a common shape.
 
-        # initialize snow depth and melt rates
-        snow_depth = np.zeros_like(temp)
-        snow_melt_rate = np.zeros_like(temp)
-        ice_melt_rate = np.zeros_like(temp)
+        Notes
+        -----
+        The first axis is interpreted as time and treated as periodic when
+        interpolating to ``self.interpolate_n`` points.
+        """
+        temp_arr = np.asarray(temp, dtype=float)
+        prec_arr = np.asarray(prec, dtype=float)
+        stdv_arr = np.asarray(stdv, dtype=float)
 
-        # compute snow depth and melt rates
-        for i in range(len(temp)):
+        maxshape = max(temp_arr.shape, prec_arr.shape, stdv_arr.shape)
+        temp_arr = self._expand(temp_arr, maxshape)
+        prec_arr = self._expand(prec_arr, maxshape)
+        stdv_arr = self._expand(stdv_arr, maxshape)
+
+        temp_arr = self._interpolate(temp_arr)
+        prec_arr = self._interpolate(prec_arr)
+        stdv_arr = self._interpolate(stdv_arr)
+
+        accumulation_rate = self.accumulation_rate(temp_arr, prec_arr)
+        inst_pdd = self.inst_pdd(temp_arr, stdv_arr)
+
+        snow_depth = np.zeros_like(temp_arr)
+        snow_melt_rate = np.zeros_like(temp_arr)
+        ice_melt_rate = np.zeros_like(temp_arr)
+
+        for i in range(len(temp_arr)):
             if i > 0:
                 snow_depth[i] = snow_depth[i - 1]
             snow_depth[i] += accumulation_rate[i]
@@ -171,6 +292,7 @@ class ReferencePDDModel:
                 snow_depth[i], inst_pdd[i]
             )
             snow_depth[i] -= snow_melt_rate[i]
+
         melt_rate = snow_melt_rate + ice_melt_rate
         runoff_rate = (
             melt_rate
@@ -179,10 +301,10 @@ class ReferencePDDModel:
         )
         inst_smb = accumulation_rate - runoff_rate
 
-        result = {
-            "temp": temp,
-            "prec": prec,
-            "stdv": stdv,
+        result: PDDResult = {
+            "temp": temp_arr,
+            "prec": prec_arr,
+            "stdv": stdv_arr,
             "inst_pdd": inst_pdd,
             "accumulation_rate": accumulation_rate,
             "snow_melt_rate": snow_melt_rate,
@@ -199,731 +321,288 @@ class ReferencePDDModel:
             "runoff": self._integrate(runoff_rate),
             "smb": self._integrate(inst_smb),
         }
-
         return result
 
-    def _expand(self, array, shape):
-        """Expand an array to the given shape"""
+    def _expand(self, array: NDArrayF, shape: tuple[int, ...]) -> NDArrayF:
+        """
+        Expand an input array to a target shape using simple broadcasting rules.
+
+        This implements the legacy expansion policy used by the reference model:
+
+        * If ``array.shape == shape``: returned unchanged.
+        * If ``array.shape == (1, shape[1], shape[2])``: repeated along time.
+        * If ``array.shape == shape[1:]``: repeated along time.
+        * If ``array.shape == ()``: expanded to full ``shape`` via multiplication.
+
+        Parameters
+        ----------
+        array : numpy.ndarray
+            Input array to expand.
+        shape : tuple of int
+            Target shape.
+
+        Returns
+        -------
+        numpy.ndarray
+            Expanded array with shape ``shape``.
+
+        Raises
+        ------
+        ValueError
+            If the input shape cannot be expanded to the requested shape.
+        """
         if array.shape == shape:
             res = array
-        elif array.shape == (1, shape[1], shape[2]):
-            res = np.asarray([array[0]] * shape[0])
+        elif len(shape) >= 3 and array.shape == (1, shape[1], shape[2]):
+            res = np.asarray([array[0]] * shape[0], dtype=float)
         elif array.shape == shape[1:]:
-            res = np.asarray([array] * shape[0])
+            res = np.asarray([array] * shape[0], dtype=float)
         elif array.shape == ():
-            res = array * np.ones(shape)
+            res = array * np.ones(shape, dtype=float)
         else:
             raise ValueError(
-                "could not expand array of shape %s to %s" % (array.shape, shape)
+                f"could not expand array of shape {array.shape} to {shape}"
             )
         return res
 
-    def _integrate(self, array):
-        """Integrate an array over one year"""
-        return np.sum(array, axis=0) / (self.interpolate_n - 1)
+    def _integrate(self, array: ArrayLike) -> NDArrayF:
+        """
+        Integrate a time series over one year.
 
-    def _interpolate(self, array):
-        """Interpolate an array through one year."""
+        The input is assumed to have a leading time dimension representing samples
+        within a year (e.g., monthly values). The method returns the mean-integral
+        over the year using the class interpolation setting.
+
+        Parameters
+        ----------
+        array : array_like
+            Time series array with a leading time axis. Shape ``(T, ...)`` where
+            ``T`` is the number of time samples.
+
+        Returns
+        -------
+        numpy.ndarray
+            Time-integrated array with shape ``(...)``.
+
+        Notes
+        -----
+        The normalization uses ``max(self.interpolate_n - 1, 1)`` to avoid division
+        by zero if ``interpolate_n`` is 1.
+        """
+        arr = _as_float_array(array)
+        denom = max(int(self.interpolate_n) - 1, 1)
+        return np.sum(arr, axis=0) / denom
+
+    def _interpolate(self, array: ArrayLike) -> NDArrayF:
+        """
+        Interpolate a periodic time series through one year.
+
+        This interpolates the input along its leading time axis to
+        ``self.interpolate_n`` points using ``scipy.interpolate.interp1d``.
+        The series is treated as periodic by padding with the last and first
+        sample before interpolation.
+
+        Parameters
+        ----------
+        array : array_like
+            Input time series with shape ``(T, ...)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Interpolated time series with shape ``(self.interpolate_n, ...)``.
+
+        Raises
+        ------
+        ValueError
+            If the input has fewer than 1 time sample.
+        """
         from scipy.interpolate import interp1d
 
-        rule = self.interpolate_rule
-        npts = self.interpolate_n
-        oldx = (np.arange(len(array) + 2) - 0.5) / len(array)
-        oldy = np.vstack(([array[-1]], array, [array[0]]))
+        rule: str = str(self.interpolate_rule)
+        npts: int = int(self.interpolate_n)
+
+        arr = _as_float_array(array)
+        if arr.shape[0] < 1:
+            raise ValueError("array must have at least one time sample along axis 0")
+
+        # Treat as periodic by adding wrap-around endpoints
+        oldx = (np.arange(len(arr) + 2) - 0.5) / len(arr)
+        oldy = np.vstack(([arr[-1]], arr, [arr[0]]))
+
+        # Centered sampling in each bin
         newx = (np.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
         newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
-        return newy
+        return _as_float_array(newy)
 
-    def inst_pdd(self, temp, stdv):
-        """Compute instantaneous positive degree days from temperature.
+    def inst_pdd(self, temp: ArrayLike, stdv: ArrayLike) -> NDArrayF:
+        r"""
+        Compute instantaneous positive degree days (Calov & Greve, 2005).
 
-        Use near-surface air temperature and standard deviation to compute
-        instantaneous positive degree days (effective temperature for melt,
-        unit degrees C) using an integral formulation (Calov and Greve, 2005).
+        Uses near-surface air temperature and its standard deviation to compute an
+        effective temperature for melt (in :math:`^\circ\mathrm{C}`) using an
+        integral formulation that accounts for sub-grid temperature variability.
 
-        *temp*: array_like
-            Near-surface air temperature in degrees Celcius.
-        *stdv*: array_like
-            Standard deviation of near-surface air temperature in Kelvin.
+        Parameters
+        ----------
+        temp : array_like
+            Near-surface air temperature in degrees Celsius. Shape ``(...)``.
+        stdv : array_like
+            Standard deviation of near-surface air temperature in Kelvin. Must be
+            broadcast-compatible with ``temp``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Instantaneous positive degree days in :math:`^\circ\mathrm{C}\,\mathrm{day}`.
+            Shape is the broadcasted shape of ``temp`` and ``stdv``.
+
+        Notes
+        -----
+        Where ``stdv == 0``, this reduces to the positive part of ``temp``.
+        The result is multiplied by 365.242198781 to convert to degree-days.
         """
         import scipy.special as sp
 
-        # compute positive part of temperature everywhere
-        positivepart = np.greater(temp, 0) * temp
+        t = _as_float_array(temp)
+        s = _as_float_array(stdv)
 
-        # compute Calov and Greve (2005) integrand, ignoring division by zero
+        # positive part of temperature
+        positivepart = (t > 0.0) * t
+
+        # Calov & Greve integrand; ignore division warnings
         with np.errstate(divide="ignore", invalid="ignore"):
-            normtemp = temp / (np.sqrt(2) * stdv)
-        calovgreve = stdv / np.sqrt(2 * np.pi) * np.exp(
-            -(normtemp**2)
-        ) + temp / 2 * sp.erfc(-normtemp)
+            normtemp = t / (np.sqrt(2.0) * s)
 
-        # use positive part where sigma is zero and Calov and Greve elsewhere
-        teff = np.where(stdv == 0.0, positivepart, calovgreve)
+        calovgreve = s / np.sqrt(2.0 * np.pi) * np.exp(-(normtemp**2)) + (
+            t / 2.0
+        ) * sp.erfc(-normtemp)
 
-        # convert to degree-days
-        return teff * 365.242198781
+        teff = np.where(s == 0.0, positivepart, calovgreve)
+        return _as_float_array(teff) * 365.242198781
 
-    def accumulation_rate(self, temp, prec):
-        """Compute accumulation rate from temperature and precipitation.
-
-        The fraction of precipitation that falls as snow decreases linearly
-        from one to zero between temperature thresholds defined by the
-        `temp_snow` and `temp_rain` attributes.
-
-        *temp*: array_like
-            Near-surface air temperature in degrees Celcius.
-        *prec*: array_like
-            Precipitation rate in meter per year.
+    def accumulation_rate(self, temp: ArrayLike, prec: ArrayLike) -> NDArrayF:
         """
+        Compute snowfall accumulation rate from temperature and precipitation.
 
-        # compute snow fraction as a function of temperature
-        reduced_temp = (self.temp_rain - temp) / (self.temp_rain - self.temp_snow)
-        snowfrac = np.clip(reduced_temp, 0, 1)
+        The fraction of precipitation that falls as snow decreases linearly from 1
+        to 0 between temperature thresholds ``self.temp_snow`` and ``self.temp_rain``.
+        Values are clipped to ``[0, 1]``.
 
-        # return accumulation rate
-        return snowfrac * prec
+        Parameters
+        ----------
+        temp : array_like
+            Near-surface air temperature in degrees Celsius. Shape ``(...)``.
+        prec : array_like
+            Precipitation rate in meters per year. Must be broadcast-compatible
+            with ``temp``.
 
-    def melt_rates(self, snow, pdd):
-        """Compute melt rates from snow precipitation and pdd sum.
+        Returns
+        -------
+        numpy.ndarray
+            Snowfall accumulation rate in meters per year, shape is the broadcasted
+            shape of ``temp`` and ``prec``.
 
-        Snow melt is computed from the number of positive degree days (*pdd*)
-        and the `pdd_factor_snow` model attribute. If all snow is melted and
-        some energy (PDD) remains, ice melt is computed using `pdd_factor_ice`.
+        Notes
+        -----
+        The snow fraction is computed as::
 
-        *snow*: array_like
-            Snow precipitation rate.
-        *pdd*: array_like
-            Number of positive degree days.
+            snowfrac = clip((temp_rain - temp) / (temp_rain - temp_snow), 0, 1)
         """
-
-        # parse model parameters for readability
-        ddf_snow = self.pdd_factor_snow
-        ddf_ice = self.pdd_factor_ice
-
-        # compute a potential snow melt
-        pot_snow_melt = ddf_snow * pdd
-
-        # effective snow melt can't exceed amount of snow
-        snow_melt = np.minimum(snow, pot_snow_melt)
-
-        # ice melt is proportional to excess snow melt
-        ice_melt = (pot_snow_melt - snow_melt) * ddf_ice / ddf_snow
-
-        # return melt rates
-        return (snow_melt, ice_melt)
-
-
-@freeze_it
-class PDDModel:
-    """
-
-    # Copyright (c) 2013--2018, Julien Seguinot <seguinot@vaw.baug.ethz.ch>
-    # GNU General Public License v3.0+ (https://www.gnu.org/licenses/gpl-3.0.txt)
-
-    A positive degree day model for glacier surface mass balance
-
-    Return a callable Positive Degree Day (PDD) model instance.
-
-    Model parameters are held as public attributes, and can be set using
-    corresponding keyword arguments at initialization time:
-
-    *pdd_factor_snow* : float
-        Positive degree-day factor for snow.
-    *pdd_factor_ice* : float
-        Positive degree-day factor for ice.
-    *refreeze_snow* : float
-        Refreezing fraction of melted snow.
-    *refreeze_ice* : float
-        Refreezing fraction of melted ice.
-    *temp_snow* : float
-        Temperature at which all precipitation falls as snow.
-    *temp_rain* : float
-        Temperature at which all precipitation falls as rain.
-    *interpolate_rule* : [ 'linear' | 'nearest' | 'zero' |
-                           'slinear' | 'quadratic' | 'cubic' ]
-        Interpolation rule passed to `scipy.interpolate.interp1d`.
-    *interpolate_n*: int
-        Number of points used in interpolations.
-    """
-
-    def __init__(
-        self,
-        pdd_factor_snow: float = 3.0,
-        pdd_factor_ice: float = 8.0,
-        refreeze_snow: float = 0.0,
-        refreeze_ice: float = 0.0,
-        temp_snow: float = 0.0,
-        temp_rain: float = 0.0,
-        interpolate_rule: str = "linear",
-        interpolate_n: int = 52,
-        *args,
-        **kwargs,
-    ):
-        super().__init__()
-
-        # set pdd model parameters
-        self.pdd_factor_snow = pdd_factor_snow
-        self.pdd_factor_ice = pdd_factor_ice
-        self.refreeze_snow = refreeze_snow
-        self.refreeze_ice = refreeze_ice
-        self.temp_snow = temp_snow
-        self.temp_rain = temp_rain
-        self.interpolate_rule = interpolate_rule
-        self.interpolate_n = interpolate_n
-
-    @property
-    def pdd_factor_snow(self):
-        return self._pdd_factor_snow
-
-    @pdd_factor_snow.setter
-    def pdd_factor_snow(self, value):
-        self._pdd_factor_snow = value
-
-    @property
-    def pdd_factor_ice(self):
-        return self._pdd_factor_ice
-
-    @pdd_factor_ice.setter
-    def pdd_factor_ice(self, value):
-        self._pdd_factor_ice = value
-
-    @property
-    def temp_snow(self):
-        return self._temp_snow
-
-    @temp_snow.setter
-    def temp_snow(self, value):
-        self._temp_snow = value
-
-    @property
-    def temp_ice(self):
-        return self._temp_ice
-
-    @temp_ice.setter
-    def temp_ice(self, value):
-        self._temp_ice = value
-
-    @property
-    def refreeze_snow(self):
-        return self._refreeze_snow
-
-    @refreeze_snow.setter
-    def refreeze_snow(self, value):
-        self._refreeze_snow = value
-
-    @property
-    def refreeze_ice(self):
-        return self._refreeze_ice
-
-    @refreeze_ice.setter
-    def refreeze_ice(self, value):
-        self._refreeze_ice = value
-
-    def __call__(self, temp, prec, stdv=0.0) -> dict:
-        """Run the positive degree day model.
-        Use temperature, precipitation, and standard deviation of temperature
-        to compute the number of positive degree days, accumulation and melt
-        surface mass fluxes, and the resulting surface mass balance.
-        *temp*: array_like
-            Input near-surface air temperature in degrees Celcius.
-        *prec*: array_like
-            Input precipitation rate in meter per year.
-        *stdv*: array_like (default 0.0)
-            Input standard deviation of near-surface air temperature in Kelvin.
-        By default, inputs are N-dimensional arrays whose first dimension is
-        interpreted as time and as periodic. Arrays of dimensions
-        N-1 are interpreted as constant in time and expanded to N dimensions.
-        Arrays of dimension 0 and numbers are interpreted as constant in time
-        and space and will be expanded too. The largest input array determines
-        the number of dimensions N.
-        Return the number of positive degree days ('pdd'), surface mass balance
-        ('smb'), and many other output variables in a dictionary.
-        """
-
-        # ensure numpy arrays
-        # FIXME use data arrays instead
-        temp = np.asarray(temp)
-        prec = np.asarray(prec)
-        stdv = np.asarray(stdv)
-
-        # expand arrays to the largest shape
-        # FIXME use xarray auto-broadcasting instead
-        maxshape = max(temp.shape, prec.shape, stdv.shape)
-        temp = self._expand(temp, maxshape)
-        prec = self._expand(prec, maxshape)
-        stdv = self._expand(stdv, maxshape)
-
-        # interpolate time-series
-        # FIXME propagate data arrays, coordinates
-        if (self.interpolate_n > 1) and (self.interpolate_n != temp.shape[0]):
-            temp = self._interpolate(temp)
-            prec = self._interpolate(prec)
-            stdv = self._interpolate(stdv)
-
-        # compute accumulation and pdd
-        accumulation_rate = self.accumulation_rate(temp, prec)
-        inst_pdd = self.inst_pdd(temp, stdv)
-
-        # initialize snow depth and melt rates
-        snow_depth = np.zeros_like(temp)
-        snow_melt_rate = np.zeros_like(temp)
-        ice_melt_rate = np.zeros_like(temp)
-
-        # compute snow depth and melt rates
-        for i in range(len(temp)):
-            if i > 0:
-                snow_depth[i] = snow_depth[i - 1]
-            snow_depth[i] += accumulation_rate[i]
-            snow_melt_rate[i], ice_melt_rate[i] = self.melt_rates(
-                snow_depth[i], inst_pdd[i]
-            )
-            snow_depth[i] -= snow_melt_rate[i]
-        melt_rate = snow_melt_rate + ice_melt_rate
-        snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
-        ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
-        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
-        runoff_rate = melt_rate - refreeze_rate
-        inst_smb = accumulation_rate - runoff_rate
-
-        result = {
-            "temp": temp,
-            "prec": prec,
-            "stdv": stdv,
-            "inst_pdd": inst_pdd,
-            "accumulation_rate": accumulation_rate,
-            "snow_melt_rate": snow_melt_rate,
-            "ice_melt_rate": ice_melt_rate,
-            "melt_rate": melt_rate,
-            "snow_refreeze_rate": snow_refreeze_rate,
-            "ice_refreeze_rate": ice_refreeze_rate,
-            "refreeze_rate": refreeze_rate,
-            "runoff_rate": runoff_rate,
-            "inst_smb": inst_smb,
-            "snow_depth": snow_depth,
-            "pdd": self._integrate(inst_pdd),
-            "accumulation": self._integrate(accumulation_rate),
-            "snow_melt": self._integrate(snow_melt_rate),
-            "ice_melt": self._integrate(ice_melt_rate),
-            "melt": self._integrate(melt_rate),
-            "runoff": self._integrate(runoff_rate),
-            "refreeze": self._integrate(refreeze_rate),
-            "snow_refreeze": self._integrate(snow_refreeze_rate),
-            "ice_refreeze": self._integrate(ice_refreeze_rate),
-            "smb": self._integrate(inst_smb),
-        }
-
-        return result
-
-    def _expand(self, array, shape):
-        """Expand an array to the given shape"""
-        if array.shape == shape:
-            res = array
-        elif array.shape == (1, shape[1], shape[2]):
-            res = np.asarray([array[0]] * shape[0])
-        elif array.shape == shape[1:]:
-            res = np.asarray([array] * shape[0])
-        elif array.shape == ():
-            res = array * np.ones(shape)
-        else:
-            raise ValueError(
-                "could not expand array of shape %s to %s" % (array.shape, shape)
-            )
-        return res
-
-    def _integrate(self, array):
-        """Integrate an array over one year"""
-        return np.sum(array, axis=0) / (self.interpolate_n - 1)
-
-    def _interpolate(self, array):
-        """Interpolate an array through one year."""
-
-        rule = self.interpolate_rule
-        npts = self.interpolate_n
-        oldx = (np.arange(len(array) + 2) - 0.5) / len(array)
-        oldy = np.vstack(([array[-1]], array, [array[0]]))
-        newx = (np.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
-        newy = interp1d(oldx, oldy, kind=rule, axis=0)(newx)
-        return newy
-
-    def inst_pdd(self, temp, stdv):
-        """Compute instantaneous positive degree days from temperature.
-        Use near-surface air temperature and standard deviation to compute
-        instantaneous positive degree days (effective temperature for melt,
-        unit degrees C) using an integral formulation (Calov and Greve, 2005).
-        *temp*: array_like
-            Near-surface air temperature in degrees Celcius.
-        *stdv*: array_like
-            Standard deviation of near-surface air temperature in Kelvin.
-        """
-
-        # compute positive part of temperature everywhere
-        positivepart = np.greater(temp, 0) * temp
-
-        # compute Calov and Greve (2005) integrand, ignoring division by zero
-        with np.errstate(divide="ignore", invalid="ignore"):
-            normtemp = temp / (np.sqrt(2) * stdv)
-        calovgreve = stdv / np.sqrt(2 * np.pi) * np.exp(
-            -(normtemp**2)
-        ) + temp / 2 * sp.erfc(-normtemp)
-
-        # use positive part where sigma is zero and Calov and Greve elsewhere
-        teff = np.where(stdv == 0.0, positivepart, calovgreve)
-
-        # convert to degree-days
-        return teff * 365.242198781
-
-    def accumulation_rate(self, temp, prec):
-        """Compute accumulation rate from temperature and precipitation.
-        The fraction of precipitation that falls as snow decreases linearly
-        from one to zero between temperature thresholds defined by the
-        `temp_snow` and `temp_rain` attributes.
-        *temp*: array_like
-            Near-surface air temperature in degrees Celcius.
-        *prec*: array_like
-            Precipitation rate in meter per year.
-        """
-
-        # compute snow fraction as a function of temperature
-        reduced_temp = (self.temp_rain - temp) / (self.temp_rain - self.temp_snow)
-        snowfrac = np.clip(reduced_temp, 0, 1)
-
-        # return accumulation rate
-        return snowfrac * prec
-
-    def melt_rates(self, snow, pdd):
-        """Compute melt rates from snow precipitation and pdd sum.
-        Snow melt is computed from the number of positive degree days (*pdd*)
-        and the `pdd_factor_snow` model attribute. If all snow is melted and
-        some energy (PDD) remains, ice melt is computed using `pdd_factor_ice`.
-        *snow*: array_like
-            Snow precipitation rate.
-        *pdd*: array_like
-            Number of positive degree days.
-        """
-
-        # parse model parameters for readability
-        ddf_snow = self.pdd_factor_snow
-        ddf_ice = self.pdd_factor_ice
-
-        # compute a potential snow melt
-        pot_snow_melt = ddf_snow * pdd
-
-        # effective snow melt can't exceed amount of snow
-        snow_melt = np.minimum(snow, pot_snow_melt)
-
-        # ice melt is proportional to excess snow melt
-        ice_melt = (pot_snow_melt - snow_melt) * ddf_ice / ddf_snow
-
-        # return melt rates
-        return (snow_melt, ice_melt)
-
-
-@freeze_it
-class TorchPDDModel(torch.nn.modules.Module):
-    """
-
-    # Copyright (c) 2013--2018, Julien Seguinot <seguinot@vaw.baug.ethz.ch>
-    # GNU General Public License v3.0+ (https://www.gnu.org/licenses/gpl-3.0.txt)
-
-    A positive degree day model for glacier surface mass balance
-
-    Return a callable Positive Degree Day (PDD) model instance.
-
-    Model parameters are held as public attributes, and can be set using
-    corresponding keyword arguments at initialization time:
-
-    *pdd_factor_snow* : float
-        Positive degree-day factor for snow.
-    *pdd_factor_ice* : float
-        Positive degree-day factor for ice.
-    *refreeze_snow* : float
-        Refreezing fraction of melted snow.
-    *refreeze_ice* : float
-        Refreezing fraction of melted ice.
-    *temp_snow* : float
-        Temperature at which all precipitation falls as snow.
-    *temp_rain* : float
-        Temperature at which all precipitation falls as rain.
-    *interpolate_rule* : [ 'linear' | 'nearest' | 'zero' |
-                           'slinear' | 'quadratic' | 'cubic' ]
-        Interpolation rule passed to `scipy.interpolate.interp1d`.
-    *interpolate_n*: int
-        Number of points used in interpolations.
-    """
-
-    def __init__(
-        self,
-        pdd_factor_snow: float = 3.0,
-        pdd_factor_ice: float = 8.0,
-        refreeze_snow: float = 0.0,
-        refreeze_ice: float = 0.0,
-        temp_snow: float = 0.0,
-        temp_rain: float = 2.0,
-        interpolate_rule: str = "linear",
-        interpolate_n: int = 12,
-        device="cpu",
-    ):
-        super().__init__()
-
-        # set pdd model parameters
-        self.pdd_factor_snow = pdd_factor_snow
-        self.pdd_factor_ice = pdd_factor_ice
-        self.refreeze_snow = refreeze_snow
-        self.refreeze_ice = refreeze_ice
-        self.temp_snow = temp_snow
-        self.temp_rain = temp_rain
-        self.interpolate_rule = interpolate_rule
-        self.interpolate_n = interpolate_n
-        self.device = device
-
-    @property
-    def pdd_factor_snow(self):
-        return self._pdd_factor_snow
-
-    @pdd_factor_snow.setter
-    def pdd_factor_snow(self, value):
-        self._pdd_factor_snow = value
-
-    @property
-    def pdd_factor_ice(self):
-        return self._pdd_factor_ice
-
-    @pdd_factor_ice.setter
-    def pdd_factor_ice(self, value):
-        self._pdd_factor_ice = value
-
-    @property
-    def temp_snow(self):
-        return self._temp_snow
-
-    @temp_snow.setter
-    def temp_snow(self, value):
-        self._temp_snow = value
-
-    @property
-    def temp_ice(self):
-        return self._temp_ice
-
-    @temp_ice.setter
-    def temp_ice(self, value):
-        self._temp_ice = value
-
-    @property
-    def refreeze_snow(self):
-        return self._refreeze_snow
-
-    @refreeze_snow.setter
-    def refreeze_snow(self, value):
-        self._refreeze_snow = value
-
-    @property
-    def refreeze_ice(self):
-        return self._refreeze_ice
-
-    @refreeze_ice.setter
-    def refreeze_ice(self, value):
-        self._refreeze_ice = value
-
-    def forward(self, temp, prec, stdv=np.array(0.0)):
-        """Run the positive degree day model.
-
-        Use temperature, precipitation, and standard deviation of temperature
-        to compute the number of positive degree days, accumulation and melt
-        surface mass fluxes, and the resulting surface mass balance.
-
-        *temp*: array_like
-            Input near-surface air temperature in degrees Celcius.
-        *prec*: array_like
-            Input precipitation rate in meter per year.
-        *stdv*: array_like (default 0.0)
-            Input standard deviation of near-surface air temperature in Kelvin.
-
-        By default, inputs are N-dimensional arrays whose first dimension is
-        interpreted as time and as periodic. Arrays of dimensions
-        N-1 are interpreted as constant in time and expanded to N dimensions.
-        Arrays of dimension 0 and numbers are interpreted as constant in time
-        and space and will be expanded too. The largest input array determines
-        the number of dimensions N.
-
-        Return the number of positive degree days ('pdd'), surface mass balance
-        ('smb'), and many other output variables in a dictionary.
-        """
-
-        temp = torch.from_numpy(temp)
-        prec = torch.from_numpy(prec)
-        stdv = torch.from_numpy(stdv)
-
-        # expand arrays to the largest shape
-        maxshape = max(temp.shape, prec.shape, stdv.shape)
-        temp = self._expand(temp, maxshape)
-        prec = self._expand(prec, maxshape)
-        stdv = self._expand(stdv, maxshape)
-
-        # interpolate time-series
-        if self.interpolate_n >= 1:
-            temp = self._interpolate(temp)
-            prec = self._interpolate(prec)
-            stdv = self._interpolate(stdv)
-
-        # compute accumulationmulation and pdd
-        accumulation_rate = self.accumulation_rate(temp, prec)
-        inst_pdd = self.inst_pdd(temp, stdv)
-
-        # initialize snow depth, melt and refreeze rates
-        snow_depth = torch.zeros_like(temp)
-        snow_melt_rate = torch.zeros_like(temp)
-        ice_melt_rate = torch.zeros_like(temp)
-        snow_refreeze_rate = torch.zeros_like(temp)
-        ice_refreeze_rate = torch.zeros_like(temp)
-
-        # parse model parameters for readability
-        ddf_snow = self.pdd_factor_snow / 1000
-        ddf_ice = self.pdd_factor_ice / 1000
-
-        for i in range(len(temp)):
-            if i == 0:
-                intermediate_snow_depth = accumulation_rate[i]
-            else:
-                intermediate_snow_depth = snow_depth[i - 1] + accumulation_rate[i]
-
-            potential_snow_melt = ddf_snow * inst_pdd[i]
-
-            snow_melt_rate[i] = torch.minimum(
-                intermediate_snow_depth, potential_snow_melt
-            )
-
-            ice_melt_rate[i] = (
-                (potential_snow_melt - snow_melt_rate[i]) * ddf_ice / ddf_snow
-            )
-
-            snow_depth[i] = intermediate_snow_depth - snow_melt_rate[i]
-        melt_rate = snow_melt_rate + ice_melt_rate
-        snow_refreeze_rate = self.refreeze_snow * snow_melt_rate
-        ice_refreeze_rate = self.refreeze_ice * ice_melt_rate
-        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
-        runoff_rate = melt_rate - refreeze_rate
-        inst_smb = accumulation_rate - runoff_rate
-
-        # output
-        return {
-            "temp": temp,
-            "prec": prec,
-            "stdv": stdv,
-            "inst_pdd": inst_pdd,
-            "accumulation_rate": accumulation_rate,
-            "snow_melt_rate": snow_melt_rate,
-            "ice_melt_rate": ice_melt_rate,
-            "melt_rate": melt_rate,
-            "snow_refreeze_rate": snow_refreeze_rate,
-            "ice_refreeze_rate": ice_refreeze_rate,
-            "refreeze_rate": refreeze_rate,
-            "runoff_rate": runoff_rate,
-            "inst_smb": inst_smb,
-            "snow_depth": snow_depth,
-            "pdd": self._integrate(inst_pdd),
-            "accumulation": self._integrate(accumulation_rate),
-            "snow_melt": self._integrate(snow_melt_rate),
-            "ice_melt": self._integrate(ice_melt_rate),
-            "melt": self._integrate(melt_rate),
-            "runoff": self._integrate(runoff_rate),
-            "refreeze": self._integrate(refreeze_rate),
-            "snow_refreeze": self._integrate(snow_refreeze_rate),
-            "ice_refreeze": self._integrate(ice_refreeze_rate),
-            "smb": self._integrate(inst_smb),
-        }
-
-    def _expand(self, array, shape):
-        """Expand an array to the given shape"""
-        if array.shape == shape:
-            res = array
-        elif array.shape == (1, shape[1], shape[2]):
-            res = [array[0]] * shape[0]
-        elif array.shape == shape[1:]:
-            res = [array] * shape[0]
-        elif array.shape == ():
-            res = array * torch.ones(shape)
-        else:
-            raise ValueError(
-                "could not expand array of shape %s to %s" % (array.shape, shape)
-            )
-        return res
-
-    def _integrate(self, array):
-        """Integrate an array over one year"""
-        dx = torch.sum(array, axis=0) / (self.interpolate_n - 1)
-        return dx.to(self.device)
-
-    def _interpolate(self, array):
-        """Interpolate an array through one year."""
-
-        rule = self.interpolate_rule
-        npts = self.interpolate_n
-        sizes = [s for s in array.size()[1::]]
-        oldx = (torch.arange(len(array) + 2, device=self.device) - 0.5) / len(array)
-        oldy = torch.vstack(
-            (array[-1].view(1, *sizes), array, array[0].view(1, *sizes))
+        t = _as_float_array(temp)
+        p = _as_float_array(prec)
+
+        reduced_temp = (float(self.temp_rain) - t) / (
+            float(self.temp_rain) - float(self.temp_snow)
         )
-        newx = (torch.arange(npts) + 0.5) / npts  # use 0.0 for PISM-like behaviour
-        newy = interp1d(oldx.cpu(), oldy.cpu(), kind=rule, axis=0)(newx)
-        interp = torch.from_numpy(newy)
+        snowfrac = np.clip(reduced_temp, 0.0, 1.0)
+        return _as_float_array(snowfrac * p)
 
-        return interp.to(self.device)
-
-    def inst_pdd(self, temp, stdv):
-        """Compute instantaneous positive degree days from temperature.
-
-        Use near-surface air temperature and standard deviation to compute
-        instantaneous positive degree days (effective temperature for melt,
-        unit degrees C) using an integral formulation (Calov and Greve, 2005).
-
-        *temp*: array_like
-            Near-surface air temperature in degrees Celcius.
-        *stdv*: array_like
-            Standard deviation of near-surface air temperature in Kelvin.
+    def melt_rates(self, snow: ArrayLike, pdd: ArrayLike) -> tuple[NDArrayF, NDArrayF]:
         """
+        Compute snow and ice melt rates from snowfall and positive degree days.
 
-        # compute positive part of temperature everywhere
-        positivepart = torch.greater(temp, 0) * temp
+        Snow melt is computed from positive degree days (``pdd``) and the degree-day
+        factor for snow (``self.pdd_factor_snow``). If all snow is melted and excess
+        energy remains, ice melt is computed using ``self.pdd_factor_ice``.
 
-        # compute Calov and Greve (2005) integrand, ignoring division by zero
-        normtemp = temp / (torch.sqrt(torch.tensor(2)) * stdv)
-        calovgreve = stdv / torch.sqrt(torch.tensor(2) * torch.pi) * torch.exp(
-            -(normtemp**2)
-        ) + temp / 2 * (1.0 - torch.erf(-normtemp))
+        Parameters
+        ----------
+        snow : array_like
+            Snow precipitation / snow availability (same units as desired melt output).
+            Shape ``(...)``.
+        pdd : array_like
+            Positive degree days (or effective melt energy proxy). Must be
+            broadcast-compatible with ``snow``.
 
-        # use positive part where sigma is zero and Calov and Greve elsewhere
-        teff = torch.where(stdv == 0.0, positivepart, calovgreve)
-        snowfrac = torch.clip(teff, 0)
+        Returns
+        -------
+        snow_melt : numpy.ndarray
+            Snow melt rate, shape is the broadcasted shape of ``snow`` and ``pdd``.
+        ice_melt : numpy.ndarray
+            Ice melt rate, shape is the broadcasted shape of ``snow`` and ``pdd``.
 
-        # convert to degree-days
-        return snowfrac * 365.242198781
+        Notes
+        -----
+        The potential snow melt is::
 
-    def accumulation_rate(self, temp, prec):
-        """Compute accumulationmulation rate from temperature and precipitation.
+            pot_snow_melt = pdd_factor_snow * pdd
 
-        The fraction of precipitation that falls as snow decreases linearly
-        from one to zero between temperature thresholds defined by the
-        `temp_snow` and `temp_rain` attributes.
-
-        *temp*: array_like
-            Near-surface air temperature in degrees Celcius.
-        *prec*: array_like
-            Precipitation rate in meter per year.
+        Snow melt is limited by available snow, and ice melt is proportional to
+        the remaining energy using the ratio of degree-day factors.
         """
+        s = _as_float_array(snow)
+        d = _as_float_array(pdd)
 
-        # compute snow fraction as a function of temperature
-        reduced_temp = (self.temp_rain - temp) / (self.temp_rain - self.temp_snow)
-        snowfrac = torch.clip(reduced_temp, 0, 1)
+        ddf_snow = float(self.pdd_factor_snow)
+        ddf_ice = float(self.pdd_factor_ice)
 
-        # return accumulationmulation rate
-        return snowfrac * prec
+        pot_snow_melt = ddf_snow * d
+        snow_melt = np.minimum(s, pot_snow_melt)
+        ice_melt = (pot_snow_melt - snow_melt) * ddf_ice / ddf_snow
+
+        return _as_float_array(snow_melt), _as_float_array(ice_melt)
 
 
 class PDD(pl.LightningModule):
     """
     Positive Degree-Day (PDD) surface mass-balance component for Lightning.
 
+    This module computes instantaneous positive degree-days (PDD), snowfall
+    accumulation, melt, refreezing, runoff, and surface mass balance (SMB) from
+    near-surface temperature and precipitation time series using a simple
+    temperature-index method (e.g., Calov & Greve, 2005).
+
+    Inputs ``temp``, ``precip``, and ``stdv`` are stored as non-trainable buffers.
+    The model parameters (degree-day factors, refreezing fractions, and temperature
+    thresholds for snow/rain partitioning) are provided at call time via ``forward``.
+
+    Parameters
+    ----------
+    temp : array_like
+        Near-surface air temperature time series. Must be convertible to a
+        torch tensor. Supported shapes include ``(T, Y, X)``, ``(1, Y, X)``,
+        ``(Y, X)``, or scalar-like; broadcasting is used internally. Units: °C.
+    precip : array_like
+        Precipitation rate with shapes broadcastable to ``temp``. Units: m yr⁻¹.
+    stdv : array_like
+        Standard deviation of near-surface air temperature. Shapes must be
+        broadcastable to ``temp``. Units: K.
+    n_interpolate : int, optional
+        Number of time points used to represent a year (``>= 1``). Default is 12.
+        This affects the annual integration scaling in :meth:`_integrate`.
+    predictor_vars : list of str, optional
+        If provided, :meth:`forward` returns a stacked tensor containing only
+        the requested variables (in the given order) instead of the full
+        diagnostics dictionary. Each name must be a key in the diagnostics
+        dictionary produced by :meth:`forward` (e.g., ``"pdd"``, ``"smb"``).
+
+    Notes
+    -----
+    * Time is assumed to represent one year and integration is performed with a
+      simple mean over the time axis scaled by the number of interpolation points.
+    * Temperature is treated in degrees Celsius (°C). The standard deviation
+      ``stdv`` is treated as Kelvin (K) but used as a magnitude in the same formula.
     """
 
     def __init__(
@@ -933,7 +612,7 @@ class PDD(pl.LightningModule):
         stdv,
         *,
         n_interpolate: int = 12,
-        predictor_vars: list | None = None,
+        predictor_vars: list[str] | None = None,
     ):
         """
         Initialize the PDD module.
@@ -941,17 +620,32 @@ class PDD(pl.LightningModule):
         Parameters
         ----------
         temp : array_like
-            Near-surface air temperature time series (shape T×Y×X, 1×Y×X, Y×X, or scalar).
+            Near-surface air temperature time series. Must be convertible to a
+            torch tensor. Supported shapes include ``(T, Y, X)``, ``(1, Y, X)``,
+            ``(Y, X)``, or scalar-like; broadcasting is used internally. Units: °C.
         precip : array_like
-            Precipitation rate (same broadcastable shapes as ``temp``).
+            Precipitation rate with shapes broadcastable to ``temp``. Units: m yr⁻¹.
         stdv : array_like
-            Standard deviation of near-surface air temperature (Kelvin).
+            Standard deviation of near-surface air temperature. Shapes must be
+            broadcastable to ``temp``. Units: K.
         n_interpolate : int, optional
-            Number of time points to interpolate to over a year (>=1). Default is 12.
-        interpolate_rule : str, optional
-            Interpolation kind for 1D interpolation (e.g., ``"linear"``, ``"cubic"``).
+            Number of time points used to represent a year (``>= 1``). Default is 12.
+            This affects the annual integration scaling in :meth:`_integrate`.
+        predictor_vars : list of str, optional
+            If provided, :meth:`forward` returns a stacked tensor containing only
+            the requested variables (in the given order) instead of the full
+            diagnostics dictionary. Each name must be a key in the diagnostics
+            dictionary produced by :meth:`forward` (e.g., ``"pdd"``, ``"smb"``).
+
+        Raises
+        ------
+        ValueError
+            If ``n_interpolate < 1``.
         """
         super().__init__()
+
+        if n_interpolate < 1:
+            raise ValueError("n_interpolate must be >= 1")
 
         # Store only the small scalar hyperparameters; ignore the big arrays.
         self.save_hyperparameters(ignore=["temp", "precip", "stdv"])
@@ -964,6 +658,7 @@ class PDD(pl.LightningModule):
         self.register_buffer("temp", temp_t)
         self.register_buffer("precip", precip_t)
         self.register_buffer("stdv", stdv_t)
+
         self.predictor_vars = predictor_vars
 
     @staticmethod
@@ -982,35 +677,60 @@ class PDD(pl.LightningModule):
         -------
         argparse.ArgumentParser
             The updated parser with PDD arguments added.
+
+        Notes
+        -----
+        This helper adds the ``--n_interpolate`` argument.
         """
         parser = parent_parser.add_argument_group("PDD")
         parser.add_argument("--n_interpolate", type=int, default=12)
 
         return parent_parser
 
-    def forward(self, x: Sequence[Tensor], **kwargs) -> tuple[Tensor, Tensor]:
+    def forward(self, x: Sequence[Tensor], **kwargs):
         """
-        Compute PDD melt and snowfall accumulation from parameter tensors.
+        Compute PDD diagnostics from parameter tensors.
 
         Parameters
         ----------
         x : Sequence[torch.Tensor]
             Ordered sequence of six parameter tensors:
-            ``(pdd_factor_snow, pdd_factor_ice, refreeze_snow, refreeze_ice, temp_snow, temp_rain)``.
-            Tensors are broadcast-compatible; each may be scalar-like or have shape ``(...)``.
+
+            ``(pdd_factor_snow, pdd_factor_ice, refreeze_snow, refreeze_ice,
+            temp_snow, temp_rain)``.
+
+            Parameters must be broadcast-compatible with the internal ``temp`` and
+            ``precip`` buffers. Scalars are allowed.
+
+            Interpreted units/conventions:
+            * ``pdd_factor_snow`` : snow degree-day factor, mm w.e. d⁻¹ °C⁻¹
+            * ``pdd_factor_ice``  : ice degree-day factor, mm w.e. d⁻¹ °C⁻¹
+            * ``refreeze_snow``   : fraction of snow melt that refreezes (0–1)
+            * ``refreeze_ice``    : fraction of ice melt that refreezes (0–1)
+            * ``temp_snow``       : °C, snow/rain transition lower bound
+            * ``temp_rain``       : °C, snow/rain transition upper bound
+
         **kwargs
             Additional keyword arguments accepted for API compatibility.
             Currently unused.
 
         Returns
         -------
-        tuple of torch.Tensor
-            ``(pdd, accumulation)`` where each tensor has the broadcasted shape of the inputs.
+        dict[str, torch.Tensor] or torch.Tensor
+            If ``predictor_vars`` is None, returns a diagnostics dictionary with
+            keys including (non-exhaustive): ``"inst_pdd"``, ``"accumulation_rate"``,
+            ``"snow_melt_rate"``, ``"ice_melt_rate"``, ``"runoff_rate"``, ``"inst_smb"``,
+            and annual integrals such as ``"pdd"``, ``"accumulation"``, ``"melt"``,
+            ``"runoff"``, ``"refreeze"``, ``"smb"``, etc.
+
+            If ``predictor_vars`` is provided, returns a 2D tensor of shape
+            ``(N, K)`` where ``K = len(predictor_vars)`` and ``N`` is the number of
+            elements in the broadcasted field (flattened by the stacking logic).
 
         Notes
         -----
-        * ``temp_snow`` and ``temp_rain`` define the linear transition for the snowfall
-          fraction in ``[temp_snow, temp_rain]`` (clamped outside).
+        * ``temp_snow`` and ``temp_rain`` define a linear transition for snowfall
+          fraction in ``[temp_snow, temp_rain]`` and are clamped outside this range.
         * Gradients flow through the linear region; clamps have zero gradients outside.
         """
         (
@@ -1033,7 +753,6 @@ class PDD(pl.LightningModule):
         snow_refreeze_rate = torch.zeros_like(self.temp)
         ice_refreeze_rate = torch.zeros_like(self.temp)
 
-        # parse model parameters for readability
         ddf_snow = pdd_factor_snow / 1000
         ddf_ice = pdd_factor_ice / 1000
 
@@ -1054,6 +773,7 @@ class PDD(pl.LightningModule):
             )
 
             snow_depth[i] = intermediate_snow_depth - snow_melt_rate[i]
+
         melt_rate = snow_melt_rate + ice_melt_rate
         snow_refreeze_rate = refreeze_snow * snow_melt_rate
         ice_refreeze_rate = refreeze_ice * ice_melt_rate
@@ -1084,30 +804,34 @@ class PDD(pl.LightningModule):
             "ice_refreeze": self._integrate(ice_refreeze_rate),
             "smb": self._integrate(inst_smb),
         }
-        # output
+
         if self.predictor_vars is not None:
             obs_pred = [result[k] for k in self.predictor_vars]
+            return torch.vstack(obs_pred).T
 
-            return torch.vstack((obs_pred)).T
-
-        else:
-            return result
+        return result
 
     def inst_pdd(self, temp: Tensor, stdv: Tensor) -> Tensor:
         """
-        Compute instantaneous PDD (Calov & Greve, 2005).
+        Compute instantaneous positive degree-days (PDD).
+
+        Uses the effective temperature formulation described by Calov & Greve (2005)
+        to account for sub-monthly variability using a normal distribution with
+        standard deviation ``stdv``.
 
         Parameters
         ----------
-        temp : Tensor
+        temp : torch.Tensor
             Near-surface air temperature (°C).
-        stdv : Tensor
-            Standard deviation of near-surface air temperature (K).
+        stdv : torch.Tensor
+            Standard deviation of near-surface air temperature (K). Must be
+            broadcast-compatible with ``temp``.
 
         Returns
         -------
-        Tensor
-            Instantaneous positive degree-days (°C·days).
+        torch.Tensor
+            Instantaneous positive degree-days (°C·days) with the same broadcasted
+            shape and device as ``temp``.
         """
         positivepart = torch.clamp(temp, min=0.0)
         normtemp = temp / (torch.sqrt(torch.tensor(2.0, device=temp.device)) * stdv)
@@ -1157,13 +881,6 @@ class PDD(pl.LightningModule):
         ``snowfrac = clamp((temp_rain - temp) / (temp_rain - temp_snow), 0, 1)``.
         Gradients flow through the linear segment; the clamp introduces zero
         gradients outside ``[temp_snow, temp_rain]``.
-
-        Examples
-        --------
-        >>> temp = torch.tensor([-5.0, 0.0, 2.0, 5.0])
-        >>> precip = torch.tensor([1.0, 1.0, 1.0, 1.0])  # m/yr
-        >>> accumulation_rate(temp, precip, temp_snow=-2.0, temp_rain=2.0)
-        tensor([1.0000, 0.5000, 0.0000, 0.0000])
         """
         reduced_temp = (temp_rain - temp) / (temp_rain - temp_snow)
         snowfrac = torch.clamp(reduced_temp, 0.0, 1.0)
@@ -1175,12 +892,20 @@ class PDD(pl.LightningModule):
 
         Parameters
         ----------
-        array : Tensor
-            Series with leading time axis.
+        array : torch.Tensor
+            Time series with a leading time axis, i.e. shape ``(T, ...)``.
 
         Returns
         -------
-        Tensor
-            Time-integrated field on the current device.
+        torch.Tensor
+            Time-integrated field on the current device with shape ``(...)``.
+
+        Notes
+        -----
+        Integration uses a simple scaled sum:
+
+        ``sum(array, dim=0) / max(n_interpolate - 1, 1)``
+
+        which behaves like an average when ``array`` represents samples over a year.
         """
         return torch.sum(array, dim=0) / max(self.hparams.n_interpolate - 1, 1)

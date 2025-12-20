@@ -103,267 +103,6 @@ param_keys_dict = {
 }
 
 
-def load_hirham_climate(
-    file: str | Path = "DMI-HIRHAM5_1980_MM.nc",
-    thinning_factor: int = 1,
-) -> tuple[
-    NDArray[np.floating],
-    NDArray[np.floating],
-    NDArray[np.floating],
-    NDArray[np.floating],
-    NDArray[np.floating],
-    NDArray[np.floating],
-    NDArray[np.floating],
-]:
-    """
-    Load monthly HIRHAM5 climate fields and return thinned arrays.
-
-    The dataset is stacked over spatial dims (``rlat``, ``rlon``) into a 1-D
-    ``z`` dimension, NaNs are dropped along ``z`` (per time step), and simple
-    unit conversions are applied. Outputs are optionally thinned along the last
-    axis by ``thinning_factor``.
-
-    Parameters
-    ----------
-    file : str or pathlib.Path, default="DMI-HIRHAM5_1980_MM.nc"
-        Path to a HIRHAM5 monthly NetCDF file containing variables such as
-        ``tas``, ``rainfall``, ``snfall``, ``gld``, ``snmel``, ``rogl``, ``rfrz``.
-    thinning_factor : int, default=1
-        Subsampling stride applied to the last (stacked spatial) axis of the
-        returned arrays. Use ``1`` for no thinning.
-
-    Returns
-    -------
-    temp : ndarray
-        Air temperature in °C, shape ``(..., M)``.
-    precip : ndarray
-        Total precipitation (rain + snow) in m/yr, shape ``(..., M)``.
-    snowfall_sum : ndarray
-        Annual sum of snowfall in m/yr over the time axis, shape ``(M,)``.
-    melt_sum : ndarray
-        Annual sum of snowmelt in m/yr over the time axis, shape ``(M,)``.
-    runoff_sum : ndarray
-        Annual sum of runoff in m/yr over the time axis, shape ``(M,)``.
-    refreeze_sum : ndarray
-        Annual sum of refreeze in m/yr over the time axis, shape ``(M,)``.
-    smb_sum : ndarray
-        Annual sum of surface mass balance in m/yr over the time axis, shape ``(M,)``.
-
-    Notes
-    -----
-    - Conversions:
-      - Temperature: K → °C.
-      - Fluxes accumulated monthly: scaled to m/yr using 365.242198781 days/yr
-        and divided by 12 for monthly mean fluxes where applicable.
-    - The last dimension ``M`` corresponds to valid (non-NaN) stacked spatial
-      points after dropping missing values.
-    """
-    with xr.open_dataset(file) as Obs:
-        stacked = Obs.stack(z=("rlat", "rlon"))
-        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
-
-        temp = stacked.tas.dropna(dim="z").values - 273.15
-        rainfall = stacked.rainfall.dropna(dim="z").values * 365.242198781 / 1000.0
-        snowfall = stacked.snfall.dropna(dim="z").values * 365.242198781 / 1000.0
-        smb = stacked.gld.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
-        refreeze = (
-            ncl_stacked.rfrz.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
-        )
-        melt = stacked.snmel.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
-        runoff = stacked.rogl.dropna(dim="z").values * 365.242198781 / 1000.0 / 12.0
-        precip = rainfall + snowfall
-
-    return (
-        temp[..., ::thinning_factor],
-        precip[..., ::thinning_factor],
-        snowfall.sum(axis=0)[::thinning_factor],
-        melt.sum(axis=0)[::thinning_factor],
-        runoff.sum(axis=0)[::thinning_factor],
-        refreeze.sum(axis=0)[::thinning_factor],
-        smb.sum(axis=0)[::thinning_factor],
-    )
-
-
-def load_hirham_climate_w_std_dev(
-    file: str | Path = "DMI-HIRHAM5_1980_2020_MMS.nc",
-    thinning_factor: int = 1,
-) -> tuple[
-    NDArray[np.floating],
-    NDArray[np.floating],
-    NDArray[np.floating],
-    dict[str, NDArray[np.floating]],
-]:
-    """
-    Load multi-year HIRHAM5 climate fields grouped by calendar year with std-dev.
-
-    The dataset is thinned on spatial dims, stacked into a 1-D spatial axis,
-    grouped by ``time.year``, and concatenated (horizontally) across years.
-    Simple unit conversions are applied. An ``obs`` dictionary returns annual
-    aggregates of several components.
-
-    Parameters
-    ----------
-    file : str or Path, default="DMI-HIRHAM5_1980_2020_MMS.nc"
-        Path to a multi-year HIRHAM5 NetCDF file containing variables such as
-        ``tas``, ``tas_std_dev``, ``rainfall``, ``snfall``, ``gld``, ``snmel``,
-        ``rogl``, ``rfrz``, ``sn``.
-    thinning_factor : int, default=1
-        Subsampling stride applied to spatial dims (``rlat``, ``rlon``, ``ncl4``,
-        ``ncl5``) before stacking.
-
-    Returns
-    -------
-    temp : ndarray
-        Air temperature in °C, concatenated by year along axis 1; shape ``(12, M)`` if
-        all months are present per year.
-    precip : ndarray
-        Total precipitation (rain + snow) in m/yr, concatenated by year; shape ``(12, M)``.
-    temp_std_dev : ndarray
-        Standard deviation of air temperature (same layout as ``temp``); shape ``(12, M)``.
-    obs : dict of {str: ndarray}
-        Annual aggregates over time for each spatial point:
-        - ``"snow_depth"``: snow depth anomaly relative to first entry (same units as input), shape ``(M,)``.
-        - ``"accumulation"``: annual snowfall sum in m/yr, shape ``(M,)``.
-        - ``"melt"``: annual snowmelt sum in m/yr, shape ``(M,)``.
-        - ``"runoff"``: annual runoff sum in m/yr, shape ``(M,)``.
-        - ``"refreeze"``: annual refreeze sum in m/yr, shape ``(M,)``.
-        - ``"smb"``: annual surface mass balance sum in m/yr, shape ``(M,)``.
-
-    Notes
-    -----
-    - Conversions mirror :func:`load_hirham_climate`.
-    - Arrays are built by ``np.hstack`` over groups of ``time.year``, yielding a
-      block of 12 months per year concatenated along axis 1.
-    """
-    with xr.open_dataset(file) as Obs:
-        nlat = len(Obs["rlat"])
-        nlon = len(Obs["rlon"])
-
-        Obs = Obs.isel(
-            rlat=slice(0, nlat, thinning_factor),
-            rlon=slice(0, nlon, thinning_factor),
-            ncl4=slice(0, nlat, thinning_factor),
-            ncl5=slice(0, nlon, thinning_factor),
-        )
-        stacked = Obs.stack(z=("rlat", "rlon"))
-        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
-
-        temp = (
-            np.hstack(
-                [d.dropna(dim="z").values for _, d in stacked.tas.groupby("time.year")]
-            )
-            - 273.15
-        )
-        temp_std_dev = np.hstack(
-            [
-                d.dropna(dim="z").values
-                for _, d in stacked.tas_std_dev.groupby("time.year")
-            ]
-        )
-        rainfall = (
-            np.hstack(
-                [
-                    d.dropna(dim="z").values
-                    for _, d in stacked.rainfall.groupby("time.year")
-                ]
-            )
-            * 365.242198781
-            / 1000.0
-        )
-        snowfall = (
-            np.hstack(
-                [
-                    d.dropna(dim="z").values
-                    for _, d in stacked.snfall.groupby("time.year")
-                ]
-            )
-            * 365.242198781
-            / 1000.0
-        )
-        smb = (
-            np.hstack(
-                [d.dropna(dim="z").values for _, d in stacked.gld.groupby("time.year")]
-            )
-            * 365.242198781
-            / 1000.0
-            / 12.0
-        )
-        refreeze = (
-            np.hstack(
-                [
-                    d.dropna(dim="z").values
-                    for _, d in ncl_stacked.rfrz.groupby("time.year")
-                ]
-            )
-            * 365.242198781
-            / 1000.0
-            / 12.0
-        )
-        snowmelt = (
-            np.hstack(
-                [
-                    d.dropna(dim="z").values
-                    for _, d in stacked.snmel.groupby("time.year")
-                ]
-            )
-            * 365.242198781
-            / 1000.0
-            / 12.0
-        )
-        snowdepth = np.hstack(
-            [d.dropna(dim="z").values for _, d in stacked.sn.groupby("time.year")]
-        )
-        runoff = (
-            np.hstack(
-                [d.dropna(dim="z").values for _, d in stacked.rogl.groupby("time.year")]
-            )
-            * 365.242198781
-            / 1000.0
-            / 12.0
-        )
-        precip = rainfall + snowfall
-
-        obs: dict[str, NDArray[np.floating]] = {
-            "snow_depth": snowdepth - snowdepth[0],
-            "accumulation": snowfall.sum(axis=0),
-            "melt": snowmelt.sum(axis=0),
-            "runoff": runoff.sum(axis=0),
-            "refreeze": refreeze.sum(axis=0),
-            "smb": smb.sum(axis=0),
-        }
-
-    return temp, precip, temp_std_dev, obs
-
-
-def load_hirham_climate_simple(file="DMI-HIRHAM5_1980_MM.nc", thinning_factor=1):
-    """
-    Read and return Obs
-    """
-
-    with xr.open_dataset(file) as Obs:
-        stacked = Obs.stack(z=("rlat", "rlon"))
-        ncl_stacked = Obs.stack(z=("ncl4", "ncl5"))
-
-        temp = stacked.tas.dropna(dim="z").values
-        rainfall = stacked.rainfall.dropna(dim="z").values
-        snowfall = stacked.snfall.dropna(dim="z").values
-        smb = stacked.gld.dropna(dim="z").values
-        refreeze = ncl_stacked.rfrz.dropna(dim="z").values
-        melt = stacked.snmel.dropna(dim="z").values
-        precip = rainfall + snowfall
-        runoff = stacked.rogl.dropna(dim="z").values
-
-    return (
-        (temp[::thinning_factor] - 273.15).reshape(1, -1),
-        precip[::thinning_factor].reshape(1, -1),
-        snowfall[::thinning_factor].reshape(1, -1),
-        melt[::thinning_factor].reshape(1, -1),
-        runoff[::thinning_factor].reshape(1, -1),
-        smb[::thinning_factor].reshape(1, -1),
-        refreeze[::thinning_factor].reshape(1, -1),
-    )
-
-
 def load_imbie_csv(
     proj_start: int = 2008,
     file: str | Path = "imbie_greenland_2021_Gt.csv",
@@ -398,6 +137,13 @@ def load_imbie_csv(
         - ``"SLE uncertainty (cm)"``  (propagated linearly from mass uncertainty)
         - ``"SLE change uncertainty (cm/yr)"``  (from mass-change uncertainty)
 
+    Raises
+    ------
+    KeyError
+        If expected IMBIE columns are missing.
+    ValueError
+        If ``proj_start`` is not present in the ``"Year"`` column.
+
     Notes
     -----
     - The conversion used is ``cmSLE = 1 / 362.5 / 10`` (i.e., 362.5 Gt per cm SLE).
@@ -409,13 +155,6 @@ def load_imbie_csv(
       ``"Cumulative mass balance uncertainty (Gt)"``. These are renamed to
       ``"Mass change (Gt/yr)"``, ``"Mass change uncertainty (Gt/yr)"``,
       ``"Mass (Gt)"``, and ``"Mass uncertainty (Gt)"``, respectively.
-
-    Raises
-    ------
-    KeyError
-        If expected IMBIE columns are missing.
-    ValueError
-        If ``proj_start`` is not present in the ``"Year"`` column.
     """
     df = pd.read_csv(file)
 
@@ -449,27 +188,47 @@ def load_imbie_csv(
     return df
 
 
-def distributions_as19():
+def distributions_as19() -> dict[str, object]:
     r"""
+    Return prior distributions from Aschwanden et al. (2019).
 
-    Returns the distributions used by Aschwanden et al (2019):
+    This helper returns a dictionary mapping parameter names to SciPy
+    random-variable objects (``scipy.stats`` distributions). These priors were
+    used in Aschwanden et al. (2019) for Greenland Ice Sheet projections.
 
-    @article{Aschwanden2019,
-    author = {Aschwanden, Andy and Fahnestock, Mark A. and Truffer, Martin and Brinkerhoff, Douglas J. and Hock, Regine and Khroulev, Constantine and Mottram, Ruth and Khan, S. Abbas},
-    doi = {10.1126/sciadv.aav9396},
-    issn = {2375-2548},
-    journal = {Science Advances},
-    month = {jun},
-    number = {6},
-    pages = {eaav9396},
-    title = {{Contribution of the Greenland Ice Sheet to sea level over the next millennium}},
-    url = {http://advances.sciencemag.org/lookup/doi/10.1126/sciadv.aav9396},
-    volume = {5},
-    year = {2019}
-    }
+    Returns
+    -------
+    dict[str, object]
+        Mapping from parameter name to a SciPy distribution object (e.g.,
+        ``scipy.stats.randint``, ``scipy.stats.truncnorm``, ``scipy.stats.uniform``,
+        ``scipy.stats.gamma``).
 
+    Notes
+    -----
+    Reference (BibTeX)::
+
+        @article{Aschwanden2019,
+        author = {Aschwanden, Andy and Fahnestock, Mark A. and Truffer, Martin and
+                  Brinkerhoff, Douglas J. and Hock, Regine and Khroulev, Constantine
+                  and Mottram, Ruth and Khan, S. Abbas},
+        doi = {10.1126/sciadv.aav9396},
+        issn = {2375-2548},
+        journal = {Science Advances},
+        month = {jun},
+        number = {6},
+        pages = {eaav9396},
+        title = {{Contribution of the Greenland Ice Sheet to sea level over the next millennium}},
+        volume = {5},
+        year = {2019}
+        }
+
+    Examples
+    --------
+    >>> dists = distributions_as19()
+    >>> dists["FICE"].mean()
+    8.0
+    >>> dists["GCM"].rvs(size=5, random_state=0)  # doctest: +SKIP
     """
-
     return {
         "GCM": randint(0, 4),
         "FICE": truncnorm(-4 / 4.0, 4.0 / 4, loc=8, scale=4),
