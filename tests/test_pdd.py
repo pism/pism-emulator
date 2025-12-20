@@ -17,12 +17,34 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 
+from typing import Literal
+
 import numpy as np
 import torch
 import xarray as xr
 from numpy.testing import assert_array_almost_equal
 
 from pism_emulator.models.pdd import PDD, ReferencePDDModel
+
+PDDCompareKey = Literal[
+    "accumulation_rate",
+    "inst_pdd",
+    "snow_depth",
+    "snow_melt_rate",
+    "ice_melt_rate",
+    "melt_rate",
+    "smb",
+]
+
+PDD_COMPARE_VARS: tuple[PDDCompareKey, ...] = (
+    "accumulation_rate",
+    "inst_pdd",
+    "snow_depth",
+    "snow_melt_rate",
+    "ice_melt_rate",
+    "melt_rate",
+    "smb",
+)
 
 
 def make_fake_climate() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -311,15 +333,7 @@ def test_torch_model():
         ]
     )
     result_pl = pdd_torch_pl.forward(x)
-    for m_var in [
-        "accumulation_rate",
-        "inst_pdd",
-        "snow_depth",
-        "snow_melt_rate",
-        "ice_melt_rate",
-        "melt_rate",
-        "smb",
-    ]:
+    for m_var in PDD_COMPARE_VARS:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(result_ref[m_var], result_pl[m_var], decimal=3)
 
@@ -365,15 +379,7 @@ def test_torch_model_2d():
         ]
     )
     result_pl = pdd_torch_pl.forward(x)
-    for m_var in [
-        "accumulation_rate",
-        "inst_pdd",
-        "snow_depth",
-        "snow_melt_rate",
-        "ice_melt_rate",
-        "melt_rate",
-        "smb",
-    ]:
+    for m_var in PDD_COMPARE_VARS:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(result_ref[m_var], result_pl[m_var], decimal=3)
 

@@ -495,12 +495,6 @@ class PDDDataModule(pl.LightningDataModule):
     Y : torch.Tensor
         Target tensor aligned with ``X``. Must have the same leading sample
         dimension as ``X`` (``Y.shape[0] == X.shape[0]``).
-    omegas : torch.Tensor
-        Auxiliary tensor stored in the config for downstream use (not currently
-        included in the DataLoaders in this implementation).
-    omegas_0 : torch.Tensor
-        Auxiliary tensor stored in the config for downstream use (not currently
-        included in the DataLoaders in this implementation).
     batch_size : int, optional
         Batch size for all DataLoaders. Default is 128.
     seed : int, optional
@@ -531,8 +525,6 @@ class PDDDataModule(pl.LightningDataModule):
         self,
         X: Tensor,
         Y: Tensor,
-        omegas: Tensor,
-        omegas_0: Tensor,
         *,
         batch_size: int = 128,
         seed: int = 42,
@@ -544,7 +536,7 @@ class PDDDataModule(pl.LightningDataModule):
 
         Parameters
         ----------
-        X, Y, omegas, omegas_0 : torch.Tensor
+        X, Y : torch.Tensor
             See class docstring.
         batch_size : int, optional
             Batch size for DataLoaders. Default is 128.
@@ -571,8 +563,6 @@ class PDDDataModule(pl.LightningDataModule):
         self.cfg = PDDConfig(
             X=X,
             Y=Y,
-            omegas=omegas,
-            omegas_0=omegas_0,
             batch_size=batch_size,
             train_size=train_size,
             num_workers=num_workers,
@@ -700,7 +690,7 @@ class LegacyPISMDataModule(pl.LightningDataModule):
         self._dl_generator = torch.Generator(device="cpu")
         self._dl_generator.manual_seed(seed)
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str | None = None):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
         self.all_data = all_data
 

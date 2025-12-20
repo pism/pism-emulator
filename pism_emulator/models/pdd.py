@@ -20,7 +20,7 @@ import argparse
 from collections.abc import Callable
 from functools import wraps
 from types import SimpleNamespace
-from typing import Any, Sequence, TypedDict, TypeVar, Union, cast
+from typing import Any, Sequence, TypeAlias, TypedDict, TypeVar, Union, cast
 
 import lightning as pl
 import numpy as np
@@ -31,10 +31,14 @@ import xarray as xr
 from scipy.interpolate import interp1d
 from torch import Tensor
 
-ArrayLike = npt.ArrayLike
-NDArrayF = npt.NDArray[np.floating]
+ArrayLike: TypeAlias = npt.ArrayLike
+NDArrayF: TypeAlias = npt.NDArray[np.floating]
 
 _T = TypeVar("_T", bound=type)
+
+
+C = TypeVar("C", bound=type[Any])
+InitFn: TypeAlias = Callable[..., None]
 
 
 def _as_float_array(x: ArrayLike) -> NDArrayF:
@@ -55,14 +59,15 @@ def _as_float_array(x: ArrayLike) -> NDArrayF:
     return np.asarray(x, dtype=float)
 
 
-def freeze_it(cls: _T) -> _T:
+def freeze_it(cls: C) -> C:
     """
-    Class decorator that prevents adding new attributes after initialization.
+    Freeze a class after initialization to prevent adding new attributes.
 
-    After the decorated class finishes running its ``__init__``, the instance is
-    marked as "frozen". Subsequent attempts to set a **new** attribute (one that
-    does not already exist on the instance) will be rejected. Updating existing
-    attributes remains allowed.
+    This class decorator modifies ``__setattr__`` so that, after ``__init__``
+    completes, attempts to set *new* attributes (i.e., attributes that do not
+    already exist on the instance) are rejected.
+
+    Existing attributes may still be modified.
 
     Parameters
     ----------
@@ -72,43 +77,36 @@ def freeze_it(cls: _T) -> _T:
     Returns
     -------
     type
-        The same class with a wrapped ``__init__`` and an overridden ``__setattr__``.
+        The same class, modified in-place (``__setattr__`` and ``__init__`` are
+        wrapped).
 
     Notes
     -----
-    This decorator enforces a lightweight "no new attributes after init" policy.
-    It prints a message instead of raising an exception when rejecting an
-    attribute assignment.
+    This is a lightweight alternative to ``__slots__`` that preserves normal
+    attribute access during initialization.
 
-    Examples
-    --------
-    >>> @freeze_it
-    ... class A:
-    ...     def __init__(self) -> None:
-    ...         self.x = 1
-    ...
-    >>> a = A()
-    >>> a.x = 2      # allowed (existing attribute)
-    >>> a.y = 3      # rejected (new attribute), prints a message  # doctest: +SKIP
+    By default this implementation raises :class:`AttributeError` when a new
+    attribute is set after initialization. If you prefer the legacy behavior
+    (print a warning and ignore), replace the ``raise`` with a ``print`` and
+    ``return``.
     """
-    cls.__frozen = False  # type: ignore[attr-defined]
+    # Class-level default; each instance gets its own flag set in wrapped __init__.
+    setattr(cls, "__frozen", False)
 
     def frozensetattr(self: Any, key: str, value: Any) -> None:
         if getattr(self, "__frozen", False) and not hasattr(self, key):
-            print(f"Class {cls.__name__} is frozen. Cannot set {key} = {value}")
-            return
+            raise AttributeError(f"Class {cls.__name__} is frozen. Cannot set {key}.")
         object.__setattr__(self, key, value)
 
-    def init_decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        def wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
-            func(self, *args, **kwargs)
-            object.__setattr__(self, "__frozen", True)
+    orig_init = cast(InitFn, getattr(cls, "__init__"))
 
-        return wrapper
+    @wraps(orig_init)
+    def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        orig_init(self, *args, **kwargs)
+        object.__setattr__(self, "__frozen", True)
 
-    cls.__setattr__ = frozensetattr  # type: ignore[assignment]
-    cls.__init__ = init_decorator(cls.__init__)  # type: ignore[method-assign]
+    setattr(cls, "__setattr__", frozensetattr)
+    setattr(cls, "__init__", wrapped_init)
 
     return cls
 

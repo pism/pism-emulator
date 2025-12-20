@@ -22,7 +22,7 @@ Stats.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -30,7 +30,7 @@ import pandas as pd
 from sklearn.base import BaseEstimator, clone
 from sklearn.linear_model import LinearRegression
 
-ArrayLike = npt.NDArray[np.floating] | npt.NDArray[np.integer]
+ArrayLike: TypeAlias = npt.ArrayLike
 
 
 def _as_df(
@@ -360,6 +360,12 @@ def stepwise_bic(
         # ----- stopping rule -----
         if best_bic < bic_curr - tol:
             # accept move
+            # mypy: entering this branch implies a best candidate was found
+            assert best_sets is not None
+            assert best_action is not None
+            assert best_term is not None
+            assert best_X is not None
+            assert best_model is not None
             sel_mains, sel_inters = best_sets
             X_curr = best_X
             model_curr = best_model

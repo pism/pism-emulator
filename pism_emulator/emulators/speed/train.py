@@ -100,7 +100,7 @@ class EpochProgressBar(Callback):
             Fixed width of the progress bar in terminal columns, by default ``120``.
         """
         super().__init__()
-        self._bar: Optional[tqdm] = None
+        self._bar: tqdm | None = None
         self._desc = desc
         self._ncols = ncols
 

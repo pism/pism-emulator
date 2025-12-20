@@ -53,7 +53,7 @@ def current_script_directory():
 script_directory = current_script_directory()
 
 if __name__ == "__main__":
-    __spec__ = None
+    __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
     parser.add_argument("--accelerator", type=str, default="auto")
@@ -92,7 +92,6 @@ if __name__ == "__main__":
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--train_size", type=float, default=1.0)
-    parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -113,7 +112,6 @@ if __name__ == "__main__":
     target_var = args.target_var
     target_error_var = args.target_error_var
     train_size = args.train_size
-    thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
 
     np.random.seed(model_index)
@@ -129,7 +127,6 @@ if __name__ == "__main__":
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        thinning_factor=thinning_factor,
         verbose=True,
     )
 

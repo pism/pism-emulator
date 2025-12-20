@@ -45,6 +45,7 @@ import torch
 import xarray as xr
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from numpy.typing import NDArray
+from torch import Tensor
 from torch.utils.data import Dataset, get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
@@ -56,7 +57,7 @@ YTransformName = Literal["none", "log10", "robust"]
 def inverse_y_transform_np(
     Yt: np.ndarray,
     *,
-    name: str,
+    name: YTransformName | None,
     y_lim: tuple[float, float] | None = None,
     params: dict[str, object] | None = None,
 ) -> np.ndarray:
@@ -90,7 +91,7 @@ def inverse_y_transform_np(
 
     params = params or {}
 
-    if name == "none":
+    if name is None or name == "none":
         Y = Yt
 
     elif name == "log10":
@@ -239,7 +240,7 @@ def _apply_affine(
 def _apply_y_transform(
     Y: torch.Tensor,
     *,
-    name: str,
+    name: YTransformName | None,
     y_lim: tuple[float, float],
     params: dict[str, object],
 ) -> tuple[torch.Tensor, dict[str, object]]:
@@ -304,7 +305,7 @@ def _apply_y_transform(
 
     To invert the transform, use ``10 ** Y_transformed`` (or ``torch.pow(10, ...)``).
     """
-    if name == "none":
+    if name is None or name == "none":
         return Y, params
 
     if name == "log10":

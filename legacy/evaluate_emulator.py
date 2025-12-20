@@ -95,7 +95,6 @@ if __name__ == "__main__":
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        thinning_factor=1,
         threshold=1e7,
     )
     X = dataset.X

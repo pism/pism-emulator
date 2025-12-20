@@ -195,7 +195,7 @@ def load_pred_dir_with_stats(
 
     samples = torch.stack([r["samples"] for r in records])  # (C, S, D)
 
-    def _maybe_stack(key: str) -> Optional[Tensor]:
+    def _maybe_stack(key: str) -> Tensor | None:
         if all((key in r) for r in records):
             return torch.stack([r[key] for r in records])  # (C, S)
         return None
