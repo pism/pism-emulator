@@ -34,46 +34,47 @@ def test_interpolated_dataset():
     Test dataset.
     """
 
-    dataset = PISMInterpolatedDataset(
-        training_files="tests/training_data/*.nc",
-        samples_file="data/samples/velocity_calibration_samples_50.csv",
-        target_file="tests/test_data/test_vel_g9000m.nc",
-        y_transform="log10",
-        y_lim=(1, 100e3)
-    )
+    for norm in ("none", "log10", "robust"):
+        dataset = PISMInterpolatedDataset(
+            training_files="tests/training_data/*.nc",
+            samples_file="data/samples/velocity_calibration_samples_50.csv",
+            target_file="tests/test_data/test_vel_g9000m.nc",
+            y_transform="log10",
+            y_lim=(1, 100e3)
+        )
 
-    X = dataset.samples.X.detach().numpy()
-    Y = dataset.samples.Y.detach().numpy()
-    n_grid_points = dataset.samples.n_grid_points
-    n_parameters = dataset.samples.n_parameters
-    n_samples = dataset.samples.n_samples
-    normed_area = dataset.samples.normed_area
+        X = dataset.samples.X.detach().numpy()
+        Y = dataset.samples.Y.detach().numpy()
+        n_grid_points = dataset.samples.n_grid_points
+        n_parameters = dataset.samples.n_parameters
+        n_samples = dataset.samples.n_samples
+        normed_area = dataset.samples.normed_area
 
-    # np.savez_compressed(
-    #     "tests/test_interpolated_dataset.npz",
-    #     X=X,
-    #     Y=Y,
-    #     normed_area=normed_area,
-    #     n_samples=n_samples,
-    #     n_parameters=n_parameters,
-    #     n_grid_points=n_grid_points,
-    #     allow_pickle=False,
-    # )
+        # np.savez_compressed(
+        #     f"tests/test_interpolated_dataset_{norm}.npz",
+        #     X=X,
+        #     Y=Y,
+        #     normed_area=normed_area,
+        #     n_samples=n_samples,
+        #     n_parameters=n_parameters,
+        #     n_grid_points=n_grid_points,
+        #     allow_pickle=False,
+        # )
 
-    with np.load("tests/test_interpolated_dataset.npz") as data:
-        X_true = data["X"]
-        Y_true = data["Y"]
-        normed_area_true = data["normed_area"]
-        n_grid_points_true = data["n_grid_points"]
-        n_samples_true = data["n_samples"]
-        n_parameters_true = data["n_parameters"]
+        with np.load(f"tests/test_interpolated_dataset_{norm}.npz") as data:
+            X_true = data["X"]
+            Y_true = data["Y"]
+            normed_area_true = data["normed_area"]
+            n_grid_points_true = data["n_grid_points"]
+            n_samples_true = data["n_samples"]
+            n_parameters_true = data["n_parameters"]
 
-    assert_equal(n_grid_points, n_grid_points_true)
-    assert_equal(n_parameters, n_parameters_true)
-    assert_equal(n_samples, n_samples_true)
-    assert_array_almost_equal(X, X_true, decimal=12)
-    assert_array_almost_equal(Y, Y_true, decimal=12)
-    assert_array_almost_equal(normed_area, normed_area_true, decimal=12)
+        assert_equal(n_grid_points, n_grid_points_true)
+        assert_equal(n_parameters, n_parameters_true)
+        assert_equal(n_samples, n_samples_true)
+        assert_array_almost_equal(X, X_true, decimal=12)
+        assert_array_almost_equal(Y, Y_true, decimal=12)
+        assert_array_almost_equal(normed_area, normed_area_true, decimal=12)
 
 
 def test_dataset():
