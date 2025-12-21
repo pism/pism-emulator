@@ -40,7 +40,7 @@ def test_interpolated_dataset():
             samples_file="data/samples/velocity_calibration_samples_50.csv",
             target_file="tests/test_data/test_vel_g9000m.nc",
             y_transform="log10",
-            y_lim=(1, 100e3)
+            y_lim=(1, 100e3),
         )
 
         X = dataset.samples.X.detach().numpy()
