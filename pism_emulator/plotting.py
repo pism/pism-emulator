@@ -21,17 +21,12 @@ Plotting.
 
 from __future__ import annotations
 
-import sys
-from math import sqrt
 from os import mkdir
 from os.path import isdir, join
-from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
-import pandas as pd
 import pylab as plt
-import xarray as xr
 from matplotlib.colors import LogNorm
 
 
@@ -176,14 +171,14 @@ def plot_eigenglaciers(
         data = np.zeros((dataset.target.ny, dataset.target.nx))
         data.put(dataset.target.sparse_idx_1d, V)
         eigen_glacier = np.ma.array(data=data, mask=dataset.target.mask_2d)
-        c = ax.imshow(
+        _ = ax.imshow(
             eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3
         )
 
         ax.text(
             0.05,
             -0.025,
-            f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%",
+            rf"$\Lambda_{k}$={lamda_scaled[k]:.1f}%",
             transform=ax.transAxes,
         )
         ax.axis("off")
@@ -217,14 +212,14 @@ def plot_legacy_eigenglaciers(
         data = np.zeros((dataset.ny, dataset.nx))
         data.put(dataset.sparse_idx_1d, V)
         eigen_glacier = np.ma.array(data=data, mask=dataset.mask_2d)
-        c = ax.imshow(
+        _ = ax.imshow(
             eigen_glacier, origin="lower", cmap="twilight_shifted", vmin=-0.3, vmax=0.3
         )
 
         ax.text(
             0.05,
             -0.025,
-            f"$\Lambda_{k}$={lamda_scaled[k]:.1f}%",
+            rf"$\Lambda_{k}$={lamda_scaled[k]:.1f}%",
             transform=ax.transAxes,
         )
         ax.axis("off")

@@ -1,6 +1,26 @@
-#!/usr/bin/env python
+# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+#
+# This file is part of pism-emulator.
+#
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License
+# along with PISM; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# pylint: disable=too-many-lines,too-many-positional-arguments,redefined-outer-name,too-many-branches,too-many-statements,consider-using-f-string
+"""
+Calibrate the AS19 dataset.
 
-# Copyright (C) 2020-22 Andy Aschwanden, Douglas J. Brinkerhoff
+We disable many pylint directives because this is legacy code.
+"""
 
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from collections.abc import Sequence
@@ -8,7 +28,7 @@ from datetime import datetime
 from functools import reduce
 from itertools import cycle
 from pathlib import Path
-from typing import Any, Literal, Mapping, Optional, Sequence, Tuple, TypeAlias, overload
+from typing import Any, Literal, TypeAlias, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -139,15 +159,15 @@ def rgba2rgb(
     if rgba_arr.size != 4:
         raise ValueError("rgba must contain exactly 4 values (R, G, B, A)")
 
-    r, g, b, a255 = rgba_arr[0], rgba_arr[1], rgba_arr[2], rgba_arr[3]
-    a = np.asarray(a255, dtype=np.float32) / 255.0
+    _r, _g, _b, a255 = rgba_arr[0], rgba_arr[1], rgba_arr[2], rgba_arr[3]
+    _a = np.asarray(a255, dtype=np.float32) / 255.0
 
     Rb, Gb, Bb = background
 
     rgb = np.empty((3,), dtype=np.float32)
-    rgb[0] = r * a + (1.0 - a) * Rb
-    rgb[1] = g * a + (1.0 - a) * Gb
-    rgb[2] = b * a + (1.0 - a) * Bb
+    rgb[0] = _r * _a + (1.0 - _a) * Rb
+    rgb[1] = _g * _a + (1.0 - _a) * Gb
+    rgb[2] = _b * _a + (1.0 - _a) * Bb
 
     return np.asarray(rgb, dtype=np.uint8)
 
@@ -178,15 +198,15 @@ def toDecimalYear(date: datetime) -> float:
     >>> toDecimalYear(datetime(2020, 10, 10))
     2020.7...
     """
-    year = date.year
-    start_of_year = datetime(year=year, month=1, day=1)
-    start_of_next_year = datetime(year=year + 1, month=1, day=1)
+    _year = date.year
+    start_of_year = datetime(year=_year, month=1, day=1)
+    start_of_next_year = datetime(year=_year + 1, month=1, day=1)
 
     year_elapsed = (date - start_of_year).total_seconds()
     year_duration = (start_of_next_year - start_of_year).total_seconds()
     fraction = year_elapsed / year_duration
 
-    return float(year) + fraction
+    return float(_year) + fraction
 
 
 def set_size(w: float, h: float, ax: Axes | None = None) -> None:
@@ -234,7 +254,6 @@ def plot_historical(
     ensembles: Sequence[str] = ("AS19", "Flow+Mass Calib."),
     quantiles: Sequence[float] = (0.05, 0.95),
     sigma: float = 2.0,
-    simulated_ctrl: pd.DataFrame | None = None,
     xlims: Sequence[float] = (2008.0, 2021.0),
     ylims: Sequence[float] = (-10000.0, 500.0),
 ) -> None:
@@ -260,9 +279,6 @@ def plot_historical(
     sigma : float, optional
         Number of observational standard deviations to shade for observations.
         Default is 2.
-    simulated_ctrl : pandas.DataFrame or None, optional
-        Optional control simulation (currently unused in this function body).
-        Included for API compatibility.
     xlims : sequence of float, optional
         X-axis limits in decimal years. Default is ``(2008, 2021)``.
     ylims : sequence of float, optional
@@ -457,7 +473,7 @@ def plot_projection(
             4,
             sharey="row",
             figsize=[6.0, 2.2],
-            gridspec_kw=dict(width_ratios=[60, len(bars), len(bars), len(bars)]),
+            gridspec_kw={"width_ratios": [60, len(bars), len(bars), len(bars)]},
         )
         fig.subplots_adjust(hspace=0.1, wspace=0.05)
         ax = axs[0]
@@ -636,15 +652,66 @@ def plot_projection(
 
 
 def plot_partitioning(
-    out_filename,
-    simulated=None,
-    observed=None,
-    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    quantiles=[0.05, 0.95],
-    sigma=2,
-    simulated_ctrl=None,
-    xlims=[2010, 2020],
-):
+    out_filename: str | Path,
+    simulated: pd.DataFrame | None = None,
+    observed: pd.DataFrame | None = None,
+    ensembles: Sequence[str] = ("AS19", "Flow Calib.", "Flow+Mass Calib."),
+    quantiles: Sequence[float] = (0.05, 0.95),
+    sigma: float = 2.0,
+    simulated_ctrl: pd.DataFrame | None = None,
+    xlims: Sequence[float] = (2010, 2020),
+) -> None:
+    """
+    Plot partitioning of mass change into dynamic discharge and SMB.
+
+    This creates a two-panel figure showing time series of:
+    - ``D (Gt/yr)``: dynamic discharge component
+    - ``SMB (Gt/yr)``: surface mass balance component
+
+    For simulated ensembles, the median and a quantile interval are shown.
+    For observations, the mean and a ±``sigma`` uncertainty band are shown.
+
+    Parameters
+    ----------
+    out_filename : str or pathlib.Path
+        Output path for the saved figure.
+    simulated : pandas.DataFrame or None, optional
+        Simulated time series. Expected columns include:
+        - ``"Year"``
+        - ``"Ensemble"``
+        - ``"D (Gt/yr)"`` and ``"SMB (Gt/yr)"``
+        If ``None``, simulated curves are not plotted.
+    observed : pandas.DataFrame or None, optional
+        Observed time series. Expected columns include:
+        - ``"Year"``
+        - ``"D (Gt/yr)"``, ``"SMB (Gt/yr)"``
+        - ``"D uncertainty (Gt/yr)"``, ``"SMB uncertainty (Gt/yr)"``
+        If ``None``, observation curves are not plotted.
+    ensembles : Sequence[str], optional
+        Ensemble labels to plot (matched against ``simulated["Ensemble"]``).
+    quantiles : Sequence[float], optional
+        Lower and upper quantiles used for the simulated uncertainty band.
+        Typically two values, e.g. ``(0.05, 0.95)``.
+    sigma : float, optional
+        Width of the observational uncertainty band in units of standard
+        deviations (e.g. ``2`` for ±2σ).
+    simulated_ctrl : pandas.DataFrame or None, optional
+        Optional control simulations. Currently unused (kept for API
+        compatibility / future extensions).
+    xlims : Sequence[float], optional
+        X-axis limits (start_year, end_year).
+
+    Returns
+    -------
+    None
+        The figure is saved to ``out_filename`` and the figure is closed.
+
+    Notes
+    -----
+    This function relies on module-level plotting configuration such as
+    ``ts_median_palette_dict``, ``ts_fill_palette_dict``, ``signal_lw``,
+    ``obs_signal_color``, ``obs_sigma_color``, and :func:`add_inner_title`.
+    """
     ncol = 0
     if simulated is not None:
         ncol += len(ensembles)
@@ -667,8 +734,8 @@ def plot_partitioning(
             for k, (v, u) in enumerate(zip(["D", "SMB"], ["Gt/yr", "Gt/yr"])):
                 g = sim.groupby(by="Year")[f"{v} ({u})"]
                 sim_median = g.quantile(0.50)
-                sim_low = g.quantile(quantiles[0])
-                sim_high = g.quantile(quantiles[-1])
+                sim_low = g.quantile(float(quantiles[0]))
+                sim_high = g.quantile(float(quantiles[-1]))
 
                 l_es_median = axs[k].plot(
                     sim_median.index,
@@ -686,7 +753,7 @@ def plot_partitioning(
                     alpha=0.75,
                     linewidth=0.0,
                     zorder=-11,
-                    label=f"{quantiles[0]*100:.0f}-{quantiles[-1]*100:.0f}%",
+                    label=f"{float(quantiles[0]) * 100:.0f}-{float(quantiles[-1]) * 100:.0f}%",
                 )
                 if k == 0:
                     legend_handles.append(l_es_median[0])
@@ -719,13 +786,15 @@ def plot_partitioning(
             )
             obs_ci = axs[k].fill_between(
                 observed["Year"],
-                observed[f"{v} ({u})"] - sigma * observed[f"{v} uncertainty ({u})"],
-                observed[f"{v} ({u})"] + sigma * observed[f"{v} uncertainty ({u})"],
+                observed[f"{v} ({u})"]
+                - float(sigma) * observed[f"{v} uncertainty ({u})"],
+                observed[f"{v} ({u})"]
+                + float(sigma) * observed[f"{v} uncertainty ({u})"],
                 color=obs_sigma_color,
                 alpha=0.75,
                 linewidth=0,
                 zorder=5,
-                label=f"{sigma}-$\sigma$",
+                label=rf"{sigma}-$\sigma$",
             )
             if k == 0:
                 legend_handles.append(obs_line[0])
@@ -759,14 +828,63 @@ def plot_partitioning(
 
 
 def plot_posterior_sle_pdfs(
-    out_filename,
-    df,
-    observed=None,
-    rcps=[26, 45, 85],
-    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    years=[2020, 2100],
-    ylim=None,
-):
+    out_filename: str | Path,
+    df: pd.DataFrame,
+    observed: pd.DataFrame | None = None,
+    rcps: Sequence[int] = (26, 45, 85),
+    ensembles: Sequence[str] = ("AS19", "Flow Calib.", "Flow+Mass Calib."),
+    years: Sequence[int] = (2020, 2100),
+    ylim: tuple[float, float] | None = None,
+) -> None:
+    """
+    Plot posterior PDFs of sea-level contribution for multiple RCPs and years.
+
+    For each RCP and each selected year, this produces:
+    - A compact “quantile bar” panel showing 5th/16th/50th/84th/95th percentiles
+      per ensemble (rectangles + median marker).
+    - A KDE panel showing the distribution of ``"SLE (cm)"`` per ensemble.
+
+    Optionally overlays observed mean and ±2σ lines (typically IMBIE) on the
+    first-year KDE panels.
+
+    Parameters
+    ----------
+    out_filename : str or pathlib.Path
+        Output path for the saved figure.
+    df : pandas.DataFrame
+        Long-form table of samples. Expected columns include:
+        - ``"Year"`` (int)
+        - ``"RCP"`` (int, e.g. 26/45/85)
+        - ``"Ensemble"`` (str)
+        - ``"SLE (cm)"`` (float)
+    observed : pandas.DataFrame or None, optional
+        Observed constraints used for vertical reference lines.
+        Expected columns include:
+        - ``"Year"``
+        - ``"SLE (cm)"``
+        - ``"SLE uncertainty (cm)"``
+        If provided, the function draws the observed mean and ±2σ bounds on
+        the left KDE column for each RCP (using the first entry in ``years``).
+    rcps : Sequence[int], optional
+        RCP scenarios to plot (e.g. ``(26, 45, 85)``).
+    ensembles : Sequence[str], optional
+        Ensemble labels to plot and ordering for the KDE hue.
+    years : Sequence[int], optional
+        Years to plot as columns (e.g. ``(2020, 2100)``).
+    ylim : tuple[float, float] or None, optional
+        If provided, y-axis limits for the KDE panels.
+
+    Returns
+    -------
+    None
+        The figure is saved to ``out_filename`` and the figure is closed.
+
+    Notes
+    -----
+    This function depends on module-level objects such as:
+    ``rcp_dict``, ``rcp_col_dict``, and :func:`color_tint`, as well as seaborn
+    being imported as ``sns`` and matplotlib patches/lines.
+    """
     n_rcps = len(rcps)
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
@@ -780,6 +898,7 @@ def plot_posterior_sle_pdfs(
         gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * n_rcps),
     )
     fig.subplots_adjust(hspace=0.0, wspace=0)
+
     for k, rcp in enumerate(rcps):
         for y, year in enumerate(years):
             y_df = df[df["Year"] == year]
@@ -792,7 +911,7 @@ def plot_posterior_sle_pdfs(
                 data=m_df,
                 x="SLE (cm)",
                 hue="Ensemble",
-                hue_order=ensembles,
+                hue_order=list(ensembles),
                 common_norm=False,
                 common_grid=True,
                 multiple="layer",
@@ -806,7 +925,7 @@ def plot_posterior_sle_pdfs(
                 data=m_df,
                 x="SLE (cm)",
                 hue="Ensemble",
-                hue_order=ensembles,
+                hue_order=list(ensembles),
                 common_norm=False,
                 common_grid=True,
                 multiple="layer",
@@ -818,7 +937,6 @@ def plot_posterior_sle_pdfs(
 
             for e, ens in enumerate(ensembles):
                 s_df = p_df[p_df["Ensemble"] == ens]
-                mk_df = y_df[y_df["Ensemble"] == ens]
 
                 alpha = alphas[e]
                 m_color = color_tint(rcp_col_dict[rcp], alpha)
@@ -900,8 +1018,8 @@ def plot_posterior_sle_pdfs(
             obs = observed[
                 (observed["Year"] >= years[0]) & (observed["Year"] < years[0] + 1)
             ]
-            obs_mean = obs["SLE (cm)"].mean()
-            obs_std = obs["SLE uncertainty (cm)"].mean()
+            obs_mean = float(obs["SLE (cm)"].mean())
+            obs_std = float(obs["SLE uncertainty (cm)"].mean())
             axs[(k * 2) + 1, 0].axvline(obs_mean, c="k", lw=0.5)
             axs[(k * 2) + 1, 0].axvline(
                 obs_mean - 2 * obs_std, c="k", lw=0.5, ls="dotted"
@@ -981,7 +1099,7 @@ def plot_posterior_sle_pdfs(
             [], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean"
         )
         l_obs_std = Line2D(
-            [], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$"
+            [], [], c="k", lw=0.5, ls="dotted", label=r"Observed (IMBIE) $\pm2-\sigma$"
         )
         legend_2 = axs[-3, 0].legend(
             handles=[l_obs_mean, l_obs_std],
@@ -1178,7 +1296,7 @@ def plot_posterior_sle_pdf(
             [], [], c="k", lw=0.5, ls="solid", label="Observed (IMBIE) mean"
         )
         l_obs_std = Line2D(
-            [], [], c="k", lw=0.5, ls="dotted", label="Observed (IMBIE) $\pm2-\sigma$"
+            [], [], c="k", lw=0.5, ls="dotted", label=r"Observed (IMBIE) $\pm2-\sigma$"
         )
         legend_2 = axs[-3].legend(
             handles=[l_obs_mean, l_obs_std],
@@ -1403,11 +1521,11 @@ def plot_histograms(
     axs[0, 0].text(
         0,
         1.05,
-        "$\mathbf{m}_{\mathrm{flow}}$",
+        r"$\mathbf{m}_{\mathrm{flow}}$",
         transform=axs[0, 0].transAxes,
         size=8,
     )
-    axs[2, 0].text(0, 1.05, "$\mathbf{m}^{*}$", transform=axs[2, 0].transAxes, size=8)
+    axs[2, 0].text(0, 1.05, r"$\mathbf{m}^{*}$", transform=axs[2, 0].transAxes, size=8)
     for ax in axs.flatten():
         ticklabels = ax.get_xticklabels()
         for tick in ticklabels:

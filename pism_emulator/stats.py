@@ -15,6 +15,8 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+# pylint: disable=too-many-statements,too-many-branches
 """
 Stats.
 """
@@ -22,7 +24,7 @@ Stats.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeAlias
+from typing import Any, Sequence, Tuple, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -34,20 +36,60 @@ ArrayLike: TypeAlias = npt.ArrayLike
 
 
 def _as_df(
-    X: np.ndarray | pd.DataFrame, names: Optional[Sequence[str]]
+    X: np.ndarray | pd.DataFrame,
+    names: Sequence[str] | None = None,
 ) -> pd.DataFrame:
+    """
+    Coerce an array-like feature matrix to a :class:`pandas.DataFrame`.
+
+    If ``X`` is already a DataFrame, a shallow copy is returned. Otherwise, ``X`` is
+    converted to a NumPy array and wrapped as a DataFrame. One-dimensional inputs are
+    interpreted as a single feature and reshaped to ``(n_samples, 1)``.
+
+    Parameters
+    ----------
+    X : numpy.ndarray or pandas.DataFrame
+        Feature matrix with shape ``(n_samples, n_features)``. If a 1D array is
+        provided, it is reshaped to ``(n_samples, 1)``.
+    names : sequence of str, optional
+        Column names to use when ``X`` is not already a DataFrame. If None, columns
+        are named ``X0, X1, ..`` according to the number of features.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame view of ``X`` with stable column names.
+    """
     if isinstance(X, pd.DataFrame):
         return X.copy()
-    X = np.asarray(X)
-    if X.ndim == 1:
-        X = X.reshape(-1, 1)
+
+    X_arr = np.asarray(X)
+    if X_arr.ndim == 1:
+        X_arr = X_arr.reshape(-1, 1)
+
     if names is None:
-        names = [f"X{i}" for i in range(X.shape[1])]
-    return pd.DataFrame(X, columns=list(names))
+        names = [f"X{i}" for i in range(X_arr.shape[1])]
+
+    return pd.DataFrame(X_arr, columns=list(names))
 
 
-def _all_interactions(main: Sequence[str]) -> List[Tuple[str, str]]:
-    # unique i<j
+def _all_interactions(main: Sequence[str]) -> list[tuple[str, str]]:
+    """
+    Generate all unique pairwise interactions among main-effect terms.
+
+    The returned list contains pairs ``(a, b)`` with unique indices ``i < j`` in the
+    order encountered in ``main``.
+
+    Parameters
+    ----------
+    main : sequence of str
+        Names of main-effect predictors.
+
+    Returns
+    -------
+    list of tuple of (str, str)
+        All unique interaction pairs.
+    """
     m = list(main)
     return [(m[i], m[j]) for i in range(len(m)) for j in range(i + 1, len(m))]
 
@@ -55,11 +97,41 @@ def _all_interactions(main: Sequence[str]) -> List[Tuple[str, str]]:
 def _make_matrix(
     Xdf: pd.DataFrame,
     mains: Sequence[str],
-    inters: Sequence[Tuple[str, str]],
+    inters: Sequence[tuple[str, str]],
 ) -> pd.DataFrame:
-    # Build design in a stable, readable column order:
-    # [main effects..., interaction effects...]
-    cols = []
+    """
+    Construct a design matrix with main effects and interaction terms.
+
+    Columns are assembled in a stable, readable order:
+
+    1. Main-effect columns (in the order provided by ``mains``).
+    2. Interaction columns (in the order provided by ``inters``), named ``"a*b"``.
+
+    Parameters
+    ----------
+    Xdf : pandas.DataFrame
+        Input features as a DataFrame containing all columns referenced by ``mains``
+        and ``inters``.
+    mains : sequence of str
+        Names of main-effect predictors to include.
+    inters : sequence of tuple of (str, str)
+        Interaction pairs ``(a, b)`` indicating that the column ``Xdf[a] * Xdf[b]``
+        should be included.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Design matrix with columns for main effects and interactions. If both
+        ``mains`` and ``inters`` are empty, an empty DataFrame is returned with the
+        same index as ``Xdf``.
+
+    Raises
+    ------
+    KeyError
+        If a requested main-effect or interaction column is not present in ``Xdf``.
+    """
+    cols: list[pd.Series] = []
+
     for name in mains:
         cols.append(Xdf[name])
 
@@ -69,16 +141,32 @@ def _make_matrix(
         cols.append(col)
 
     if not cols:
-        # Intercept-only model is out of scope for scikit-learn LinearRegression
-        # but we’ll fall back to an empty matrix and let the estimator handle it.
+        # Intercept-only model: return an empty matrix and let the estimator decide.
         return pd.DataFrame(index=Xdf.index)
 
     return pd.concat(cols, axis=1)
 
 
 def _consistent_feature_list(
-    mains: Sequence[str], inters: Sequence[Tuple[str, str]]
-) -> List[str]:
+    mains: Sequence[str],
+    inters: Sequence[tuple[str, str]],
+) -> list[str]:
+    """
+    Build a stable list of feature names for a main+interaction design.
+
+    Parameters
+    ----------
+    mains : sequence of str
+        Names of main-effect predictors.
+    inters : sequence of tuple of (str, str)
+        Interaction pairs ``(a, b)`` that correspond to features named ``"a*b"``.
+
+    Returns
+    -------
+    list of str
+        Feature names in the same order as produced by :func:`_make_matrix`:
+        main effects first, then interactions.
+    """
     out = list(mains)
     out += [f"{a}*{b}" for (a, b) in inters]
     return out
@@ -86,11 +174,15 @@ def _consistent_feature_list(
 
 @dataclass
 class Step:
+    """
+    Step class.
+    """
+
     step: int
     action: str  # 'add' or 'remove' or 'init'
     term: str | None
     bic: float
-    features: List[str]
+    features: list[str]
 
 
 def calc_bic(
@@ -176,13 +268,13 @@ def stepwise_bic(
     X: np.ndarray | pd.DataFrame,
     Y: np.ndarray | pd.Series | pd.DataFrame,
     *,
-    varnames: Optional[Sequence[str]] = None,
-    estimator: Optional[BaseEstimator] = None,
+    varnames: Sequence[str] | None = None,
+    estimator: BaseEstimator | None = None,
     direction: str = "both",  # 'forward', 'backward', or 'both'
     interactions: bool = True,  # first-order interactions
     start: str = "main",  # 'main' (all mains, no interactions) or 'empty'
     tol: float = 0.0,  # require improvement < -tol to accept
-    max_steps: Optional[int] = None,
+    max_steps: int | None = None,
     verbose: bool = False,
     calc_bic_fn=None,  # pass your calc_bic function or bind it below
 ) -> tuple[list[str], BaseEstimator, pd.DataFrame, list[Step]]:
@@ -251,8 +343,8 @@ def stepwise_bic(
 
     # Initialize selected sets
     if start == "main":
-        sel_mains: List[str] = list(all_mains)
-        sel_inters: List[Tuple[str, str]] = []
+        sel_mains: list[str] = list(all_mains)
+        sel_inters: list[Tuple[str, str]] = []
     elif start == "empty":
         sel_mains = []
         sel_inters = []
@@ -264,7 +356,7 @@ def stepwise_bic(
     model_curr = clone(estimator)
     model_curr.fit(X_curr, y)
     bic_curr = float(calc_bic_fn(model_curr, X_curr, y))
-    history: List[Step] = [
+    history: list[Step] = [
         Step(
             step=0,
             action="init",
@@ -339,7 +431,9 @@ def stepwise_bic(
             elif action == "remove_inter":
                 a, b = payload
                 cand_inters = [
-                    (ai, bi) for (ai, bi) in cand_inters if not (ai == a and bi == b)
+                    (ai, bi)
+                    for (ai, bi) in cand_inters
+                    if a not in (ai, bi) and b not in (ai, bi)
                 ]
             else:
                 continue
@@ -452,7 +546,7 @@ def gelman_rubin(p: npt.ArrayLike, q: npt.ArrayLike) -> float:
     >>> p = np.random.default_rng(0).normal(size=1000)
     >>> q = np.random.default_rng(1).normal(size=1000)
     >>> gelman_rubin(p, q)  # doctest: +ELLIPSIS
-    1.0...
+    1.0..
     """
     p_arr = np.asarray(p, dtype=float).ravel()
     q_arr = np.asarray(q, dtype=float).ravel()
@@ -525,7 +619,7 @@ def kl_divergence(p: ArrayLike, q: ArrayLike) -> float:
     >>> p = np.array([0.5, 0.5])
     >>> q = np.array([0.9, 0.1])
     >>> kl_divergence(p, q)  # doctest: +ELLIPSIS
-    0.5108...
+    0.5108
     """
     p_arr = np.asarray(p, dtype=float)
     q_arr = np.asarray(q, dtype=float)

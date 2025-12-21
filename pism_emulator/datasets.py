@@ -186,7 +186,7 @@ def _fit_robust_params(
     if len(quantile_range) != 2:
         raise ValueError("quantile_range must be a tuple of (low, high) percentiles")
     q_lo, q_hi = quantile_range
-    if not (0.0 <= q_lo < q_hi <= 100.0):
+    if not 0.0 <= q_lo < q_hi <= 100.0:
         raise ValueError("quantile_range must satisfy 0 <= low < high <= 100")
 
     q_lo_t = q_lo / 100.0
@@ -1769,6 +1769,7 @@ class PISMInterpolatedDataset(Dataset):
             normalize_x=bool(normalize_x),
             y_lim=tuple(y_lim),
             y_transform=y_transform if y_transform is not None else "none",
+            y_transform_kwargs=y_transform_kwargs,
             epsilon=float(epsilon),
             engine=engine,
             parallel=bool(parallel),
@@ -1948,11 +1949,13 @@ class PISMInterpolatedDataset(Dataset):
             Y_target_corr = torch.from_numpy(corr_vec.astype(np.float32))
 
         # Grid resolution (assumes uniform x spacing on ref grid)
-        try:
+        grid_resolution = float("nan")
+
+        if ref_x_dim in dref:
             xcoord = dref[ref_x_dim].isel({ref_x_dim: slice(None, None, 1)})
-            grid_resolution = float(abs(xcoord[1] - xcoord[0]))
-        except Exception:
-            grid_resolution = float("nan")
+            if getattr(xcoord, "size", 0) >= 2:
+                # xcoord[...] may be an xarray scalar; float() handles numpy scalars too
+                grid_resolution = float(abs(xcoord[1] - xcoord[0]))
 
         # Build a masked 2D view of Y_target for convenience
         y2d = np.zeros((ny, nx), dtype=np.float32)

@@ -32,7 +32,7 @@ import torch
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from sklearn.model_selection import train_test_split
 from torch import Tensor
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 
 def seed_worker(worker_id: int) -> None:  # pylint: disable=unused-argument
@@ -555,7 +555,7 @@ class PDDDataModule(pl.LightningDataModule):
         """
         super().__init__()
 
-        if not (0.0 < train_size < 1.0):
+        if not 0.0 < train_size < 1.0:
             raise ValueError("train_size must be in (0, 1)")
         if X.shape[0] != Y.shape[0]:
             raise ValueError("X and Y must have the same number of samples")
@@ -667,18 +667,99 @@ class PDDDataModule(pl.LightningDataModule):
         return self._build_loader(self._val, shuffle=False)
 
 
-class LegacyPISMDataModule(pl.LightningDataModule):
+class LegacyPISMDataModule(
+    pl.LightningDataModule
+):  # pylint: disable=too-many-instance-attributes,too-many-positional-arguments
+    """
+    PyTorch Lightning ``DataModule`` for the legacy PISM emulator training pipeline.
+
+    This data module manages a set of input features ``X`` and model fields ``F`` with
+    associated quadrature weights (``omegas`` and ``omegas_0``). During
+    :meth:`prepare_data`, it computes the *eigenglaciers* basis (a weighted SVD/PCA-like
+    decomposition) and stores:
+
+    - ``F_mean``: weighted mean of ``F`` over the ensemble.
+    - ``F_bar``: mean-centered anomalies of ``F`` (``F - F_mean``).
+    - ``V_hat``: truncated basis used for projecting/representing fields.
+
+    During :meth:`setup`, it constructs ``TensorDataset`` instances and provides
+    training/validation dataloaders (and convenience loaders over the full dataset).
+
+    Parameters
+    ----------
+    X : torch.Tensor
+        Input feature tensor. Shape is typically ``(n_samples, n_features)``.
+    F : torch.Tensor
+        Field tensor used to build eigenglaciers. Shape is typically
+        ``(n_samples, n_grid_points)``.
+    omegas : torch.Tensor
+        Quadrature/area weights associated with grid points. Shape typically
+        ``(n_grid_points, 1)`` or ``(n_grid_points,)``.
+    omegas_0 : torch.Tensor
+        Additional weights passed through to the dataset (e.g., baseline weights for
+        a reference geometry). Shape typically compatible with ``omegas``.
+    batch_size : int, default=128
+        Batch size used by dataloaders.
+    train_size : float, default=0.9
+        Fraction of samples assigned to the training split. The remainder is used for
+        validation.
+    num_workers : int, default=0
+        Number of subprocesses used by dataloaders.
+    seed : int, default=42
+        Seed used for the internal dataloader RNG (:class:`torch.Generator`).
+
+    Attributes
+    ----------
+    V_hat : torch.Tensor
+        Eigenglacier basis (truncated) produced by :meth:`prepare_data`.
+    F_bar : torch.Tensor
+        Mean-centered anomaly fields, produced by :meth:`prepare_data`.
+    F_mean : torch.Tensor
+        Weighted mean field, produced by :meth:`prepare_data`.
+    n_eigenglaciers : int
+        Number of eigenglaciers/basis vectors used (``q``).
+    all_data : torch.utils.data.TensorDataset
+        Dataset containing ``(X, F_bar, omegas, omegas_0)`` over all samples.
+    training_data : torch.utils.data.Dataset
+        Training subset (split from ``all_data``).
+    val_data : torch.utils.data.Dataset
+        Validation subset (split from ``all_data``).
+    train_loader : torch.utils.data.DataLoader
+        Training dataloader over ``training_data``.
+    val_loader : torch.utils.data.DataLoader
+        Validation dataloader over ``val_data``.
+    train_all_loader : torch.utils.data.DataLoader
+        Dataloader over the full dataset with shuffling enabled.
+    val_all_loader : torch.utils.data.DataLoader
+        Dataloader over the full dataset with shuffling disabled.
+
+    See Also
+    --------
+    get_eigenglaciers : Computes the eigenglacier basis and related anomaly fields.
+    prepare_data : Populates ``V_hat``, ``F_bar``, ``F_mean``, and ``n_eigenglaciers``.
+    setup : Builds datasets and dataloaders used by Lightning.
+
+    Notes
+    -----
+    - ``setup`` expects :meth:`prepare_data` to have been called first so that
+      ``self.F_bar`` is available.
+    - This module uses a CPU-based :class:`torch.Generator` seeded in ``__init__`` for
+      deterministic shuffling (in combination with ``seed_worker``).
+    - The eigenglacier computation supports either a randomized low-rank SVD via
+      :func:`torch.svd_lowrank` or a full weighted covariance eigendecomposition.
+    """
+
     def __init__(
         self,
-        X,
-        F,
-        omegas,
-        omegas_0,
+        X: torch.Tensor,
+        F: torch.Tensor,
+        omegas: torch.Tensor,
+        omegas_0: torch.Tensor,
         batch_size: int = 128,
         train_size: float = 0.9,
         num_workers: int = 0,
         seed: int = 42,
-    ):
+    ):  # pylint: disable=too-many-instance-attributes,too-many-positional-arguments
         super().__init__()
         self.X = X
         self.F = F
@@ -687,8 +768,25 @@ class LegacyPISMDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.train_size = train_size
         self.num_workers = num_workers
+
         self._dl_generator = torch.Generator(device="cpu")
         self._dl_generator.manual_seed(seed)
+
+        self.V_hat: torch.Tensor | None = None
+        self.F_bar: torch.Tensor | None = None
+        self.F_mean: torch.Tensor | None = None
+        self.n_eigenglaciers: int | None = None
+
+        self.all_data: TensorDataset | None = None
+        self.training_data: Dataset | None = None
+        self.test_data: Dataset | None = None
+        self.val_data: Dataset | None = None
+
+        self.train_all_loader: DataLoader | None = None
+        self.val_all_loader: DataLoader | None = None
+        self.train_loader: DataLoader | None = None
+        self.test_loader: DataLoader | None = None
+        self.val_loader: DataLoader | None = None
 
     def setup(self, stage: str | None = None):
         all_data = TensorDataset(self.X, self.F_bar, self.omegas, self.omegas_0)
@@ -743,14 +841,50 @@ class LegacyPISMDataModule(pl.LightningDataModule):
         self.val_loader = val_loader
 
     def prepare_data(self, **kwargs):
-        V_hat, F_bar, F_mean = self.get_eigenglaciers(**kwargs)
+        """
+        Prepare data.
+
+        Parameters
+        ----------
+        **kwargs
+            Forwarded to :meth:`get_eigenglaciers`. This allows configuration of
+            basis size, cutoff, SVD mode, and caching.
+        """
+
+        V_hat, F_bar, F_mean, _ = self.get_eigenglaciers(**kwargs)
         n_eigenglaciers = V_hat.shape[1]
         self.V_hat = V_hat
         self.F_bar = F_bar
         self.F_mean = F_mean
         self.n_eigenglaciers = n_eigenglaciers
 
-    def get_eigenglaciers(self, **kwargs):
+    def get_eigenglaciers(self, **kwargs) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """
+        Compute or load the eigenglacier basis and mean-centered responses.
+
+        Given a set of responses ``F`` and weights ``omegas``, this method computes
+        the weighted mean field ``F_mean`` and mean-centered anomalies ``F_bar``.
+        It then constructs an eigenglacier basis ``V_hat`` using either a low-rank
+        SVD or an explicit eigen-decomposition.
+
+        Parameters
+        ----------
+        **kwargs
+            Forwarded to :meth:`get_eigenglaciers`. This allows configuration of
+            basis size, cutoff, SVD mode.
+
+        Returns
+        -------
+        V_hat : torch.Tensor
+            Eigenglacier basis matrix. Shape depends on truncation choice
+            (typically ``(G, r)`` where ``G`` is number of grid points).
+        F_bar : torch.Tensor
+            Mean-centered anomalies, ``F - F_mean``. Shape ``(N, G)``.
+        F_mean : torch.Tensor
+            Weighted mean field across runs. Shape ``(G,)`` (or broadcastable).
+        eigs_vals : torch.Tensor
+            Eigenvalues (variance captured by each mode). Shape ``(r,)``.
+        """
         rank_zero_info("Generating eigenglaciers")
         defaultKwargs = {
             "cutoff": 1.0,
@@ -772,26 +906,38 @@ class LegacyPISMDataModule(pl.LightningDataModule):
         F_bar = F - F_mean  # Eq. 28
         if kwargs["svd_lowrank"]:
             Z = torch.diag(torch.sqrt(omegas.squeeze() * n_grid_points))
-            U, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
+            _, S, V = torch.svd_lowrank(Z @ F_bar, q=q)
             lamda = S**2 / (n_grid_points)
         else:
             S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
-            lamda, V = torch.linalg.eig(S)  # Eq. 26
+            lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
             lamda = lamda[:, 0].squeeze()
 
         rank_zero_info(f"...using the first {q} eigen values")
-        lamda_truncated = lamda.detach()
         V = V.detach()
         V_hat = V @ torch.diag(torch.sqrt(lamda))
 
-        if kwargs["eigenvalues"]:
-            return V_hat, F_bar, F_mean, lamda
-        else:
-            return V_hat, F_bar, F_mean
+        return V_hat, F_bar, F_mean, lamda
 
     def train_dataloader(self):
+        """
+        Return train loader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader.
+        """
         return self.train_loader
 
     def validation_dataloader(self):
+        """
+        Return validation loader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader.
+        """
         return self.val_loader

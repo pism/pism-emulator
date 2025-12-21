@@ -16,9 +16,11 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+import math
 from io import StringIO
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pytest
 from numpy.testing import assert_array_almost_equal
@@ -174,18 +176,133 @@ def fixture_dp16_df() -> pd.DataFrame:
     return pd.read_csv(dp16_data, skipinitialspace=True)
 
 
-def test_kl_divergence(pq):
-    p, q = pq
+def _manual_kl_with_masking(
+    p: npt.NDArray[np.floating], q: npt.NDArray[np.floating]
+) -> float:
+    """
+    Compute KL with the same masking semantics as kl_divergence.
 
-    assert_array_almost_equal(kl_divergence(p, q), 0.08529960)
-    assert_array_almost_equal(kl_divergence(q, p), 0.09745500)
+    Parameters
+    ----------
+    p : numpy.ndarray
+        Array of probabilities.
+    q : numpy.ndarray
+        Array of probabilities.
+
+    Returns
+    -------
+    float
+        KL divergence with masked contributions (p==0, q==0, or non-finite p/q -> 0).
+    """
+    ratio = p / q
+    mask = (p != 0) & (q != 0) & np.isfinite(ratio)
+    return float(np.sum(np.where(mask, p * np.log(ratio), 0.0)))
 
 
-def test_gelman_rubin(pq):
-    p, q = pq
+class TestGelmanRubin:
+    """Tests for gelman_rubin."""
 
-    assert_array_almost_equal(gelman_rubin(p, q), 0.816496580927726)
-    assert_array_almost_equal(gelman_rubin(q, p), 0.816496580927726)
+    def test_raises_on_different_lengths(self) -> None:
+        """Gelman_rubin raises ValueError when chain lengths differ."""
+        p = np.array([1.0, 2.0, 3.0])
+        q = np.array([1.0, 2.0])
+        with pytest.raises(ValueError, match="same length"):
+            gelman_rubin(p, q)
+
+    def test_raises_on_too_few_samples(self) -> None:
+        """Gelman_rubin raises ValueError when n_samples < 2."""
+        p = np.array([1.0])
+        q = np.array([1.0])
+        with pytest.raises(ValueError, match="at least two"):
+            gelman_rubin(p, q)
+
+    def test_constant_chains_return_one(self) -> None:
+        """Gelman_rubin returns 1.0 when both chains are constant."""
+        p = np.full(10, 3.14)
+        q = np.full(10, 3.14)
+        rhat = gelman_rubin(p, q)
+        assert rhat == 1.0
+
+    def test_identical_nonconstant_chains_are_one(self) -> None:
+        """Gelman_rubin returns ~1.0 for identical non-constant chains."""
+        p = np.arange(1.0, 101.0)
+        q = p.copy()
+        rhat = gelman_rubin(p, q)
+        assert rhat == pytest.approx(1.0, rel=1e-2, abs=0.0)
+
+    def test_different_means_increase_rhat(self) -> None:
+        """Gelman_rubin produces R-hat > 1 when chains differ in mean."""
+        rng = np.random.default_rng(0)
+        p = rng.normal(loc=0.0, scale=1.0, size=2000)
+        q = rng.normal(loc=1.0, scale=1.0, size=2000)
+        rhat = gelman_rubin(p, q)
+        assert rhat > 1.0
+
+    def test_output_is_finite_positive(self) -> None:
+        """Gelman_rubin returns a finite positive float for typical inputs."""
+        rng = np.random.default_rng(123)
+        p = rng.normal(size=500)
+        q = rng.normal(size=500)
+        rhat = gelman_rubin(p, q)
+        assert isinstance(rhat, float)
+        assert math.isfinite(rhat)
+        assert rhat > 0.0
+
+
+class TestKLDivergence:
+    """Tests for kl_divergence."""
+
+    def test_kl_zero_when_equal(self) -> None:
+        """KL_divergence is zero when p == q (within numerical tolerance)."""
+        p = np.array([0.2, 0.3, 0.5], dtype=float)
+        q = np.array([0.2, 0.3, 0.5], dtype=float)
+        out = kl_divergence(p, q)
+        assert out == pytest.approx(0.0, abs=1e-15)
+
+    def test_kl_matches_manual_computation(self) -> None:
+        """KL_divergence matches a manual masked computation on simple input."""
+        p = np.array([0.5, 0.5], dtype=float)
+        q = np.array([0.9, 0.1], dtype=float)
+        out = kl_divergence(p, q)
+        expected = float(np.sum(p * np.log(p / q)))
+        assert out == pytest.approx(expected, rel=1e-12)
+
+    def test_masking_when_p_has_zeros(self) -> None:
+        """Test terms with p == 0 contribute 0 even if q differs."""
+        p = np.array([0.0, 1.0], dtype=float)
+        q = np.array([0.5, 0.5], dtype=float)
+        out = kl_divergence(p, q)
+        expected = float(1.0 * np.log(1.0 / 0.5))
+        assert out == pytest.approx(expected, rel=1e-12)
+
+    def test_masking_when_q_has_zeros(self) -> None:
+        """Test terms with q == 0 are masked out (contribute 0) per implementation."""
+        p = np.array([0.25, 0.75], dtype=float)
+        q = np.array([0.0, 1.0], dtype=float)  # q[0]==0 would be inf in strict KL
+        out = kl_divergence(p, q)
+
+        # With your masking: first term masked (q==0), second term finite.
+        expected = _manual_kl_with_masking(p, q)
+        assert out == pytest.approx(expected, rel=1e-12)
+
+    def test_broadcasting_supported(self) -> None:
+        """KL_divergence supports broadcasting between p and q."""
+        # p is (2, 3), q is (3,)
+        p = np.array([[0.2, 0.3, 0.5], [0.1, 0.1, 0.8]], dtype=float)
+        q = np.array([0.25, 0.25, 0.5], dtype=float)
+        out = kl_divergence(p, q)
+
+        expected = _manual_kl_with_masking(p, q)
+        assert out == pytest.approx(expected, rel=1e-12)
+
+    def test_output_is_float_and_finite(self) -> None:
+        """KL_divergence returns a finite float on typical distributions."""
+        p = np.array([0.1, 0.2, 0.7], dtype=float)
+        q = np.array([0.2, 0.2, 0.6], dtype=float)
+        out = kl_divergence(p, q)
+        assert isinstance(out, float)
+        assert math.isfinite(out)
+        assert out >= 0.0
 
 
 def test_stepwise_bic(dp16data: pd.DataFrame) -> None:
