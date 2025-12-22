@@ -384,20 +384,22 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     model_true = PDD(temp, precip, sd)
     model = PDD(temp, precip, sd, predictor_vars=predictor_vars)
 
-    f_snow_val = 4.2
-    f_ice_val = 8.0
-    refreeze_snow_val = 0.6
-    refreeze_ice_val = 0.2
-    temp_snow_val = -0.5
-    temp_rain_val = 1.6
+    true_vals = {
+        "pdd_factor_snow": 4.2,
+        "pdd_factor_ice": 8.0,
+        "refreeze_snow": 0.6,
+        "refreeze_ice": 0.2,
+        "temp_snow": -0.5,
+        "temp_rain": 1.6,
+    }
     x_true = torch.tensor(
         [
-            f_snow_val,
-            f_ice_val,
-            refreeze_snow_val,
-            refreeze_ice_val,
-            temp_snow_val,
-            temp_rain_val,
+            true_vals["pdd_factor_snow"],
+            true_vals["pdd_factor_ice"],
+            true_vals["refreeze_snow"],
+            true_vals["refreeze_ice"],
+            true_vals["temp_snow"],
+            true_vals["temp_rain"],
         ]
     )
 
@@ -405,12 +407,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     obs_pred = [obs[k] for k in predictor_vars if k in obs]
 
     Y_true = torch.vstack((obs_pred)).T
+    noise = 0.01 * Y_true * torch.randn_like(Y_true)
+    Y_true += noise
 
     X_prior = torch.from_numpy(prior_df.values)
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
-    sigma = 0.1
+    sigma = 0.025
     sh = torch.ones_like(Y_true)
     sigma_hat = sh * torch.tensor([sigma])
 
@@ -525,6 +529,16 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
                 idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
             )
 
+            for i, vname in enumerate(var_names):
+                hist_ax = axes[i, 0]  # histogram axis (usually column 1)
+                tv = true_vals.get(vname)
+
+                hist_ax.axvline(
+                    tv,
+                    linestyle=":",  # dotted
+                    linewidth=1.5,
+                    alpha=0.9,
+                )
             if hasattr(idata, "prior"):
                 for i, vname in enumerate(var_names):
                     hist_ax = axes[i, 0]  # histogram axis (usually column 1)
