@@ -50,7 +50,7 @@ class DiskPredictionWriter(BasePredictionWriter):
         Default is ``"batch"``.
     """
 
-    def __init__(self, out_dir: str, write_interval: str = "batch") -> None:
+    def __init__(self, out_dir: str | Path, write_interval: str = "batch") -> None:
         super().__init__(write_interval=write_interval)
         self.out_dir = Path(out_dir)
 
@@ -114,6 +114,36 @@ class DiskPredictionWriter(BasePredictionWriter):
 
             path = self.out_dir / f"rank{rank:02d}_chain{chain:06d}.pt"
             torch.save(rec, path)
+
+    def write_on_epoch_end(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        predictions: Any,
+        batch_indices: Any,
+    ) -> None:
+        """
+        Handle predictions at the end of an epoch.
+
+        This method is required by :class:`pytorch_lightning.callbacks.BasePredictionWriter`
+        even when ``write_interval="batch"``. When this writer is configured for
+        batch-level writes, this method is a no-op.
+
+        Parameters
+        ----------
+        trainer : pytorch_lightning.Trainer
+            The Lightning trainer.
+        pl_module : pytorch_lightning.LightningModule
+            The Lightning module used for prediction.
+        predictions : Any
+            Aggregated predictions for the epoch. The exact structure depends on the
+            prediction loop and dataloaders.
+        batch_indices : Any
+            Indices of batches that produced ``predictions``. Structure depends on the
+            prediction loop.
+        """
+        # We write predictions incrementally in `write_on_batch_end`.
+        return
 
 
 def load_pred_dir(pred_dir: str | Path, expected_chains: int | None = None) -> Tensor:

@@ -25,7 +25,7 @@ import warnings
 from argparse import ArgumentParser
 from os.path import join
 from pathlib import Path
-from typing import Callable, Literal, Mapping, Sequence
+from typing import Any, Callable, Literal, Mapping, Sequence, cast
 
 import arviz as az
 import lightning as pl
@@ -72,8 +72,7 @@ rcparams = {
 }
 
 
-if __name__ == "__main__":
-    __spec__ = None  # type: ignore
+def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     parser = ArgumentParser()
     parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
@@ -273,22 +272,25 @@ if __name__ == "__main__":
         for i, name in enumerate(dataset.samples.X_keys)
     }
 
-    idata = az.from_dict(posterior=posterior, prior=prior)
+    sample_stats: dict[str, np.ndarray] = {}
+
+    if lp is not None:
+        lp_t = cast(torch.Tensor, lp)
+        sample_stats["lp"] = lp_t.detach().cpu().numpy()
+
+    if step is not None:
+        step_t = cast(torch.Tensor, step)
+        sample_stats["step"] = step_t.detach().cpu().numpy()
+
+    if accept is not None:
+        accept_t = cast(torch.Tensor, accept)
+        sample_stats["accept"] = accept_t.detach().cpu().numpy()
+
     idata = az.from_dict(
         posterior=posterior,
         prior=prior,
-        sample_stats={
-            "lp": lp.numpy(),  # (chain, draw)
-            "step": step.numpy(),  # (chain, draw)
-            "accept": accept.numpy(),  # (chain, draw) -> bool
-        },
-        # optional: log_likelihood group if you want arviz to treat it as such
-        # log_likelihood = {"lp": lp.numpy()},
+        sample_stats=sample_stats if sample_stats else None,
     )
-    # (Optional) sanity check
-    rank_zero_info(
-        "posterior dims:", idata.posterior.sizes
-    )  # should show chain=C, draw=S
 
     # Save to Zarr (overwrite)
     out_dir = Path(posterior_dir)
@@ -333,3 +335,28 @@ if __name__ == "__main__":
             plt.close("all")
         else:
             rank_zero_info("All parameters are (near) constant; skipping trace plot.")
+
+    return {"idata": idata, "prior": prior, "posterior": posterior}
+
+
+def cli(argv: Sequence[str] | None = None) -> int:
+    """
+    Console entry point.
+
+    Parameters
+    ----------
+    argv : sequence of str or None, optional
+        Command-line arguments (without the program name). If None, uses sys.argv.
+
+    Returns
+    -------
+    int
+        Exit code (0 for success).
+    """
+    _ = main(argv=argv)
+    return 0
+
+
+if __name__ == "__main__":
+    __spec__ = None  # type: ignore
+    raise SystemExit(cli())

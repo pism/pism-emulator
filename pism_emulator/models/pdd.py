@@ -857,7 +857,7 @@ class PDD(pl.LightningModule):
         Parameters
         ----------
         temp : torch.Tensor
-            Near-surface air temperature (°C). Arbitrary shape ``(...)``.
+            Near-surface air temperature (°C). Arbitrary shape ``()``.
         precip : torch.Tensor
             Precipitation rate (m yr⁻¹). Must be broadcast-compatible with ``temp``.
         temp_snow : float or torch.Tensor
@@ -891,12 +891,371 @@ class PDD(pl.LightningModule):
         Parameters
         ----------
         array : torch.Tensor
-            Time series with a leading time axis, i.e. shape ``(T, ...)``.
+            Time series with a leading time axis, i.e. shape ``(T, )``.
 
         Returns
         -------
         torch.Tensor
-            Time-integrated field on the current device with shape ``(...)``.
+            Time-integrated field on the current device with shape ``()``.
+
+        Notes
+        -----
+        Integration uses a simple scaled sum:
+
+        ``sum(array, dim=0) / max(n_interpolate - 1, 1)``
+
+        which behaves like an average when ``array`` represents samples over a year.
+        """
+        return torch.sum(array, dim=0) / max(self.hparams.n_interpolate - 1, 1)
+
+
+class VecPDD(pl.LightningModule):
+    """
+    Positive Degree-Day (PDD) surface mass-balance component for Lightning.
+
+    This module computes instantaneous positive degree-days (PDD), snowfall
+    accumulation, melt, refreezing, runoff, and surface mass balance (SMB) from
+    near-surface temperature and precipitation time series using a simple
+    temperature-index method (e.g., Calov & Greve, 2005).
+
+    Inputs ``temp``, ``precip``, and ``stdv`` are stored as non-trainable buffers.
+    The model parameters (degree-day factors, refreezing fractions, and temperature
+    thresholds for snow/rain partitioning) are provided at call time via ``forward``.
+
+    Parameters
+    ----------
+    temp : array_like
+        Near-surface air temperature time series. Must be convertible to a
+        torch tensor. Supported shapes include ``(T, Y, X)``, ``(1, Y, X)``,
+        ``(Y, X)``, or scalar-like; broadcasting is used internally. Units: °C.
+    precip : array_like
+        Precipitation rate with shapes broadcastable to ``temp``. Units: m yr⁻¹.
+    stdv : array_like
+        Standard deviation of near-surface air temperature. Shapes must be
+        broadcastable to ``temp``. Units: K.
+    n_interpolate : int, optional
+        Number of time points used to represent a year (``>= 1``). Default is 12.
+        This affects the annual integration scaling in :meth:`_integrate`.
+    predictor_vars : list of str, optional
+        If provided, :meth:`forward` returns a stacked tensor containing only
+        the requested variables (in the given order) instead of the full
+        diagnostics dictionary. Each name must be a key in the diagnostics
+        dictionary produced by :meth:`forward` (e.g., ``"pdd"``, ``"smb"``).
+
+    Notes
+    -----
+    * Time is assumed to represent one year and integration is performed with a
+      simple mean over the time axis scaled by the number of interpolation points.
+    * Temperature is treated in degrees Celsius (°C). The standard deviation
+      ``stdv`` is treated as Kelvin (K) but used as a magnitude in the same formula.
+    """
+
+    def __init__(
+        self,
+        temp,
+        precip,
+        stdv,
+        *,
+        n_interpolate: int = 12,
+        predictor_vars: list[str] | None = None,
+    ):
+        """
+        Initialize the PDD module.
+
+        Parameters
+        ----------
+        temp : array_like
+            Near-surface air temperature time series. Must be convertible to a
+            torch tensor. Supported shapes include ``(T, Y, X)``, ``(1, Y, X)``,
+            ``(Y, X)``, or scalar-like; broadcasting is used internally. Units: °C.
+        precip : array_like
+            Precipitation rate with shapes broadcastable to ``temp``. Units: m yr⁻¹.
+        stdv : array_like
+            Standard deviation of near-surface air temperature. Shapes must be
+            broadcastable to ``temp``. Units: K.
+        n_interpolate : int, optional
+            Number of time points used to represent a year (``>= 1``). Default is 12.
+            This affects the annual integration scaling in :meth:`_integrate`.
+        predictor_vars : list of str, optional
+            If provided, :meth:`forward` returns a stacked tensor containing only
+            the requested variables (in the given order) instead of the full
+            diagnostics dictionary. Each name must be a key in the diagnostics
+            dictionary produced by :meth:`forward` (e.g., ``"pdd"``, ``"smb"``).
+
+        Raises
+        ------
+        ValueError
+            If ``n_interpolate < 1``.
+        """
+        super().__init__()
+
+        if n_interpolate < 1:
+            raise ValueError("n_interpolate must be >= 1")
+
+        # Store only the small scalar hyperparameters; ignore the big arrays.
+        self.save_hyperparameters(ignore=["temp", "precip", "stdv"])
+
+        # Tensors
+        temp_t = torch.as_tensor(temp)
+        precip_t = torch.as_tensor(precip)
+        stdv_t = torch.as_tensor(stdv)
+
+        self.register_buffer("temp", temp_t)
+        self.register_buffer("precip", precip_t)
+        self.register_buffer("stdv", stdv_t)
+
+        self.predictor_vars = predictor_vars
+
+    @staticmethod
+    def add_model_specific_args(
+        parent_parser: argparse.ArgumentParser,
+    ) -> argparse.ArgumentParser:
+        """
+        Add PDD-specific CLI arguments to an existing parser.
+
+        Parameters
+        ----------
+        parent_parser : argparse.ArgumentParser
+            Parser to which PDD arguments will be added.
+
+        Returns
+        -------
+        argparse.ArgumentParser
+            The updated parser with PDD arguments added.
+
+        Notes
+        -----
+        This helper adds the ``--n_interpolate`` argument.
+        """
+        parser = parent_parser.add_argument_group("PDD")
+        parser.add_argument("--n_interpolate", type=int, default=12)
+
+        return parent_parser
+
+    def forward(self, x: Sequence[Tensor], **kwargs):
+        """
+        Compute PDD diagnostics from parameter tensors.
+
+        Parameters
+        ----------
+        x : Sequence[torch.Tensor]
+            Ordered sequence of six parameter tensors:
+
+            ``(pdd_factor_snow, pdd_factor_ice, refreeze_snow, refreeze_ice,
+            temp_snow, temp_rain)``.
+
+            Parameters must be broadcast-compatible with the internal ``temp`` and
+            ``precip`` buffers. Scalars are allowed.
+
+            Interpreted units/conventions:
+            * ``pdd_factor_snow`` : snow degree-day factor, mm w.e. d⁻¹ °C⁻¹
+            * ``pdd_factor_ice``  : ice degree-day factor, mm w.e. d⁻¹ °C⁻¹
+            * ``refreeze_snow``   : fraction of snow melt that refreezes (0–1)
+            * ``refreeze_ice``    : fraction of ice melt that refreezes (0–1)
+            * ``temp_snow``       : °C, snow/rain transition lower bound
+            * ``temp_rain``       : °C, snow/rain transition upper bound
+
+        **kwargs
+            Additional keyword arguments accepted for API compatibility.
+            Currently unused.
+
+        Returns
+        -------
+        dict[str, torch.Tensor] or torch.Tensor
+            If ``predictor_vars`` is None, returns a diagnostics dictionary with
+            keys including (non-exhaustive): ``"inst_pdd"``, ``"accumulation_rate"``,
+            ``"snow_melt_rate"``, ``"ice_melt_rate"``, ``"runoff_rate"``, ``"inst_smb"``,
+            and annual integrals such as ``"pdd"``, ``"accumulation"``, ``"melt"``,
+            ``"runoff"``, ``"refreeze"``, ``"smb"``, etc.
+
+            If ``predictor_vars`` is provided, returns a 2D tensor of shape
+            ``(N, K)`` where ``K = len(predictor_vars)`` and ``N`` is the number of
+            elements in the broadcasted field (flattened by the stacking logic).
+
+        Notes
+        -----
+        * ``temp_snow`` and ``temp_rain`` define a linear transition for snowfall
+          fraction in ``[temp_snow, temp_rain]`` and are clamped outside this range.
+        * Gradients flow through the linear region; clamps have zero gradients outside.
+        """
+        (
+            pdd_factor_snow,
+            pdd_factor_ice,
+            refreeze_snow,
+            refreeze_ice,
+            temp_snow,
+            temp_rain,
+        ) = x
+
+        inst_pdd = self.inst_pdd(self.temp, self.stdv)
+        accumulation_rate = self.accumulation_rate(
+            self.temp, self.precip, temp_snow, temp_rain
+        )
+
+        # Degree-day factors (convert mm w.e. / day / °C -> m w.e. / day / °C)
+        ddf_snow = pdd_factor_snow / 1000.0
+        ddf_ice = pdd_factor_ice / 1000.0
+
+        # Potential snow melt (m/day or whatever your time unit is consistent with)
+        potential_snow_melt = ddf_snow * inst_pdd  # shape: (T, ...)
+
+        # Reflected snowpack evolution:
+        # snow_depth[t] = max(snow_depth[t-1] + accumulation[t] - potential_snow_melt[t], 0)
+        u = accumulation_rate - potential_snow_melt  # (T, ...)
+        S = torch.cumsum(u, dim=0)  # (T, ...)
+        S0 = torch.zeros_like(S[:1])  # (1, ...)
+        S_ext = torch.cat([S0, S], dim=0)  # (T+1, ...)
+
+        running_min = torch.cummin(S_ext, dim=0).values[1:]  # (T, ...)
+        snow_depth = S - torch.minimum(
+            running_min, torch.zeros_like(running_min)
+        )  # (T, ...)
+
+        # Intermediate snow available before melt at each step: snow_depth[t-1] + accumulation[t]
+        snow_depth_prev = torch.cat(
+            [torch.zeros_like(snow_depth[:1]), snow_depth[:-1]], dim=0
+        )
+        intermediate_snow = snow_depth_prev + accumulation_rate
+
+        # Actual snow melt is limited by available snow and potential melt
+        snow_melt_rate = (
+            intermediate_snow - snow_depth
+        )  # == min(intermediate_snow, potential_snow_melt)
+
+        # Ice melt happens only if potential snow melt exceeds available snow
+        # (avoid division if ddf_snow can be 0; if it can't, this is fine)
+        ratio = ddf_ice / ddf_snow
+        ice_melt_rate = (potential_snow_melt - snow_melt_rate) * ratio
+        ice_melt_rate = torch.clamp(ice_melt_rate, min=0.0)
+
+        melt_rate = snow_melt_rate + ice_melt_rate
+        snow_refreeze_rate = refreeze_snow * snow_melt_rate
+        ice_refreeze_rate = refreeze_ice * ice_melt_rate
+        refreeze_rate = snow_refreeze_rate + ice_refreeze_rate
+        runoff_rate = melt_rate - refreeze_rate
+        inst_smb = accumulation_rate - runoff_rate
+
+        result = {
+            "inst_pdd": inst_pdd,
+            "accumulation_rate": accumulation_rate,
+            "snow_melt_rate": snow_melt_rate,
+            "ice_melt_rate": ice_melt_rate,
+            "melt_rate": melt_rate,
+            "snow_refreeze_rate": snow_refreeze_rate,
+            "ice_refreeze_rate": ice_refreeze_rate,
+            "refreeze_rate": refreeze_rate,
+            "runoff_rate": runoff_rate,
+            "inst_smb": inst_smb,
+            "snow_depth": snow_depth,
+            "pdd": self._integrate(inst_pdd),
+            "accumulation": self._integrate(accumulation_rate),
+            "snow_melt": self._integrate(snow_melt_rate),
+            "ice_melt": self._integrate(ice_melt_rate),
+            "melt": self._integrate(melt_rate),
+            "runoff": self._integrate(runoff_rate),
+            "refreeze": self._integrate(refreeze_rate),
+            "snow_refreeze": self._integrate(snow_refreeze_rate),
+            "ice_refreeze": self._integrate(ice_refreeze_rate),
+            "smb": self._integrate(inst_smb),
+        }
+
+        if self.predictor_vars is not None:
+            obs_pred = [result[k] for k in self.predictor_vars]
+            return torch.vstack(obs_pred).T
+
+        return result
+
+    def inst_pdd(self, temp: Tensor, stdv: Tensor) -> Tensor:
+        """
+        Compute instantaneous positive degree-days (PDD).
+
+        Uses the effective temperature formulation described by Calov & Greve (2005)
+        to account for sub-monthly variability using a normal distribution with
+        standard deviation ``stdv``.
+
+        Parameters
+        ----------
+        temp : torch.Tensor
+            Near-surface air temperature (°C).
+        stdv : torch.Tensor
+            Standard deviation of near-surface air temperature (K). Must be
+            broadcast-compatible with ``temp``.
+
+        Returns
+        -------
+        torch.Tensor
+            Instantaneous positive degree-days (°C·days) with the same broadcasted
+            shape and device as ``temp``.
+        """
+        positivepart = torch.clamp(temp, min=0.0)
+
+        sqrt2 = temp.new_tensor(2.0).sqrt()
+        sqrt2pi = temp.new_tensor(2.0 * torch.pi).sqrt()
+        normtemp = temp / (sqrt2 * stdv)
+        calovgreve = stdv / torch.sqrt(
+            torch.tensor(2.0 * torch.pi, device=temp.device)
+        ) * torch.exp(-(normtemp**2)) + temp * 0.5 * (1.0 - torch.erf(-normtemp))
+        teff = torch.where(stdv == 0.0, positivepart, calovgreve)
+        return torch.clamp(teff, min=0.0) * 365.242198781
+
+    def accumulation_rate(
+        self,
+        temp: Tensor,
+        precip: Tensor,
+        temp_snow: float | Tensor,
+        temp_rain: float | Tensor,
+    ) -> Tensor:
+        """
+        Compute snowfall accumulation rate from air temperature and precipitation.
+
+        The snowfall fraction decreases linearly from 1 to 0 as temperature rises
+        from ``temp_snow`` to ``temp_rain``; values are clamped to ``[0, 1]``.
+        For ``temp <= temp_snow`` all precipitation is snow; for
+        ``temp >= temp_rain`` none is snow.
+
+        Parameters
+        ----------
+        temp : torch.Tensor
+            Near-surface air temperature (°C). Arbitrary shape ``()``.
+        precip : torch.Tensor
+            Precipitation rate (m yr⁻¹). Must be broadcast-compatible with ``temp``.
+        temp_snow : float or torch.Tensor
+            Temperature (°C) below which precipitation is entirely snow (fraction = 1).
+            Can be a scalar or broadcast-compatible tensor.
+        temp_rain : float or torch.Tensor
+            Temperature (°C) above which precipitation is entirely rain (fraction = 0).
+            Must satisfy ``temp_rain > temp_snow`` and be broadcast-compatible.
+
+        Returns
+        -------
+        torch.Tensor
+            Snowfall accumulation rate (m yr⁻¹), same broadcasted shape and device
+            as the inputs.
+
+        Notes
+        -----
+        The snow fraction is
+        ``snowfrac = clamp((temp_rain - temp) / (temp_rain - temp_snow), 0, 1)``.
+        Gradients flow through the linear segment; the clamp introduces zero
+        gradients outside ``[temp_snow, temp_rain]``.
+        """
+        reduced_temp = (temp_rain - temp) / (temp_rain - temp_snow)
+        snowfrac = torch.clamp(reduced_temp, 0.0, 1.0)
+        return snowfrac * precip
+
+    def _integrate(self, array: Tensor) -> Tensor:
+        """
+        Integrate a time series over one year.
+
+        Parameters
+        ----------
+        array : torch.Tensor
+            Time series with a leading time axis, i.e. shape ``(T, )``.
+
+        Returns
+        -------
+        torch.Tensor
+            Time-integrated field on the current device with shape ``()``.
 
         Notes
         -----

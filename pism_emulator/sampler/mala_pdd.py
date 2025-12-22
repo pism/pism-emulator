@@ -17,38 +17,28 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import datetime
-import datetime as dt
 import os
-import time
+import time as time_m
 import warnings
 from argparse import ArgumentParser
-from os.path import join
 from pathlib import Path
-from typing import Callable, Literal, Mapping, Sequence
+from typing import Any, Sequence, cast
 
 import arviz as az
-import lightning as pl
 import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
-from joblib import Parallel, delayed
-from lightning import LightningModule
-from lightning.pytorch.callbacks import Timer
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from pyDOE3 import lhs
 from pyfiglet import Figlet
 from scipy.stats import beta
 from scipy.stats.distributions import uniform
-from torch import Tensor
-from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
 
-from pism_emulator.models.pdd import PDD
-from pism_emulator.sampler.mala import ChainInitDataset, MALASamplerModule, run_sampling
+from pism_emulator.models.pdd import VecPDD as PDD
+from pism_emulator.sampler.mala import MALASamplerModule, run_sampling
 
 warnings.filterwarnings(
     "ignore",
@@ -302,24 +292,69 @@ def draw_samples(n_samples: int = 10_000, random_seed: int = 2) -> pd.DataFrame:
     return pd.DataFrame(data=dist_sample, columns=keys)
 
 
-def main():
+def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     """
-    Main.
+    Run MALA sampling for the PDD posterior and assemble an ArviZ InferenceData.
+
+    This function is the programmatic entry point. It parses command-line style
+    arguments, runs the sampler, and returns a dictionary containing the resulting
+    `arviz.InferenceData` object (and optionally other intermediate artifacts).
+
+    Parameters
+    ----------
+    argv : sequence of str or None, optional
+        Command-line arguments **excluding** the program name (i.e., like
+        ``sys.argv[1:]``). If ``None`` (default), arguments are taken from the
+        current process' ``sys.argv[1:]``. Passing ``argv=[]`` is recommended
+        when calling from a Jupyter notebook to avoid ipykernel arguments.
+
+    Returns
+    -------
+    dict[str, Any]
+        Results dictionary. At minimum this includes:
+
+        - ``"idata"``: :class:`arviz.InferenceData`
+          InferenceData containing ``posterior`` and ``prior`` groups, and
+          optionally a ``sample_stats`` group (e.g., log-probability, step sizes,
+          acceptance indicators) if available.
+
+        Additional keys may be included depending on the configuration and
+        sampler implementation (for example, raw prior/posterior arrays, runtime
+        metadata, or filenames of saved outputs).
+
+    Raises
+    ------
+    SystemExit
+        If argument parsing fails (e.g., unknown arguments), consistent with
+        :mod:`argparse`. When calling from notebooks, pass ``argv=[]`` (or an
+        explicit list of arguments) to prevent ipykernel arguments from being
+        parsed.
+
+    Notes
+    -----
+    This function is intended to be used from Python:
+
+    >>> from pism_emulator.sampler import mala_pdd
+    >>> out = mala_pdd.main(argv=["--samples", "500", "--burn", "100"])
+    >>> idata = out["idata"]
+
+    For the console script, use a thin wrapper (e.g., ``cli()``) that calls
+    :func:`main` and returns an integer exit code, to avoid printing the returned
+    dictionary via ``sys.exit(main())``.
     """
+    ...
+
     parser = ArgumentParser()
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--chains", type=int, default=1)
-    parser.add_argument("--model_index", type=int, default=0)
     parser.add_argument("--burn", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--alpha", type=float, default=0.01)
 
-    args = parser.parse_args()
-    hparams = vars(args)
+    args = parser.parse_args(list(argv) if argv is not None else None)
 
     accelerator = args.accelerator
     alpha = args.alpha
-    model_index = args.model_index
     chains = args.chains
     samples = args.samples
     burn = args.burn
@@ -330,12 +365,12 @@ def main():
 
     f = Figlet(font="standard")
     banner = f.renderText("pism-emulator")
-    print("=" * 80)
-    print(banner)
-    print("=" * 80)
-    print(f"MALA Sampler")
-    print("-" * 80)
-    print("")
+    rank_zero_info("=" * 80)
+    rank_zero_info(banner)
+    rank_zero_info("=" * 80)
+    rank_zero_info(f"MALA Sampler")
+    rank_zero_info("-" * 80)
+    rank_zero_info("")
 
     prior_df = draw_samples(n_samples=10_000)
     X_keys = prior_df.columns
@@ -379,7 +414,7 @@ def main():
     sh = torch.ones_like(Y_true)
     sigma_hat = sh * torch.tensor([sigma])
 
-    start = time.time()
+    start = time_m.time()
     sampler = MALASamplerModule(
         model,
         X_min,
@@ -421,17 +456,15 @@ def main():
     lp = stats.get("lp")  # (C, S) or None
     step = stats.get("step_size")  # (C, S) or None
     accept = stats.get("accept")  # (C, S) or None
-    rank_zero_info("\n\n\n\n\n\n\n\n\n\n\n\n")
-    end = time.time()
+    rank_zero_info("\n")
+    end = time_m.time()
     time_elapsed = end - start
     rank_zero_info(f"Sampling took {time_elapsed:.0f}s")
 
     chains_np = [np.asarray(c) for c in samples]  # each (S, D)
     arr = np.stack(chains_np, axis=0)  # (C, S, D)
 
-    C, S, D = arr.shape
-    coords = {"chain": np.arange(C), "draw": np.arange(S)}
-    dims = {name: ["chain", "draw"] for name in X_keys}
+    C, _, D = arr.shape
 
     posterior = {name: arr[:, :, i] for i, name in enumerate(X_keys)}
 
@@ -442,31 +475,30 @@ def main():
 
     X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
 
-    prior_coords = {"chain": np.arange(C_prior), "draw": np.arange(S_prior)}
-    prior_dims = {name: ["chain", "draw"] for name in X_keys}
-
     prior = {
         name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)
         for i, name in enumerate(X_keys)
     }
 
-    idata = az.from_dict(posterior=posterior, prior=prior)
+    sample_stats: dict[str, np.ndarray] = {}
+
+    if lp is not None:
+        lp_t = cast(torch.Tensor, lp)
+        sample_stats["lp"] = lp_t.detach().cpu().numpy()
+
+    if step is not None:
+        step_t = cast(torch.Tensor, step)
+        sample_stats["step"] = step_t.detach().cpu().numpy()
+
+    if accept is not None:
+        accept_t = cast(torch.Tensor, accept)
+        sample_stats["accept"] = accept_t.detach().cpu().numpy()
+
     idata = az.from_dict(
         posterior=posterior,
         prior=prior,
-        sample_stats={
-            "lp": lp.numpy(),  # (chain, draw)
-            "step": step.numpy(),  # (chain, draw)
-            "accept": accept.numpy(),  # (chain, draw) -> bool
-        },
-        # optional: log_likelihood group if you want arviz to treat it as such
-        # log_likelihood = {"lp": lp.numpy()},
+        sample_stats=sample_stats if sample_stats else None,
     )
-    # (Optional) sanity check
-    rank_zero_info(
-        "posterior dims:", idata.posterior.sizes
-    )  # should show chain=C, draw=S
-
     # Save to Zarr (overwrite)
     out_dir = Path(posterior_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -489,7 +521,7 @@ def main():
     )
 
     # Save + load
-    out_nc = out_dir / f"X_posterior_model_{model_index}.nc"
+    out_nc = out_dir / "X_posterior_model.nc"
     az.to_netcdf(idata, out_nc)  # write
 
     # Robust plotting: drop (near-)constant vars and use hist with fewer bins
@@ -503,15 +535,85 @@ def main():
             axes = az.plot_trace(
                 idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
             )  # <-- key fix: kind/hist_kwargs at top level
+
+            if hasattr(idata, "prior"):
+                for i, vname in enumerate(var_names):
+                    hist_ax = axes[i, 0]  # histogram axis (usually column 1)
+
+                    # ---- PRIOR ----
+                    prior_vals = np.asarray(
+                        idata.prior[vname], dtype=np.float64
+                    ).ravel()
+                    prior_vals = prior_vals[np.isfinite(prior_vals)]
+                    if prior_vals.size < 2:
+                        continue
+
+                    # ---- POSTERIOR ----
+                    post_vals = np.asarray(
+                        idata.posterior[vname], dtype=np.float64
+                    ).ravel()
+                    post_vals = post_vals[np.isfinite(post_vals)]
+                    if post_vals.size < 2:
+                        continue
+
+                    # Common bins (important!)
+                    lo = min(prior_vals.min(), post_vals.min())
+                    hi = max(prior_vals.max(), post_vals.max())
+                    if lo == hi:
+                        continue
+                    bins = np.linspace(lo, hi, 31)
+
+                    prior_hist, edges = np.histogram(
+                        prior_vals, bins=bins, density=True
+                    )
+                    post_hist, _ = np.histogram(post_vals, bins=bins, density=True)
+                    centers = 0.5 * (edges[1:] + edges[:-1])
+
+                    # ---- SCALE PRIOR ----
+                    prior_max = prior_hist.max()
+                    post_max = post_hist.max()
+                    if prior_max > 0:
+                        scale = 5 * post_max / prior_max
+                    else:
+                        scale = 1.0
+
+                    # ---- PLOT ----
+                    hist_ax.plot(
+                        centers,
+                        scale * prior_hist,
+                        alpha=0.35,
+                        label="prior (scaled)",
+                    )
+
             fig = axes.flatten()[0].get_figure()
             fig.suptitle("Posterior Traces")
-            out_png = out_dir / f"X_posterior_model_{model_index}.trace.png"
+            out_png = out_dir / "X_posterior_model_trace.png"
             plt.savefig(out_png, dpi=300, bbox_inches="tight")
             plt.close("all")
         else:
             rank_zero_info("All parameters are (near) constant; skipping trace plot.")
 
+    return {"idata": idata, "prior": prior, "posterior": posterior}
+
+
+def cli(argv: Sequence[str] | None = None) -> int:
+    """
+    Console entry point.
+
+    Parameters
+    ----------
+    argv : sequence of str or None, optional
+        Command-line arguments (without the program name). If None, uses sys.argv.
+
+    Returns
+    -------
+    int
+        Exit code (0 for success).
+    """
+    _ = main(argv=argv)
+    return 0
+
 
 if __name__ == "__main__":
     __spec__ = None  # type: ignore
-    main()
+    raise SystemExit(cli())

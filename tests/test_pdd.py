@@ -24,7 +24,7 @@ import torch
 import xarray as xr
 from numpy.testing import assert_array_almost_equal
 
-from pism_emulator.models.pdd import PDD, ReferencePDDModel
+from pism_emulator.models.pdd import PDD, ReferencePDDModel, VecPDD
 
 PDDCompareKey = Literal[
     "accumulation_rate",
@@ -336,6 +336,22 @@ def test_torch_model():
     for m_var in PDD_COMPARE_VARS:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(result_ref[m_var], result_pl[m_var], decimal=3)
+
+    pdd_torch_vec = VecPDD(temp, precip, sd)
+    x = torch.tensor(
+        [
+            pdd_factor_snow,
+            pdd_factor_ice,
+            refreeze_snow,
+            refreeze_ice,
+            temp_snow,
+            temp_rain,
+        ]
+    )
+    result_vec = pdd_torch_vec.forward(x)
+    for m_var in PDD_COMPARE_VARS:
+        print(f"Comparing Reference and Torch implementation for variable {m_var}")
+        assert_array_almost_equal(result_ref[m_var], result_vec[m_var], decimal=3)
 
 
 def test_torch_model_2d():
