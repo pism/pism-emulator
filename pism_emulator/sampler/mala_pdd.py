@@ -17,6 +17,10 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=too-many-statements,too-many-branches,redefined-builtin
+"""
+MALA Sampling.
+"""
 import os
 import time as time_m
 import warnings
@@ -183,7 +187,7 @@ def make_fake_climate_2d(filename: str | None = None) -> xr.Dataset:
         "snow_depth": {"long_name": "depth of snow cover", "units": "m"},
     }
 
-    # FIXME code could be simplified a lot more but we need a better test not
+    # code could be simplified a lot more but we need a better test not
     # relying on exact reproducibility of this toy climate data.
 
     # assign coordinate values
@@ -280,9 +284,6 @@ def draw_samples(n_samples: int = 10_000, random_seed: int = 2) -> pd.DataFrame:
 
     keys = list(distributions.keys())
 
-    # Describe the problem (kept for compatibility; not used further here)
-    problem = {"num_vars": len(keys), "names": keys, "bounds": [[0, 1]] * len(keys)}
-
     unif_sample = lhs(len(keys), n_samples)
     dist_sample = np.zeros_like(unif_sample)
 
@@ -342,7 +343,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     :func:`main` and returns an integer exit code, to avoid printing the returned
     dictionary via ``sys.exit(main())``.
     """
-    ...
 
     parser = ArgumentParser()
     parser.add_argument("--accelerator", type=str, default="auto")
@@ -368,7 +368,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     rank_zero_info("=" * 80)
     rank_zero_info(banner)
     rank_zero_info("=" * 80)
-    rank_zero_info(f"MALA Sampler")
+    rank_zero_info("MALA Sampler")
     rank_zero_info("-" * 80)
     rank_zero_info("")
 
@@ -509,17 +509,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
             ds = getattr(idata, grp)
             setattr(idata, grp, ds.astype({v: "float32" for v in ds.data_vars}))
 
-    # Add useful metadata
-    idata.attrs.update(
-        {
-            "created": pd.Timestamp.utcnow().isoformat(),
-            "model": type(model).__name__,
-            "emulator_dir": str(posterior_dir),
-            "n_chains": int(idata.posterior.sizes["chain"]),
-            "n_draws": int(idata.posterior.sizes["draw"]),
-        }
-    )
-
     # Save + load
     out_nc = out_dir / "X_posterior_model.nc"
     az.to_netcdf(idata, out_nc)  # write
@@ -534,7 +523,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
             var_names = [X_keys[i] for i in np.flatnonzero(keep)]
             axes = az.plot_trace(
                 idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
-            )  # <-- key fix: kind/hist_kwargs at top level
+            )
 
             if hasattr(idata, "prior"):
                 for i, vname in enumerate(var_names):
