@@ -1,8 +1,7 @@
 [project]
 name = "pism-emulator"
-version = "0.2.0"
 maintainers = [{name = "Andy Aschwanden", email = "andy.aschwanden@gmail.com"}]
-description = """Home of NASA ROSES project "A Reanalysis of the Greenland Ice Sheet"""
+description = """PISM Emulator and MALA MCMC Sampler"""
 readme = "README.md"
 requires-python = ">3.9"
 license = {text = "GPL 3.0"}
@@ -15,10 +14,17 @@ classifiers = [
         "Programming Language :: Python :: 3.10",
         "Topic :: Scientific/Engineering :: Postprocessing",
         ]
-dynamic = ["dependencies"]
+dynamic = ["dependencies", "version"]
+
+[project.scripts]
+train-emulator = "pism_emulator.emulators.speed.train:main"
+evaluate-emulator = "pism_emulator.emulators.speed.evaluate:main"
+sample-posterior-speed = "pism_emulator.sampler.mala_speed:cli"
+sample-posterior-pdd = "pism_emulator.sampler.mala_pdd:cli"
+plot-posterior = "pism_emulator.sampler.plot_posterior:cli"
 
 [tool.setuptools.packages.find]
-include = ["pism_emulator"]
+include = ["pism_emulator*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
@@ -30,10 +36,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["pism_emulator"]
 
-[tool.pytest.ini_options]
-pythonpath = [
-  "."
-]
 
 [tool.flake8]
 # https://pep8.readthedocs.io/en/latest/intro.html#error-codes
@@ -66,10 +68,10 @@ multi_line_output = 3
 include_trailing_comma = "True"
 force_grid_wrap = 0
 use_parentheses = "True"
-line_length = 88
+line_length = 120
 
 [tool.pycodestyle]
-max-line-length = 119
+max-line-length = 120
 exclude = [
     ".tox",
     ".git",
@@ -79,6 +81,7 @@ exclude = [
     "*__init__.py",
     "venv"
     ]
+
 
 [tool.mypy]
 python_version = 3.11
@@ -114,3 +117,12 @@ disable = """
 
 [tool.pylint.format]
 max-line-length = 120
+
+[tool.numpydoc_validation]
+checks = [
+    "all",   # report on all checks, except the below
+    "EX01",
+    "SA01",
+    "ES01",
+    "GL08"
+]

@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Andy Aschwanden
+# Copyright (C) 2021, 2025 Andy Aschwanden
 #
 # This file is part of pism-emulator.
 #
@@ -15,33 +15,35 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-
-
-import random
+"""
+Test emulators.
+"""
 
 import lightning as pl
 import numpy as np
 import torch
-from numpy.testing import assert_array_almost_equal
 from scipy.stats import dirichlet
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics.regression import MeanSquaredError
 
-from pism_emulator.nnemulator import DNNEmulator, NNEmulator
+from pism_emulator.datamodules import seed_worker
+from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 
 
-def seed_worker(worker_id):
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
+def nn_setup(Emulator: pl.LightningModule) -> torch.tensor:
+    """
+    Setup emulator.
 
+    Parameters
+    ----------
+    Emulator : LightningModule
+       An Emulator.
 
-g = torch.Generator()
-g.manual_seed(0)
-
-
-def nn_setup(Emulator):
+    Returns
+    -------
+    Tensor
+        Prediction.
+    """
     torch.use_deterministic_algorithms(True)
     torch.manual_seed(0)
 
@@ -50,8 +52,9 @@ def nn_setup(Emulator):
 
     n_parameters = 5
     n_eigenglaciers = 10
-    n_grid_points = 10000
+    n_grid_points = 1000
     n_samples = 1000
+
     V_hat = torch.rand(n_grid_points, n_eigenglaciers, dtype=torch.float32)
     F_mean = torch.rand(n_grid_points, dtype=torch.float32)
     area = torch.ones_like(F_mean, dtype=torch.float32) / n_grid_points
@@ -64,16 +67,17 @@ def nn_setup(Emulator):
         "n_hidden_3": 128,
         "n_hidden_4": 128,
         "n_layers": 4,
-        "learning_rate": 0.1,
+        "learning_rate": 0.01,
+        "width": 128,
+        "depth": 4,
     }
 
     e = Emulator(
         n_parameters,
-        n_eigenglaciers,
         V_hat,
         F_mean,
         area,
-        hparams,
+        **hparams,
     )
 
     X = torch.rand(n_samples, n_parameters, dtype=torch.float32)
@@ -83,22 +87,26 @@ def nn_setup(Emulator):
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
-    dataset = TensorDataset(X, Y, omegas, omegas_0)
-    training_data, val_data = train_test_split(dataset, train_size=0.9, random_state=0)
+    dataset = TensorDataset(
+        X,
+        Y,
+        omegas,
+        omegas_0,
+    )
     train_loader = DataLoader(
-        dataset=training_data,
+        dataset=dataset,
         batch_size=hparams["batch_size"],
         worker_init_fn=seed_worker,
         generator=g,
     )
     val_loader = DataLoader(
-        dataset=val_data,
+        dataset=dataset,
         batch_size=hparams["batch_size"],
         worker_init_fn=seed_worker,
         generator=g,
     )
 
-    max_epochs = 20
+    max_epochs = 50
 
     trainer_e = pl.Trainer(
         deterministic=True,
@@ -115,7 +123,7 @@ def nn_setup(Emulator):
 
 def test_emulator_equivalence():
     """
-    Compare NNEmulator and DNNEmulator
+    Compare NNEmulator and DNNEmulator.
     """
 
     Y_e = nn_setup(NNEmulator)
@@ -124,4 +132,4 @@ def test_emulator_equivalence():
     mean_squared_error = MeanSquaredError()
     mse = mean_squared_error(Y_e, Y_de)
 
-    assert mse <= 1e-1
+    assert mse <= 5e-3

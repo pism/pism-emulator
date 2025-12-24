@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-25 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -15,37 +15,91 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+# pylint: disable=arguments-differ
+"""
+Metrics Module.
+"""
 
-from typing import Any, Tuple
 
 import torch
-from torch import Tensor, tensor
+from torch import Tensor
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
 
 
-def _area_absolute_error_update(
-    preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
-) -> Tensor:
-    _check_same_shape(preds, target)
-    diff = torch.abs(preds - target)
-    sum_abs_error = torch.sum(diff * diff * area, axis=1)
-    absolute_error = torch.sum(sum_abs_error * omegas.squeeze())
-    return absolute_error
-
-
-def _area_absolute_error_compute(absolute_error) -> Tensor:
-    return absolute_error
-
-
-from torch import Tensor
-
-
-def area_absolute_error(
+def _area_weighted_error_update(
     preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
 ) -> Tensor:
     """
-    Compute the area absolute error between the predicted and target tensors.
+    Accumulate an area-weighted error over a batch.
+
+    The function computes the per-sample spatial reduction
+    ``sum_i (|preds - target|^2 * area[i])`` and then aggregates across the
+    batch using the sample weights ``omegas``:
+
+    .. math::
+
+        E = \\sum_{b} \\omega_b \\sum_{i} (|p_{b,i} - t_{b,i}|^2)\\,A_i
+
+    Parameters
+    ----------
+    preds : torch.Tensor
+        Predicted field values with shape ``(B, N)`` where ``B`` is batch size
+        and ``N`` is the number of spatial nodes.
+    target : torch.Tensor
+        Target/observed field values with shape ``(B, N)``.
+    omegas : torch.Tensor
+        Per-sample weights with shape ``(B,)`` or ``(B, 1)``. Will be squeezed.
+    area : torch.Tensor
+        Per-node area weights with shape ``(N,)`` or broadcastable to ``(B, N)``.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar tensor containing the accumulated area-weighted error over the batch.
+
+    Raises
+    ------
+    ValueError
+        If ``preds`` and ``target`` do not have the same shape.
+    """
+    _check_same_shape(preds, target)
+    diff = preds - target
+    sum_weighted_error = torch.sum(diff * diff * area, dim=1)  # spatial reduction
+    _weighted_error = torch.sum(
+        sum_weighted_error * omegas.squeeze()
+    )  # batch reduction
+    return _weighted_error
+
+
+def _area_weighted_error_compute(_weighted_error: Tensor) -> Tensor:
+    """
+    Finalize the area-weighted error reduction.
+
+    Parameters
+    ----------
+    _weighted_error : torch.Tensor
+        Scalar tensor produced by :func:`_area_weighted_error_update`.
+
+    Returns
+    -------
+    torch.Tensor
+        The same scalar tensor (Lightning metric compatibility shim).
+
+    Notes
+    -----
+    This function exists to mirror the ``update/compute`` pattern used by
+    PyTorch-Lightning metrics. If you switch to a stateful Metric class, this
+    would return the aggregated state instead.
+    """
+    return _weighted_error
+
+
+def area_weighted_error(
+    preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
+) -> Tensor:
+    """
+    Compute the area weighted error between the predicted and target tensors.
 
     Parameters
     ----------
@@ -61,250 +115,100 @@ def area_absolute_error(
     Returns
     -------
     Tensor
-        The area absolute error as a PyTorch Tensor.
+        The area weighted error as a PyTorch Tensor.
 
     Notes
     -----
-    This function uses the '_area_absolute_error_update' and '_area_absolute_error_compute' functions
-    to calculate the area absolute error.
+    This function uses the '_area_weighted_error_update' and '_area_weighted_error_compute' functions
+    to calculate the area weighted error.
     """
-    sum_abs_error = _area_absolute_error_update(preds, target, omegas, area)
-    return _area_absolute_error_compute(sum_abs_error)
+    sum_weighted_error = _area_weighted_error_update(preds, target, omegas, area)
+    return _area_weighted_error_compute(sum_weighted_error)
 
 
-class AreaAbsoluteError(Metric):
-    # Set to True if the metric during 'update' requires access to the global metric
-    # state for its calculations. If not, setting this to False indicates that all
-    # batch states are independent and we will optimize the runtime of 'forward'
-    # Use:
-    # x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-    # y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-    # o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-    # a = torch.tensor([0.25, 0.25])
-    # torchmetrics.utilities.check_forward_full_state_property(AreaAbsoluteError, input_args={"preds": x, "target": y, "omegas": o, "area": a})
+class AreaWeightedError(Metric):
+    """
+    Area-weighted error aggregated over a batch (TorchMetrics-compatible).
+
+    This metric accumulates an area-weighted discrepancy between ``preds`` and
+    ``target`` over updates, and returns the aggregated value in :meth:`compute`.
+
+    The actual per-batch discrepancy is delegated to
+    :func:`_area_weighted_error_update`. Depending on that helper's definition,
+    this metric behaves as an area-weighted L1 or L2-style error.
+
+    Parameters
+    ----------
+    dist_sync_on_step : bool, optional
+        If True, synchronizes internal state across distributed processes at each
+        step. Default is False.
+
+    Attributes
+    ----------
+    sum_weighted_error : torch.Tensor
+        Running total of the area-weighted error. Reduced across DDP processes
+        using ``sum``.
+    full_state_update : bool
+        TorchMetrics hint that per-batch updates are independent. Set to False.
+    """
 
     full_state_update: bool = False
+    sum_weighted_error: Tensor
 
-    def __init__(self, dist_sync_on_step=False):
-        # call `self.add_state`for every internal state that is needed for the metrics computations
-        # dist_reduce_fx indicates the function that should be used to reduce
-        # state from multiple processes
+    def __init__(self, dist_sync_on_step: bool = False) -> None:
         super().__init__(dist_sync_on_step=dist_sync_on_step)
-
-        self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
-
-    def update(self, preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor):
-        """
-        Update state with predictions and targets, and area.
-        Args:
-            preds: Predictions from model
-            target: Ground truth values
-            omegas: Weights
-            area: Area of each cell
-        """
-        sum_abs_error = _area_absolute_error_update(preds, target, omegas, area)
-        self.sum_abs_error += sum_abs_error
-
-    def compute(self):
-        """
-        Computes absolute error over state.
-        """
-        return _area_absolute_error_compute(self.sum_abs_error)
-
-    @property
-    def is_differentiable(self):
-        return True
-
-
-def _absolute_error_update(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
-    _check_same_shape(preds, target)
-    diff = torch.abs(preds - target)
-    sum_abs_error = torch.sum(diff * diff, axis=1)
-    absolute_error = torch.sum(sum_abs_error * omegas.squeeze())
-    return absolute_error
-
-
-def _absolute_error_compute(absolute_error) -> Tensor:
-    return absolute_error
-
-
-def absolute_error(preds: Tensor, target: Tensor, omegas: Tensor) -> Tensor:
-    """
-    Computes squared absolute error
-    Args:
-        preds: estimated labels
-        target: ground truth labels
-        omegas: weights
-    Return:
-        Tensor with absolute error
-    Example:
-        >>> x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-        >>> y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-        >>> o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-        >>> absolute_error(x, y, o)
-        tensor(0.4000)
-    """
-    sum_abs_error = _absolute_error_update(preds, target, omegas)
-    return _absolute_error_compute(sum_abs_error)
-
-
-class AbsoluteError(Metric):
-    # Set to True if the metric during 'update' requires access to the global metric
-    # state for its calculations. If not, setting this to False indicates that all
-    # batch states are independent and we will optimize the runtime of 'forward'
-    # Use:
-    # x = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]]).T
-    # y = torch.tensor([[0, 1, 2, 1], [2, 3, 4, 4]]).T
-    # o = torch.tensor([0.25, 0.25, 0.3, 0.2])
-    # torchmetrics.utilities.check_forward_full_state_property(AreaAbsoluteError, input_args={"preds": x, "target": y, "omegas": o})
-
-    full_state_update: bool = False
-
-    def __init__(self, dist_sync_on_step=False):
-        # call `self.add_state`for every internal state that is needed for the metrics computations
-        # dist_reduce_fx indicates the function that should be used to reduce
-        # state from multiple processes
-        super().__init__(dist_sync_on_step=dist_sync_on_step)
-
-        self.add_state("sum_abs_error", default=torch.tensor(0.0), dist_reduce_fx="sum")
-
-    def update(self, preds: Tensor, target: Tensor, omegas: Tensor):
-        """
-        Update state with predictions and targets, and area.
-        Args:
-            preds: Predictions from model
-            target: Ground truth values
-            omegas: Weights
-        """
-        sum_abs_error = _absolute_error_update(preds, target, omegas)
-        self.sum_abs_error += sum_abs_error
-
-    def compute(self):
-        """
-        Computes absolute error over state.
-        """
-        return _absolute_error_compute(self.sum_abs_error)
-
-    @property
-    def is_differentiable(self):
-        return True
-
-
-class L2MeanSquaredError(Metric):
-    r"""Computes an L2 regularized `mean squared error`_ (MSE):
-    .. math:: \text{MSE} = \frac{1}{N}\sum_i^N(y_i - \hat{y_i})^2 + K\frac{1}{N}\sum_i^N(w_i)^2
-    Where :math:`y` is a tensor of target values, :math:`\hat{y}` is a tensor of predictions, :math: `w` is a tensor of weights, and :math:`K` is a regularization constant. Equivalent to Mean Squared Error for :math:`K=0`.
-    Args:
-        squared: If True returns MSE value, if False returns RMSE value.
-        kwargs: Additional keyword arguments, see :ref:`Metric kwargs` for more info.
-    Example:
-        >>> from pismemulator.metrics import L2MeanSquaredError
-        >>> target = torch.tensor([2.5, 5.0, 4.0, 8.0])
-        >>> preds = torch.tensor([3.0, 5.0, 2.5, 7.0])
-        >>> weight = torch.tensor([0.1, 0.2, 0.5, 0.2])
-        >>> k = 1e-1
-        >>> l2_mean_squared_error = L2MeanSquaredError()
-        >>> l2_mean_squared_error(preds, target, weight, k)
-        tensor(0.8835)
-    """
-
-    is_differentiable = True
-    higher_is_better = False
-    full_state_update = False
-    sum_squared_error: Tensor
-    total: int
-
-    def __init__(
-        self,
-        squared: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-
-        self.add_state("sum_squared_error", default=tensor(0.0), dist_reduce_fx="sum")
-        self.add_state("total", default=tensor(0), dist_reduce_fx="sum")
-        self.squared = squared
-
-    def update(self, preds: Tensor, target: Tensor, weight: Tensor, K: float) -> None:  # type: ignore
-        """Update state with predictions and targets.
-        Args:
-            preds: Predictions from model
-            target: Ground truth values
-            weight: linear weights
-            k: regularization constant
-        """
-        sum_squared_error, n_obs = _l2_mean_squared_error_update(
-            preds, target, weight, K
+        self.add_state(
+            "sum_weighted_error", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
 
-        self.sum_squared_error += sum_squared_error
-        self.total += n_obs
+    def update(
+        self, preds: Tensor, target: Tensor, omegas: Tensor, area: Tensor
+    ) -> None:
+        """
+        Update metric state with a new batch.
+
+        Parameters
+        ----------
+        preds : torch.Tensor
+            Model predictions with shape ``(batch, n_nodes)`` (or broadcast-compatible
+            with ``target``).
+        target : torch.Tensor
+            Reference/ground-truth values with the same shape as ``preds``.
+        omegas : torch.Tensor
+            Per-sample weights with shape ``(B,)`` or ``(B, 1)``. Will be squeezed.
+        area : torch.Tensor
+            Per-node area weights, shape ``(n_nodes,)`` (or broadcast-compatible).
+
+        Returns
+        -------
+        None
+            Updates internal state in place.
+        """
+        self.sum_weighted_error = self.sum_weighted_error + _area_weighted_error_update(
+            preds, target, omegas, area
+        )
 
     def compute(self) -> Tensor:
-        """Computes mean squared error over state."""
-        return _l2_mean_squared_error_compute(
-            self.sum_squared_error, self.total, squared=self.squared
-        )
+        """
+        Compute the aggregated metric value.
 
+        Returns
+        -------
+        torch.Tensor
+            Aggregated area-weighted error as computed by
+            :func:`_area_weighted_error_compute`.
+        """
+        return _area_weighted_error_compute(self.sum_weighted_error)
 
-def _l2_mean_squared_error_update(
-    preds: Tensor, target: Tensor, weight: Tensor, K: float
-) -> Tuple[Tensor, int]:
-    """Updates and returns variables required to compute Mean Squared Error.
-    Checks for same shape of input tensors.
-    Args:
-        preds: Predicted tensor
-        target: Ground truth tensor
-        weight: linear weights
-        k: regularization constant
-    """
-    _check_same_shape(preds, target)
-    diff = preds - target
-    n_obs = target.numel()
-    sum_squared_error = torch.sum(diff * diff) + K * torch.sum(weight * weight)
-    return sum_squared_error, n_obs
+    @property
+    def is_differentiable(self) -> bool:
+        """
+        Indicate whether the metric is differentiable.
 
-
-def _l2_mean_squared_error_compute(
-    sum_squared_error: Tensor, n_obs: int, squared: bool = True
-) -> Tensor:
-    """Computes Mean Squared Error with L2 regularization.
-    Args:
-        sum_squared_error: Sum of square of errors over all observations
-        n_obs: Number of predictions or observations
-        squared: Returns RMSE value if set to False.
-    Example:
-        >>> preds = torch.tensor([0., 1, 2, 3])
-        >>> target = torch.tensor([0., 1, 2, 2])
-        >>> weigth = torch.tensor([0.25, 0.5, 0.25, 0.25])
-        >>> k = 1e-1
-        >>> sum_squared_error, n_obs = _l2__mean_squared_error_update(preds, target, weight, k)
-        >>> _l2_mean_squared_error_compute(sum_squared_error, n_obs)
-        tensor(0.2609)
-    """
-    return (
-        sum_squared_error / n_obs if squared else torch.sqrt(sum_squared_error / n_obs)
-    )
-
-
-def l2_mean_squared_error(
-    preds: Tensor, target: Tensor, weight: Tensor, K: float, squared: bool = True
-) -> Tensor:
-    """Computes mean squared error with L2 regularization.
-    Args:
-        preds: estimated labels
-        target: ground truth labels
-        squared: returns RMSE value if set to False
-    Return:
-        Tensor with MSE
-    Example:
-        >>> from torchmetrics.functional import mean_squared_error
-        >>> x = torch.tensor([0., 1, 2, 3])
-        >>> y = torch.tensor([0., 1, 2, 2])
-        >>> w = torch.tensor([0.25, 0.5, 0.25, 0.25])
-        >>> k = 1e-1
-        >>> mean_squared_error(x, y, w, k)
-        tensor(0.2609)
-    """
-    sum_squared_error, n_obs = _l2_mean_squared_error_update(preds, target, weight, K)
-    return _l2_mean_squared_error_compute(sum_squared_error, n_obs, squared=squared)
+        Returns
+        -------
+        bool
+            True. (Note: TorchMetrics may still treat some metrics as non-differentiable
+            depending on internal operations).
+        """
+        return True

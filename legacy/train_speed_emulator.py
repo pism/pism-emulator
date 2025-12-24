@@ -18,7 +18,13 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=redefined-builtin
+"""
+Train the speed emulator.
+"""
+import inspect
 import os
+import random
 import warnings
 from argparse import ArgumentParser
 from os.path import abspath, dirname, join, realpath
@@ -30,26 +36,56 @@ from lightning.pytorch.callbacks import ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 from scipy.stats import dirichlet
 
-from pism_emulator.datamodules import PISMDataModule
-from pism_emulator.datasets import PISMDataset
-from pism_emulator.nnemulator import NNEmulator
-from pism_emulator.utils import plot_eigenglaciers
+from pism_emulator.datamodules import LegacyPISMDataModule as PISMDataModule
+from pism_emulator.datasets import LegacyPISMDataset as PISMDataset
+from pism_emulator.emulators.nnemulator import LegacyNNEmulator as NNEmulator
+from pism_emulator.plotting import plot_legacy_eigenglaciers as plot_eigenglaciers
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
+torch.use_deterministic_algorithms(True)
+torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
+torch.backends.cudnn.benchmark = True
 
-def current_script_directory():
-    import inspect
 
-    filename = inspect.stack(0)[0][1]
-    print(dirname(filename))
+def current_script_directory() -> str:
+    """
+    Return the absolute directory containing the calling script.
+
+    This helper inspects the current call stack to find the file path of the
+    frame at index 0 (the immediate call site within this function) and returns
+    its directory as an absolute path.
+
+    Returns
+    -------
+    str
+        Absolute path to the directory containing the script file.
+
+    Raises
+    ------
+    RuntimeError
+        If the script path cannot be determined (e.g., in some interactive
+        environments where frames may not have a filename).
+
+    Notes
+    -----
+    In notebooks, REPLs, or frozen/packaged applications, stack-based filename
+    inspection can be unreliable. If you need a more robust approach, consider
+    passing a reference path explicitly or using ``__file__`` when available.
+    """
+    frame = inspect.stack(context=0)[0]
+    filename = frame.filename
+    if not filename:
+        raise RuntimeError(
+            "Unable to determine current script directory from call stack."
+        )
     return realpath(dirname(filename))
 
 
 script_directory = current_script_directory()
 
 if __name__ == "__main__":
-    __spec__ = None
+    __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
     parser.add_argument("--accelerator", type=str, default="auto")
@@ -65,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument("--emulator_dir", default="emulator_ensemble")
     parser.add_argument("--max_epochs", type=int, default=1000)
     parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--n_layers", type=int, default=4)
     parser.add_argument("-q", type=int, default=100)
     parser.add_argument(
@@ -88,7 +124,6 @@ if __name__ == "__main__":
     parser.add_argument("--target_var", type=str, default="velsurf_mag")
     parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
     parser.add_argument("--train_size", type=float, default=1.0)
-    parser.add_argument("--thinning_factor", type=int, default=1)
 
     parser = NNEmulator.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -109,8 +144,12 @@ if __name__ == "__main__":
     target_var = args.target_var
     target_error_var = args.target_error_var
     train_size = args.train_size
-    thinning_factor = args.thinning_factor
     tb_logs_dir = f"{emulator_dir}/tb_logs"
+
+    np.random.seed(model_index)
+    random.seed(model_index)
+    torch.manual_seed(model_index)
+    pl.seed_everything(model_index, workers=True)
 
     callbacks: list = []
 
@@ -120,7 +159,6 @@ if __name__ == "__main__":
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        thinning_factor=thinning_factor,
         verbose=True,
     )
 
@@ -130,9 +168,6 @@ if __name__ == "__main__":
     n_grid_points = dataset.n_grid_points
     n_parameters = dataset.n_parameters
     n_samples = dataset.n_samples
-
-    torch.manual_seed(0)
-    np.random.seed(model_index)
 
     if not os.path.isdir(emulator_dir):
         os.makedirs(emulator_dir)
@@ -156,6 +191,7 @@ if __name__ == "__main__":
             train_size=train_size,
             num_workers=num_workers,
             batch_size=batch_size,
+            seed=model_index,
         )
 
     data_loader.prepare_data(q=q)

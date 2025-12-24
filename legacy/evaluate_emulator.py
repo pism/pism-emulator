@@ -1,6 +1,6 @@
 #!/bin/env python3
 
-# Copyright (C) 2021 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021,25 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -18,9 +18,16 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=bare-except,possibly-used-before-assignment,redefined-builtin
+
+"""
+Evaluate emulators.
+"""
+
+import inspect
 from argparse import ArgumentParser
-from os import mkdir
-from os.path import abspath, dirname, isdir, join, realpath
+from os.path import abspath, dirname, join, realpath
+from pathlib import Path
 
 import numpy as np
 import pylab as plt
@@ -30,22 +37,49 @@ from scipy.stats import pearsonr
 from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
 
-from pism_emulator.datasets import PISMDataset
-from pism_emulator.nnemulator import NNEmulator
+from pism_emulator.datasets import LegacyPISMDataset as PISMDataset
+from pism_emulator.emulators.nnemulator import LegacyNNEmulator as NNEmulator
 from pism_emulator.utils import param_keys_dict as keys_dict
 
 
-def current_script_directory():
-    import inspect
+def current_script_directory() -> str:
+    """
+    Return the absolute directory containing the calling script.
 
-    filename = inspect.stack(0)[0][1]
+    This helper inspects the current call stack to find the file path of the
+    frame at index 0 (the immediate call site within this function) and returns
+    its directory as an absolute path.
+
+    Returns
+    -------
+    str
+        Absolute path to the directory containing the script file.
+
+    Raises
+    ------
+    RuntimeError
+        If the script path cannot be determined (e.g., in some interactive
+        environments where frames may not have a filename).
+
+    Notes
+    -----
+    In notebooks, REPLs, or frozen/packaged applications, stack-based filename
+    inspection can be unreliable. If you need a more robust approach, consider
+    passing a reference path explicitly or using ``__file__`` when available.
+    """
+    frame = inspect.stack(context=0)[0]
+    filename = frame.filename
+    if not filename:
+        raise RuntimeError(
+            "Unable to determine current script directory from call stack."
+        )
     return realpath(dirname(filename))
 
 
 script_directory = current_script_directory()
 
 if __name__ == "__main__":
-    __spec__ = None
+    __spec__ = None  # type: ignore
 
     parser = ArgumentParser()
     parser.add_argument("--data_dir", default="../tests/training_data")
@@ -95,7 +129,6 @@ if __name__ == "__main__":
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
-        thinning_factor=1,
         threshold=1e7,
     )
     X = dataset.X
@@ -121,12 +154,30 @@ if __name__ == "__main__":
         nrows=4, ncols=4, sharex="col", sharey="row", figsize=(6.4, 10)
     )
 
+    n_models = num_models
+    n_glaciers = len(glaciers)
+    p_models = tqdm(
+        total=n_models, position=0, leave=True, desc="Models", dynamic_ncols=True
+    )
+    p_glaciers = tqdm(
+        total=n_glaciers, position=1, leave=True, desc="Glaciers", dynamic_ncols=True
+    )
+
+    # text-only "bar" that stays as a single line
+    p_metrics = tqdm(
+        total=1, position=2, leave=True, bar_format="{desc}", dynamic_ncols=True
+    )
+    p_metrics.set_description_str("MAE=…, MBE=…, RMSE=…, r=…, r²=…")
+    p_metrics.refresh()
+
     k = 0
-    for m in tqdm(glaciers):
-        print(f"{k+1} of {len(glaciers)}: Loading ensemble member {m}")
+    l = 1
+    for m in range(n_glaciers):
+        p_glaciers.update(1)
         F_val = np.zeros((num_models, F.shape[1]))
         F_pred = np.zeros((num_models, F.shape[1]))
-        for model_index in tqdm(range(0, num_models)):
+        for model_index in range(n_models):
+            p_models.update(1)
             emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
             state_dict = torch.load(emulator_file)
             e = NNEmulator(
@@ -141,28 +192,39 @@ if __name__ == "__main__":
             e.eval()
 
             X_val = X[m]
-            F_v = F[m].detach().numpy()
-            F_p = e(X_val, add_mean=True).detach().numpy()
-            F_val[:] = F_v
-            F_pred[:] = F_p
+            if isinstance(X_val, np.ndarray):
+                X_val = torch.as_tensor(X_val)
+            if X_val.dim() == 1:
+                X_val = X_val.unsqueeze(0)  # (1, n_parameters)
+
+            with torch.no_grad():
+                F_v = F[m].detach().cpu().numpy()  # (n_nodes,)
+                F_p = e(X_val, add_mean=True).detach().cpu().numpy()  # (1, n_nodes)
+
+            # store per-model predictions; we'll ensemble by mean later
+            F_val[model_index, :] = F_v
+            F_pred[model_index, :] = F_p.squeeze(0)
+
         rmse = np.sqrt(
             ((10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)) ** 2).mean()
         )
         mae = mean_absolute_error(10 ** F_pred.mean(axis=0), 10 ** F_val.mean(axis=0))
         mbe = (10 ** F_pred.mean(axis=0) - 10 ** F_val.mean(axis=0)).mean()
-        r = pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0))
+        r = pearsonr(F_pred.mean(axis=0), F_val.mean(axis=0))[0]
         r2 = r2_score(F_pred.mean(axis=0), F_val.mean(axis=0))
         rmses.append(rmse)
         maes.append(mae)
         mbes.append(mbe)
-        pearson_rs.append(r[0])
+        pearson_rs.append(r)
         r2s.append(r2)
-        print(
-            f"MAE={mae:.2f} m/yr, MBE={mbe:.2f} m/yr, RMSE={rmse:.0f} m/yr, Pearson r={r[0]:.4f}, r2={r2:.4f}"
+        # after computing metrics for this model (or overall), update the fixed line:
+        p_metrics.set_description_str(
+            f"MAE={mae:.2f} m/yr, MBE={mbe:.2f} m/yr, RMSE={rmse:.0f} m/yr, "
+            f"Pearson r={r:.4f}, r²={r2:.4f}"
         )
-
+        p_metrics.refresh()
         if m in plot_glaciers:
-            X_val_unscaled = X_val * dataset.X_std + dataset.X_mean
+            X_val_unscaled = X_val.squeeze() * dataset.X_std + dataset.X_mean
 
             F_val_2d = np.zeros((dataset.ny, dataset.nx))
             F_val_2d.put(dataset.sparse_idx_1d, 10**F_val)
@@ -175,10 +237,10 @@ if __name__ == "__main__":
             F_pred_2d = np.ma.array(data=F_pred_2d, mask=mask)
 
             c1 = axs[0, k].imshow(
-                F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
+                F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
             )
             axs[1, k].imshow(
-                F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=3e3)
+                F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
             )
             c2 = axs[2, k].imshow(
                 F_pred_2d - F_val_2d,
@@ -231,6 +293,7 @@ if __name__ == "__main__":
             axs[-1, k].set_axis_off()
 
             k += 1
+        l += 1
 
     rmse_mean = np.array(rmses).mean()
     mae_mean = np.array(maes).mean()
@@ -296,9 +359,8 @@ if __name__ == "__main__":
     else:
         mode = "train"
 
-    fig_dir = f"{emulator_dir}/{mode}"
-    if not isdir(fig_dir):
-        mkdir(fig_dir)
+    fig_dir = Path(f"{emulator_dir}/{mode}")
+    fig_dir.mkdir(parents=True, exist_ok=True)
 
     fig_name = join(fig_dir, f"speed_emulator_{mode}.pdf")
     print(f"Saving to {fig_name}")
