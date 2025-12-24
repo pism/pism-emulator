@@ -34,7 +34,6 @@ import lightning as pl
 import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
-import pandas as pd
 import torch
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from pyfiglet import Figlet
@@ -101,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     parser = ArgumentParser()
     parser.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
-    tmp, _ = parser.parse_known_args()
+    tmp, _ = parser.parse_known_args(argv)
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--burn", type=int, default=1000)
@@ -132,7 +131,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     elif tmp.emulator == "DNN":
         Emulator = DNNEmulator
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     accelerator = args.accelerator
     emulator_dir = args.emulator_dir
@@ -288,9 +287,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         + X_mean[None, None, :]
     )
 
-    prior_coords = {"chain": np.arange(C_prior), "draw": np.arange(S_prior)}
-    prior_dims = {name: ["chain", "draw"] for name in dataset.samples.X_keys}
-
     prior = {
         name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)
         for i, name in enumerate(dataset.samples.X_keys)
@@ -314,6 +310,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         posterior=posterior,
         prior=prior,
         sample_stats=sample_stats if sample_stats else None,
+        coords=coords,
+        dims=dims,
     )
 
     # Save to Zarr (overwrite)
@@ -325,17 +323,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         if hasattr(idata, grp):
             ds = getattr(idata, grp)
             setattr(idata, grp, ds.astype({v: "float32" for v in ds.data_vars}))
-
-    # Add useful metadata
-    idata.attrs.update(
-        {
-            "created": pd.Timestamp.utcnow().isoformat(),
-            "model": type(model).__name__,
-            "emulator_dir": str(posterior_dir),
-            "n_chains": int(idata.posterior.sizes["chain"]),
-            "n_draws": int(idata.posterior.sizes["draw"]),
-        }
-    )
 
     # Save + load
     out_nc = out_dir / f"X_posterior_model_{model_index}.nc"
