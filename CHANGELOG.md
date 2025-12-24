@@ -7,6 +7,6 @@ and this project adheres to [PEP 440](https://www.python.org/dev/peps/pep-0440/)
 and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.40.2]
+## [0.41.2]
 
 - Thorough linting.
