@@ -15,21 +15,20 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+# pylint: disable=arguments-differ,too-many-instance-attributes,too-many-lines
 """
 Neural Network Emulators.
 """
 import math
+import warnings
 from argparse import ArgumentParser
-from collections import OrderedDict
 
 import lightning as pl
-import numpy as np
 import torch
-import torch.nn as nn
-from lightning.pytorch.utilities.rank_zero import rank_zero_info
-from torch import Tensor
+from torch import Tensor, nn
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, _LRScheduler
+from torch.optim.lr_scheduler import ExponentialLR, _LRScheduler
 
 from pism_emulator.metrics import AreaWeightedError, area_weighted_error
 
@@ -274,12 +273,21 @@ class DNNEmulator(pl.LightningModule):
         self.apply(_kaiming_init)
 
         self._compiled = False
+
         if bool(self.hparams.get("compile", False)) and hasattr(torch, "compile"):
             try:
                 self.forward = torch.compile(self.forward, dynamic=True)  # type: ignore[method-assign]
                 self._compiled = True
-            except Exception:
-                pass
+            except (RuntimeError, TypeError, ValueError) as e:
+                self._compiled = False
+                warnings.warn(
+                    "torch.compile was requested but failed; continuing without compilation.\n"
+                    f"Reason: {type(e).__name__}: {e}\n"
+                    "To silence this, set hparams['compile']=False. For debug: "
+                    "TORCH_LOGS=+dynamo TORCHDYNAMO_VERBOSE=1.",
+                    category=RuntimeWarning,
+                    stacklevel=2,
+                )
 
     def forward(self, x: Tensor, add_mean: bool = False) -> Tensor:
         """
@@ -382,6 +390,7 @@ class DNNEmulator(pl.LightningModule):
         torch.Tensor
             Scalar loss tensor.
         """
+        _ = batch_idx
         x, f, o, _ = batch
         f_pred = self.forward(x)
         loss = area_weighted_error(f_pred, f, o, self.area)
@@ -405,6 +414,7 @@ class DNNEmulator(pl.LightningModule):
         dict[str, torch.Tensor]
             Dictionary of tensors useful for epoch-end hooks/logging.
         """
+        _ = batch_idx
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
 
@@ -449,6 +459,40 @@ class DNNEmulator(pl.LightningModule):
 
 
 class NNEmulator(pl.LightningModule):
+    """
+    Deep neural network emulator for PISM glacier fields.
+
+    This model maps a vector of input parameters ``x`` to a set of coefficients in a
+    reduced basis (the "eigenglacier" basis), and reconstructs full fields in physical
+    space via a fixed matrix ``V_hat``:
+
+    .. math::
+
+        \\hat{F}(x) = c(x) V_{\\hat{}}^T \\, (+\\, F_{\\mathrm{mean}})
+
+    where ``c(x)`` are learned coefficients and ``F_mean`` is an optional mean field
+    added back during reconstruction.
+
+    Parameters
+    ----------
+    n_parameters : int
+        Number of input parameters (feature dimension of ``x``).
+    V_hat : torch.Tensor
+        Fixed basis matrix used to reconstruct fields from coefficients.
+        Shape ``(n_nodes, n_eigenglaciers)``.
+    F_mean : torch.Tensor
+        Mean field in physical space. Shape ``(n_nodes,)`` (or broadcastable
+        to ``(batch, n_nodes)``).
+    area : torch.Tensor
+        Per-node area weights used in area-weighted loss/metrics. Shape
+        ``(n_nodes,)`` (or broadcastable).
+    n_eigenglaciers : int or None, optional
+        Number of basis vectors / coefficient dimension. If None, inferred
+        from ``V_hat.shape[1]``. Default is None.
+    **hparams : object
+        Additional hyperparameters controlling the network and optimization.
+    """
+
     def __init__(
         self,
         n_parameters,
@@ -534,6 +578,19 @@ class NNEmulator(pl.LightningModule):
 
     @staticmethod
     def add_model_specific_args(parent_parser):
+        """
+        Add NNEmulator-specific CLI arguments to an existing parser.
+
+        Parameters
+        ----------
+        parent_parser : argparse.ArgumentParser
+            Parser to which DNNEmulator arguments will be added.
+
+        Returns
+        -------
+        argparse.ArgumentParser
+            The updated parser with DNNEmulator options added.
+        """
         parser = parent_parser.add_argument_group("NNEmulator")
         parser.add_argument("--n_hidden", type=int, default=128)
         parser.add_argument("--learning_rate", type=float, default=0.1)
@@ -552,6 +609,7 @@ class NNEmulator(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def training_step(self, batch, batch_idx):
+        _ = batch_idx
         x, f, o, _ = batch
         f_pred = self.forward(x)
         area = self.area
@@ -560,6 +618,7 @@ class NNEmulator(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        _ = batch_idx
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
         area = self.area
@@ -611,6 +670,40 @@ class NNEmulator(pl.LightningModule):
 
 
 class NN5Emulator(pl.LightningModule):
+    """
+    Deep neural network emulator for PISM glacier fields.
+
+    This model maps a vector of input parameters ``x`` to a set of coefficients in a
+    reduced basis (the "eigenglacier" basis), and reconstructs full fields in physical
+    space via a fixed matrix ``V_hat``:
+
+    .. math::
+
+        \\hat{F}(x) = c(x) V_{\\hat{}}^T \\, (+\\, F_{\\mathrm{mean}})
+
+    where ``c(x)`` are learned coefficients and ``F_mean`` is an optional mean field
+    added back during reconstruction.
+
+    Parameters
+    ----------
+    n_parameters : int
+        Number of input parameters (feature dimension of ``x``).
+    V_hat : torch.Tensor
+        Fixed basis matrix used to reconstruct fields from coefficients.
+        Shape ``(n_nodes, n_eigenglaciers)``.
+    F_mean : torch.Tensor
+        Mean field in physical space. Shape ``(n_nodes,)`` (or broadcastable
+        to ``(batch, n_nodes)``).
+    area : torch.Tensor
+        Per-node area weights used in area-weighted loss/metrics. Shape
+        ``(n_nodes,)`` (or broadcastable).
+    n_eigenglaciers : int or None, optional
+        Number of basis vectors / coefficient dimension. If None, inferred
+        from ``V_hat.shape[1]``. Default is None.
+    **hparams : object
+        Additional hyperparameters controlling the network and optimization.
+    """
+
     def __init__(
         self,
         n_parameters,
@@ -704,6 +797,19 @@ class NN5Emulator(pl.LightningModule):
 
     @staticmethod
     def add_model_specific_args(parent_parser):
+        """
+        Add NNEmulator-specific CLI arguments to an existing parser.
+
+        Parameters
+        ----------
+        parent_parser : argparse.ArgumentParser
+            Parser to which NNEmulator arguments will be added.
+
+        Returns
+        -------
+        argparse.ArgumentParser
+            The updated parser with NNEmulator options added.
+        """
         parser = parent_parser.add_argument_group("NNEmulator")
         parser.add_argument("--n_hidden", type=int, default=128)
         parser.add_argument("--learning_rate", type=float, default=0.01)
@@ -722,6 +828,7 @@ class NN5Emulator(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def training_step(self, batch, batch_idx):
+        _ = batch_idx
         x, f, o, _ = batch
         f_pred = self.forward(x)
         area = self.area
@@ -730,6 +837,7 @@ class NN5Emulator(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        _ = batch_idx
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
         area = self.area
@@ -781,6 +889,46 @@ class NN5Emulator(pl.LightningModule):
 
 
 class LegacyNNEmulator(pl.LightningModule):
+    """
+    Deep neural network emulator for PISM glacier fields.
+
+    This model maps a vector of input parameters ``x`` to a set of coefficients in a
+    reduced basis (the "eigenglacier" basis), and reconstructs full fields in physical
+    space via a fixed matrix ``V_hat``:
+
+    .. math::
+
+        \\hat{F}(x) = c(x) V_{\\hat{}}^T \\, (+\\, F_{\\mathrm{mean}})
+
+    where ``c(x)`` are learned coefficients and ``F_mean`` is an optional mean field
+    added back during reconstruction.
+
+    Parameters
+    ----------
+    n_parameters : int
+        Number of input parameters (feature dimension of ``x``).
+    n_eigenglaciers : int or None, optional
+        Number of basis vectors / coefficient dimension. If None, inferred
+        from ``V_hat.shape[1]``. Default is None.
+    V_hat : torch.Tensor
+        Fixed basis matrix used to reconstruct fields from coefficients.
+        Shape ``(n_nodes, n_eigenglaciers)``.
+    F_mean : torch.Tensor
+        Mean field in physical space. Shape ``(n_nodes,)`` (or broadcastable
+        to ``(batch, n_nodes)``).
+    area : torch.Tensor
+        Per-node area weights used in area-weighted loss/metrics. Shape
+        ``(n_nodes,)`` (or broadcastable).
+    hparams : dict[str, Any] | argparse.Namespace | lightning.pytorch.utilities.parsing.AttributeDict
+        Hyperparameters/configuration used to build the network and control training.
+        The expected keys depend on your implementation (e.g., layer sizes, learning
+        rate, dropout, etc.).
+    *args : Any
+        Additional positional arguments forwarded to ``pl.LightningModule`` (if any).
+    **kwargs : Any
+        Additional keyword arguments forwarded to ``pl.LightningModule`` (if any).
+    """
+
     def __init__(
         self,
         n_parameters,
@@ -855,6 +1003,19 @@ class LegacyNNEmulator(pl.LightningModule):
 
     @staticmethod
     def add_model_specific_args(parent_parser):
+        """
+        Add NNEmulator-specific CLI arguments to an existing parser.
+
+        Parameters
+        ----------
+        parent_parser : argparse.ArgumentParser
+            Parser to which NNEmulator arguments will be added.
+
+        Returns
+        -------
+        argparse.ArgumentParser
+            The updated parser with NNEmulator options added.
+        """
         parser = parent_parser.add_argument_group("NNEmulator")
         parser.add_argument("--n_hidden_1", type=int, default=128)
         parser.add_argument("--n_hidden_2", type=int, default=128)
@@ -876,6 +1037,7 @@ class LegacyNNEmulator(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def training_step(self, batch, batch_idx):
+        _ = batch_idx
         x, f, o, _ = batch
         f_pred = self.forward(x)
         loss = area_weighted_error(f_pred, f, o, self.area)
@@ -883,6 +1045,7 @@ class LegacyNNEmulator(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        _ = batch_idx
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
 

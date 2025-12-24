@@ -17,6 +17,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=redefined-builtin,redefined-outer-name,no-member
 """
 Plot posteriors.
 """
@@ -55,8 +56,40 @@ rcparams = {
     "ytick.major.width": 0.25,
     "legend.fontsize": fontsize,
     "lines.markersize": markersize,
-    "font.size": fontsize,
 }
+
+
+def _get_groups(idata: az.InferenceData) -> list[str]:
+    """
+    Return group names from an ArviZ ``InferenceData`` using public APIs.
+
+    This helper prefers the public ``InferenceData.groups`` attribute when
+    available. If it is missing, it falls back to iterating over ``idata``,
+    which yields group names in newer ArviZ versions.
+
+    Parameters
+    ----------
+    idata : arviz.InferenceData
+        InferenceData object to inspect.
+
+    Returns
+    -------
+    list[str]
+        Group names present in ``idata`` (e.g., ``"posterior"``, ``"prior"``,
+        ``"sample_stats"``).
+
+    Notes
+    -----
+    ``InferenceData.groups`` may be either an iterable or a callable depending
+    on the ArviZ version.
+    """
+    groups_attr = getattr(idata, "groups", None)
+    if groups_attr is None:
+        # InferenceData is iterable over group names in recent ArviZ.
+        return [str(g) for g in idata]
+    if callable(groups_attr):
+        return [str(g) for g in groups_attr()]
+    return [str(g) for g in groups_attr]
 
 
 def _group_to_df(ds: xr.Dataset, label: str, cols: Sequence[str]) -> pd.DataFrame:
@@ -80,9 +113,9 @@ def _group_to_df(ds: xr.Dataset, label: str, cols: Sequence[str]) -> pd.DataFram
         the requested variables in columns, plus an ``ensemble`` column set to
         ``label``.
     """
-    df = ds[cols].to_dataframe().reset_index()  # gives columns: chain, draw, <vars>
-    df["ensemble"] = label
-    return df
+    _df = ds[cols].to_dataframe().reset_index()  # gives columns: chain, draw, <vars>
+    _df["ensemble"] = label
+    return _df
 
 
 def load_and_stack_idatas(
@@ -155,7 +188,7 @@ def load_and_stack_idatas(
             New InferenceData with group datasets expanded along ``dim_name``.
         """
         group_ds: dict[str, xr.Dataset] = {}
-        for group in idata._groups_all:
+        for group in _get_groups(idata):
             ds = getattr(idata, group, None)
             if ds is None:
                 continue
@@ -165,7 +198,7 @@ def load_and_stack_idatas(
 
     expanded = [_expanded(az.from_netcdf(p), lab) for p, lab in zip(paths, labels)]
 
-    groups = set().union(*(set(e._groups_all) for e in expanded))
+    groups = set().union(*(set(_get_groups(e)) for e in expanded))
     concatenated: dict[str, xr.Dataset] = {}
     for g in groups:
         dses = [getattr(e, g, None) for e in expanded]
@@ -184,6 +217,7 @@ params = [
     "stress_balance.blatter.enhancement_factor",
     "stress_balance.blatter.Glen_exponent",
 ]
+
 
 plt.rcParams.update(rcparams)
 
@@ -233,20 +267,20 @@ if __name__ == "__main__":
         fig.savefig("traces.png", dpi=300)
 
     with mpl.rc_context(rcparams):
-        g = sns.pairplot(
+        _g = sns.pairplot(
             df[df["ensemble"] == "Posterior"],
             hue="model",
             palette="crest",
         )
-        g.fig.set_size_inches(6.4, 6.4)  # (width, height) in inches
-        g.fig.tight_layout()
-        g.fig.savefig("test.png", dpi=300)
-        g = sns.pairplot(
+        _g.fig.set_size_inches(6.4, 6.4)  # (width, height) in inches
+        _g.fig.tight_layout()
+        _g.fig.savefig("test.png", dpi=300)
+        _g = sns.pairplot(
             df,
             hue="ensemble",
             hue_order=["Prior", "Posterior"],
             palette=["#97a6c4", "#384860"],
         )
-        g.fig.set_size_inches(6.4, 6.4)  # (width, height) in inches
-        g.fig.tight_layout()
-        g.fig.savefig("test_prior_posterior.png", dpi=300)
+        _g.fig.set_size_inches(6.4, 6.4)  # (width, height) in inches
+        _g.fig.tight_layout()
+        _g.fig.savefig("test_prior_posterior.png", dpi=300)

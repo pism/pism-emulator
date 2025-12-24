@@ -16,7 +16,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-# pylint: disable=not-callable,too-many-lines,too-many-instance-attributes
+# pylint: disable=not-callable,too-many-lines,too-many-instance-attributes,arguments-differ,too-many-statements
 """
 MALA Sampler.
 """
@@ -38,7 +38,6 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-
 
 from pism_emulator.sampler.writer import DiskPredictionWriter
 
@@ -363,26 +362,22 @@ class MALASamplerModule(pl.LightningModule):
         self.hess_refresh: int = int(hess_refresh)
         self._base_seed: int = 0 if seed is None else int(seed)
 
-    # ------------------------------------------------------------------ #
-    # Lightning API                                                      #
-    # ------------------------------------------------------------------ #
     def configure_optimizers(self) -> None:
         """
         Lightning hook. This module does not optimize/train any parameters.
         """
         return None
 
-    # ------------------------------------------------------------------ #
-    # Core maths                                                         #
-    # ------------------------------------------------------------------ #
     def forward(self, *args: Any, **kwargs: Any) -> Tensor:
         """
         Forward model wrapper.
 
         Parameters
         ----------
-        X : torch.Tensor
-            Parameter vector of shape ``(D,)`` or mini-batch of shape ``(N, D)``.
+        *args
+            Positional arguments. If provided, ``args[0]`` must be ``X``.
+        **kwargs
+            Keyword arguments. Must contain ``X`` if ``*args`` is empty.
 
         Returns
         -------
@@ -868,7 +863,9 @@ class MALASamplerModule(pl.LightningModule):
         self.zero_grad(set_to_none=True)
         return X
 
-    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> dict[str, Any]:  # pylint: disable=arguments-differ,too-many-statements
+    def predict_step(
+        self, batch: Any, batch_idx: int, dataloader_idx: int = 0
+    ) -> dict[str, Any]:
         """
         One predict step = one chain.
 
@@ -881,7 +878,7 @@ class MALASamplerModule(pl.LightningModule):
             Lightning-provided batch index (unused).
         dataloader_idx : int, optional
             Dataloader index provided by Lightning (unused).
-        
+
         Returns
         -------
         dict
