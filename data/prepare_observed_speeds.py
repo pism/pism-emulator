@@ -15,6 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+# pylint: disable=redefined-builtin
+
 """
 Download and process observed speeds.
 """
@@ -23,7 +26,6 @@ import re
 from pathlib import Path
 
 import earthaccess
-import numpy as np
 import rioxarray as rxr
 import xarray as xr
 
@@ -65,6 +67,9 @@ def download_earthaccess(
 
 
 def main():
+    """
+    Download and prepare observed velocities.
+    """
     print("Preparing Velocities")
     filter_str = "greenland_vel_mosaic250"
     result_dir = Path("observed_speeds")

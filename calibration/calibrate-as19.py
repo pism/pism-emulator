@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-# pylint: disable=too-many-lines,too-many-positional-arguments,redefined-outer-name,too-many-branches,too-many-statements,consider-using-f-string
+# pylint: disable=too-many-lines,too-many-positional-arguments,redefined-outer-name,too-many-branches,too-many-statements,consider-using-f-string,protected-access
 """
 Calibrate the AS19 dataset.
 
@@ -28,7 +28,7 @@ from datetime import datetime
 from functools import reduce
 from itertools import cycle
 from pathlib import Path
-from typing import Any, Literal, TypeAlias, overload
+from typing import Any, Literal, Mapping, TypeAlias, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -712,6 +712,7 @@ def plot_partitioning(
     ``ts_median_palette_dict``, ``ts_fill_palette_dict``, ``signal_lw``,
     ``obs_signal_color``, ``obs_sigma_color``, and :func:`add_inner_title`.
     """
+    _ = simulated_ctrl
     ncol = 0
     if simulated is not None:
         ncol += len(ensembles)
@@ -723,7 +724,7 @@ def plot_partitioning(
         1,
         sharex="col",
         figsize=[3.2, 2.6],
-        gridspec_kw=dict(height_ratios=[1, 1]),
+        gridspec_kw={"height_ratios": [1, 1]},
     )
     fig.subplots_adjust(hspace=0.1, wspace=0.25)
 
@@ -895,7 +896,7 @@ def plot_posterior_sle_pdfs(
         2,
         sharex="col",
         figsize=[5.8, 4.2],
-        gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * n_rcps),
+        gridspec_kw={"height_ratios": [0.30 * len(ensembles), 4] * n_rcps},
     )
     fig.subplots_adjust(hspace=0.0, wspace=0)
 
@@ -1115,26 +1116,122 @@ def plot_posterior_sle_pdfs(
 
 
 def plot_posterior_sle_pdf(
-    out_filename,
-    df,
-    observed=None,
-    year=2100,
-    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    ylim=None,
-):
+    out_filename: str | Path,
+    df: pd.DataFrame,
+    observed: pd.DataFrame | None = None,
+    year: int = 2100,
+    ensembles: Sequence[str] = ("AS19", "Flow Calib.", "Flow+Mass Calib."),
+    ylim: tuple[float, float] | None = None,
+) -> None:
+    """
+    Plot posterior probability densities of sea-level equivalent (SLE) for multiple RCPs.
+
+    This produces a stacked set of panels (per RCP) showing:
+    1) a compact "quantile bar" panel (median with 16–84% and 5–95% ranges), and
+    2) a KDE-based PDF panel (filled densities) for each ensemble.
+
+    Optionally, observational constraints are overlaid as a solid vertical line at the
+    observed mean with dotted lines at ±2σ.
+
+    Parameters
+    ----------
+    out_filename : str or pathlib.Path
+        Output path for the saved figure (any format supported by Matplotlib,
+        e.g. ``.png`` or ``.pdf``).
+    df : pandas.DataFrame
+        Long-form table containing posterior samples / realizations. Expected columns:
+
+        - ``"Year"``: int year
+        - ``"RCP"``: scenario identifier compatible with the global ``rcps`` iterable
+        - ``"Ensemble"``: ensemble name matching entries in ``ensembles``
+        - ``"SLE (cm)"``: sea-level equivalent in centimeters (numeric)
+
+        Additional columns are ignored.
+    observed : pandas.DataFrame, optional
+        Observational constraint table. If provided, expected columns:
+
+        - ``"Year"``: numeric year
+        - ``"SLE (cm)"``: observed SLE in centimeters
+        - ``"SLE uncertainty (cm)"``: 1σ uncertainty in centimeters
+
+        Rows are filtered to the interval ``[year, year+1)`` before computing the
+        mean and uncertainty used for plotting.
+    year : int, optional
+        Year to plot. Rows in ``df`` are filtered where ``df["Year"] == year``.
+        Default is 2100.
+    ensembles : sequence of str, optional
+        Ensemble names and plotting order. Default is
+        ``("AS19", "Flow Calib.", "Flow+Mass Calib.")``.
+    ylim : tuple of float, optional
+        Y-limits applied to the KDE panels (not the quantile bars). If None,
+        Matplotlib autoscaling is used.
+
+    Returns
+    -------
+    None
+        Saves the figure to ``out_filename`` and closes it.
+
+    Raises
+    ------
+    KeyError
+        If required columns are missing from ``df`` or ``observed`` (when provided).
+    ValueError
+        If filtering leaves no rows for the requested ``year`` or if ``ensembles``
+        is empty.
+    OSError
+        If the figure cannot be written to ``out_filename``.
+
+    Notes
+    -----
+    This function relies on several module-level objects/functions:
+
+    - ``rcps``: iterable of scenario identifiers
+    - ``rcp_col_dict``: mapping ``rcp -> color``
+    - ``rcp_dict``: mapping ``rcp -> label``
+    - ``color_tint``: function to adjust colors by alpha
+    - ``make_quantile_df``: function returning quantiles in a wide format keyed by
+      quantile values (e.g., 0.05, 0.16, 0.5, 0.84, 0.95)
+    - ``add_inner_title``: helper for panel titles
+
+    If you want this function to be fully standalone, pass these as arguments or
+    refactor them into explicit dependencies.
+    """
+    required = {"Year", "RCP", "Ensemble", "SLE (cm)"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise KeyError(f"df is missing required columns: {sorted(missing)}")
+    if not ensembles:
+        raise ValueError("ensembles must contain at least one entry.")
+
+    # If observed is provided, validate expected columns early for clearer errors.
+    if observed is not None:
+        obs_required = {"Year", "SLE (cm)", "SLE uncertainty (cm)"}
+        obs_missing = obs_required.difference(observed.columns)
+        if obs_missing:
+            raise KeyError(
+                f"observed is missing required columns: {sorted(obs_missing)}"
+            )
+
+    out_filename = Path(out_filename)
+
     legend_rcp = 85
     alphas = [0.4, 0.7, 1.0]
     m_alphas = alphas[: len(ensembles)]
+
     fig, axs = plt.subplots(
         6,
         1,
         sharex="col",
         figsize=[3.2, 4.2],
-        gridspec_kw=dict(height_ratios=[0.30 * len(ensembles), 4] * 3),
+        gridspec_kw={"height_ratios": [0.30 * len(ensembles), 4] * 3},
     )
     fig.subplots_adjust(hspace=0.0, wspace=0)
+
     for k, rcp in enumerate(rcps):
         y_df = df[df["Year"] == year]
+        if y_df.empty:
+            raise ValueError(f"No rows found in df for Year == {year}.")
+
         q_df = make_quantile_df(y_df, quantiles=[0.05, 0.16, 0.5, 0.84, 0.95])
 
         m_df = y_df[y_df["RCP"] == rcp]
@@ -1144,13 +1241,13 @@ def plot_posterior_sle_pdf(
             data=m_df,
             x="SLE (cm)",
             hue="Ensemble",
-            hue_order=ensembles,
+            hue_order=list(ensembles),
             common_norm=False,
             common_grid=True,
             multiple="layer",
             fill=True,
             lw=0,
-            palette=[color_tint(rcp_col_dict[rcp], alpha) for alpha in m_alphas],
+            palette=[color_tint(rcp_col_dict[rcp], a) for a in m_alphas],
             ax=axs[k * 2 + 1],
         )
 
@@ -1158,19 +1255,18 @@ def plot_posterior_sle_pdf(
             data=m_df,
             x="SLE (cm)",
             hue="Ensemble",
-            hue_order=ensembles,
+            hue_order=list(ensembles),
             common_norm=False,
             common_grid=True,
             multiple="layer",
             fill=False,
             lw=0.8,
-            palette=[color_tint(rcp_col_dict[rcp], alpha) for alpha in m_alphas],
+            palette=[color_tint(rcp_col_dict[rcp], a) for a in m_alphas],
             ax=axs[k * 2 + 1],
         )
 
         for e, ens in enumerate(ensembles):
             s_df = p_df[p_df["Ensemble"] == ens]
-            mk_df = y_df[y_df["Ensemble"] == ens]
 
             alpha = alphas[e]
             m_color = color_tint(rcp_col_dict[rcp], alpha)
@@ -1239,11 +1335,16 @@ def plot_posterior_sle_pdf(
 
         if observed is not None:
             obs = observed[(observed["Year"] >= year) & (observed["Year"] < year + 1)]
-            obs_mean = obs["SLE (cm)"].mean()
-            obs_std = obs["SLE uncertainty (cm)"].mean()
-            axs[(k * 2) + 1].axvline(obs_mean, c="k", lw=0.5)
-            axs[(k * 2) + 1].axvline(obs_mean - 2 * obs_std, c="k", lw=0.5, ls="dotted")
-            axs[(k * 2) + 1].axvline(obs_mean + 2 * obs_std, c="k", lw=0.5, ls="dotted")
+            if not obs.empty:
+                obs_mean = float(obs["SLE (cm)"].mean())
+                obs_std = float(obs["SLE uncertainty (cm)"].mean())
+                axs[(k * 2) + 1].axvline(obs_mean, c="k", lw=0.5)
+                axs[(k * 2) + 1].axvline(
+                    obs_mean - 2 * obs_std, c="k", lw=0.5, ls="dotted"
+                )
+                axs[(k * 2) + 1].axvline(
+                    obs_mean + 2 * obs_std, c="k", lw=0.5, ls="dotted"
+                )
 
     axs[0].set_title(f"Year {year}")
 
@@ -1313,12 +1414,87 @@ def plot_posterior_sle_pdf(
 
 
 def plot_histograms(
-    out_filename,
-    df,
-    X_prior=None,
-    ensembles=["AS19", "Flow Calib.", "Flow+Mass Calib."],
-    palette="binary",
-):
+    out_filename: str | Path,
+    df: pd.DataFrame,
+    X_prior: pd.DataFrame | None = None,
+    ensembles: Sequence[str] = ("AS19", "Flow Calib.", "Flow+Mass Calib."),
+    palette: str = "binary",
+) -> None:
+    """
+    Plot per-parameter histograms (and KDE overlays) for multiple ensembles.
+
+    The figure is a fixed 5×4 grid of subplots, one per parameter key in an
+    internal parameter specification dictionary. For each key, the function
+    draws ensemble-stratified histograms (density normalized) and (for
+    continuous parameters) a KDE overlay. If a prior sample table is provided
+    via ``X_prior``, a dashed prior density is overlaid for matching parameters.
+
+    Parameters
+    ----------
+    out_filename : str or pathlib.Path
+        Output path for the saved figure (any format supported by Matplotlib,
+        e.g. ``.png`` or ``.pdf``).
+    df : pandas.DataFrame
+        Long-form table of samples to plot. Must contain:
+
+        - one column per parameter key referenced by the internal parameter
+          dictionary (e.g., ``"SIAE"``, ``"PPQ"``, ...),
+        - an ``"Ensemble"`` column used for grouping/colouring.
+
+        Additional columns are ignored.
+    X_prior : pandas.DataFrame, optional
+        Prior samples table used to overlay prior densities.
+
+        If provided, it should contain columns matching one or both of the
+        internal key sets:
+
+        - ``m_flow_keys``: continuous flow-parameter subset, used to construct
+          an additional Beta-based prior sample ``X_prior_b`` for plotting;
+        - ``m_star_keys``: additional parameters plotted directly from
+          ``X_prior[m_star_keys]``.
+
+        If None, no prior overlays are drawn.
+    ensembles : sequence of str, optional
+        Ensemble names and plotting order. These must correspond to values in
+        ``df["Ensemble"]``. Default is
+        ``("AS19", "Flow Calib.", "Flow+Mass Calib.")``.
+    palette : str, optional
+        Seaborn palette name to use for ensemble colours. Default is ``"binary"``.
+
+    Returns
+    -------
+    None
+        Saves the figure to ``out_filename`` and closes it.
+
+    Raises
+    ------
+    KeyError
+        If ``"Ensemble"`` or required parameter columns are missing from ``df``,
+        or if expected columns are missing from ``X_prior`` when provided.
+    ValueError
+        If ``ensembles`` is empty or if the plot cannot be constructed due to
+        invalid inputs (e.g., non-numeric parameter columns where densities are
+        required).
+    OSError
+        If the figure cannot be written to ``out_filename``.
+
+    Notes
+    -----
+    This function assumes several module-level objects exist:
+
+    - ``sns`` (seaborn), ``plt`` (matplotlib), and a numeric line width ``lw``.
+    - ``keys_dict``: mapping from parameter key to a label suitable for axis text.
+
+    If you want this function to be fully standalone, pass these as arguments or
+    refactor them into explicit dependencies.
+    """
+    if not ensembles:
+        raise ValueError("ensembles must contain at least one entry.")
+    if "Ensemble" not in df.columns:
+        raise KeyError('df is missing required column: "Ensemble"')
+
+    out_filename = Path(out_filename)
+
     m_flow_keys = [
         "SIAE",
         "PPQ",
@@ -1330,12 +1506,17 @@ def plot_histograms(
         "PHIMAX",
     ]
     m_star_keys = ["GCM", "RFR", "FICE", "FSNOW", "PRS", "OCM", "OCS", "TCT", "VCM"]
-    m_keys = m_flow_keys + m_star_keys
-    m_as19_df = df[df["Ensemble"] == "AS19"][m_keys]
-    m_flow_df = df[df["Ensemble"] == "Flow Calib."][m_flow_keys]
-    m_mass_df = df[df["Ensemble"] == "Flow+Mass Calib."][m_keys]
 
-    p_dict = {
+    # Ensure df has parameter columns we will plot.
+    all_keys = set(m_flow_keys) | set(m_star_keys)
+    missing_df = sorted(k for k in all_keys if k not in df.columns)
+    if missing_df:
+        raise KeyError(
+            f"df is missing parameter columns required for plotting: {missing_df}"
+        )
+
+    # (Your original p_dict is kept as-is; typing note only.)
+    p_dict: Mapping[str, Mapping[str, Any]] = {
         "SIAE": {"axs": [0, 0], "bins": np.linspace(1, 4, 11)},
         "PPQ": {"axs": [0, 1], "bins": np.linspace(0.1, 0.9, 11)},
         "TEFO": {"axs": [0, 2], "bins": np.linspace(0.005, 0.035, 11)},
@@ -1391,13 +1572,22 @@ def plot_histograms(
         },
     }
 
+    # Prior overlay: keep your existing behavior but validate inputs if provided.
+    X_prior_b: np.ndarray | None = None
     if X_prior is not None:
+        missing_prior = sorted(
+            k for k in (set(m_flow_keys) | set(m_star_keys)) if k not in X_prior.columns
+        )
+        if missing_prior:
+            raise KeyError(
+                f"X_prior is missing required columns for prior overlays: {missing_prior}"
+            )
+
         X = X_prior[m_flow_keys]
         X_mean = X.mean(axis=0)
         X_std = X.std(axis=0)
-        X_keys = X_prior.keys()
 
-        n_samples, n_parameters = X.shape
+        _, n_parameters = X.shape
 
         X_min = (((X.min(axis=0) - X_mean) / X_std - 1e-3) * X_std + X_mean).values
         X_max = (((X.max(axis=0) - X_mean) / X_std + 1e-3) * X_std + X_mean).values
@@ -1409,24 +1599,20 @@ def plot_histograms(
             + X_min
         )
 
-    fig, axs = plt.subplots(
-        5,
-        4,
-        figsize=[4.8, 5.2],
-    )
+    fig, axs = plt.subplots(5, 4, figsize=[4.8, 5.2])
     fig.subplots_adjust(hspace=1.25, wspace=0.0)
 
-    cmap = sns.color_palette(palette, n_colors=3)
+    cmap = sns.color_palette(palette, n_colors=len(ensembles))
 
-    for key in p_dict.keys():
-        m_axs = p_dict[key]["axs"]
-        m_bins = p_dict[key]["bins"]
+    for key, val in p_dict.items():
+        m_axs = val["axs"]
+        m_bins = val["bins"]
 
         sns.histplot(
             data=df,
             x=key,
             hue="Ensemble",
-            hue_order=ensembles,
+            hue_order=list(ensembles),
             common_norm=False,
             bins=m_bins,
             palette=palette,
@@ -1437,12 +1623,13 @@ def plot_histograms(
             ax=axs[m_axs[0], m_axs[1]],
             legend=False,
         )
+
         if key not in ["GCM", "OCM", "OCS", "TCT"]:
             sns.kdeplot(
                 data=df,
                 x=key,
                 hue="Ensemble",
-                hue_order=ensembles,
+                hue_order=list(ensembles),
                 clip=[m_bins[0], m_bins[-1]],
                 common_norm=False,
                 warn_singular=False,
@@ -1451,65 +1638,37 @@ def plot_histograms(
                 ax=axs[m_axs[0], m_axs[1]],
                 legend=False,
             )
+
         if (X_prior_b is not None) and (key in m_flow_keys):
             X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_flow_keys)
             X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
             b = 0.5 * (b[1:] + b[:-1])
-
             axs[m_axs[0], m_axs[1]].plot(
-                b,
-                X_prior_hist,
-                color="k",
-                linewidth=lw,
-                linestyle="dashed",
+                b, X_prior_hist, color="k", linewidth=lw, linestyle="dashed"
             )
-        elif (X_prior_b is not None) and (key in m_star_keys):
-            X_prior_b = X_prior[m_star_keys]
-            X_prior_m = pd.DataFrame(data=X_prior_b, columns=m_star_keys)
+
+        elif (X_prior is not None) and (key in m_star_keys):
+            X_prior_star = X_prior[m_star_keys]
+            X_prior_m = pd.DataFrame(data=X_prior_star, columns=m_star_keys)
             X_prior_hist, b = np.histogram(X_prior_m[key], m_bins, density=True)
             b = 0.5 * (b[1:] + b[:-1])
+
             if key not in ["GCM", "OCM", "OCS", "TCT"]:
                 axs[m_axs[0], m_axs[1]].plot(
-                    b,
-                    X_prior_hist,
-                    color="k",
-                    linewidth=lw,
-                    linestyle="dashed",
+                    b, X_prior_hist, color="k", linewidth=lw, linestyle="dashed"
                 )
             else:
-                axs[m_axs[0], m_axs[1]].plot(
-                    b[::2],
-                    X_prior_hist[::2],
-                    "s",
-                    color="k",
-                )
-        else:
-            pass
+                axs[m_axs[0], m_axs[1]].plot(b[::2], X_prior_hist[::2], "s", color="k")
 
     handles: list[Any] = [
-        Patch(
-            facecolor=cmap[k],
-            edgecolor="0.0",
-            linewidth=0.25,
-            label=ens,
-        )
+        Patch(facecolor=cmap[k], edgecolor="0.0", linewidth=0.25, label=ens)
         for k, ens in enumerate(ensembles)
     ]
     if X_prior_b is not None:
-        l_p = Line2D(
-            [],
-            [],
-            c="k",
-            lw=lw,
-            ls="dashed",
-            label="Prior",
-        )
+        handles.append(Line2D([], [], c="k", lw=lw, ls="dashed", label="Prior"))
 
-        handles.append(l_p)
     legend_1 = axs[4, 2].legend(
-        handles=handles,
-        loc="lower left",
-        bbox_to_anchor=(0, -0.2),
+        handles=handles, loc="lower left", bbox_to_anchor=(0, -0.2)
     )
     legend_1.get_frame().set_linewidth(0.0)
     legend_1.get_frame().set_alpha(0.0)
@@ -1519,53 +1678,21 @@ def plot_histograms(
     axs[4, 3].set_axis_off()
 
     axs[0, 0].text(
-        0,
-        1.05,
-        r"$\mathbf{m}_{\mathrm{flow}}$",
-        transform=axs[0, 0].transAxes,
-        size=8,
+        0, 1.05, r"$\mathbf{m}_{\mathrm{flow}}$", transform=axs[0, 0].transAxes, size=8
     )
     axs[2, 0].text(0, 1.05, r"$\mathbf{m}^{*}$", transform=axs[2, 0].transAxes, size=8)
-    for ax in axs.flatten():
-        ticklabels = ax.get_xticklabels()
-        for tick in ticklabels:
-            tick.set_rotation(30)
 
+    for ax in axs.flatten():
+        for tick in ax.get_xticklabels():
+            tick.set_rotation(30)
         ax.get_yaxis().set_visible(False)
         key = ax.get_xlabel()
         if key != "":
             ax.set_xlabel(keys_dict[key])
-            # ax.text(0, 0.9, keys_dict[key],
-            #         transform=ax.transAxes,
-            #         )
 
     fig.tight_layout()
     fig.savefig(out_filename)
     plt.close(fig)
-
-
-def plot_prior_histograms(out_filename: str, df: pd.DataFrame) -> None:
-    """
-    Plot histograms of prior distributions.
-
-    Parameters
-    ----------
-    out_filename : str
-        Output path for the saved figure.
-    df : pandas.DataFrame
-        DataFrame containing prior samples/parameters to be visualized.
-
-    Returns
-    -------
-    None
-        This function currently does nothing and always returns ``None``.
-
-    Notes
-    -----
-    This is a stub. Implement plotting logic (e.g., via Matplotlib/Seaborn)
-    or remove the function if it is not used.
-    """
-    return None
 
 
 @overload
@@ -1960,7 +2087,6 @@ params = {
     "ytick.major.width": 0.25,
     "legend.fontsize": fontsize,
     "lines.markersize": markersize,
-    "font.size": fontsize,
     "hatch.linewidth": 0.25,
 }
 

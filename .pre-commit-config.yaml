@@ -41,17 +41,17 @@ repos:
         additional_dependencies: [types-toml, types-requests]
 
 
-  # - repo: local
-  #   hooks:
-  #     - id: pylint
-  #       name: pylint
-  #       entry: pylint
-  #       language: system
-  #       types: [python]
-  #       require_serial: true
-  #       args:
-  #         [
-  #           "-rn", # Only display messages
-  #           "-sn", # Don't display the score
-  #           "--extension-pkg-whitelist=scipy",
-  #         ]
+  - repo: local
+    hooks:
+      - id: pylint
+        name: pylint
+        entry: pylint
+        language: system
+        types: [python]
+        require_serial: true
+        args:
+          [
+            "-rn", # Only display messages
+            "-sn", # Don't display the score
+            "--extension-pkg-whitelist=scipy",
+          ]

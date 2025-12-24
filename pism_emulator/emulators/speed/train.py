@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+# pylint: disable=too-many-statements,redefined-builtin
 """
 Surrogate model training.
 """
@@ -30,7 +32,7 @@ from typing import Any, Mapping
 import lightning as pl
 import numpy as np
 import torch
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint, Timer
+from lightning.pytorch.callbacks import Callback, Timer
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from pyfiglet import Figlet
@@ -189,7 +191,6 @@ def main():
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--cutoff", type=float, default=None)
     parser.add_argument("--devices", default="auto")
-    parser.add_argument("--drop-out", type=float, default=0.1)
     parser.add_argument("--emulator-dir", default="emulator_ensemble")
     parser.add_argument("--engine", default="netcdf4")
     parser.add_argument("--max-epochs", type=int, default=1000)
@@ -239,7 +240,6 @@ def main():
     num_workers = args.num_workers
     max_epochs = args.max_epochs
     q = args.q
-    p = args.drop_out
     samples_file = args.samples_file
     strategy = args.strategy
     target_file = args.target_file
@@ -271,7 +271,6 @@ def main():
     X = dataset.samples.X
     F = dataset.samples.Y
     area = dataset.samples.normed_area
-    n_grid_points = dataset.samples.n_grid_points
     n_parameters = dataset.samples.n_parameters
     n_samples = dataset.samples.n_samples
 

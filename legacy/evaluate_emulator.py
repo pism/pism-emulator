@@ -1,6 +1,6 @@
 #!/bin/env python3
 
-# Copyright (C) 2021 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021,25 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -18,9 +18,16 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=bare-except,possibly-used-before-assignment,redefined-builtin
+
+"""
+Evaluate emulators.
+"""
+
+import inspect
 from argparse import ArgumentParser
-from os import mkdir
-from os.path import abspath, dirname, isdir, join, realpath
+from os.path import abspath, dirname, join, realpath
+from pathlib import Path
 
 import numpy as np
 import pylab as plt
@@ -35,10 +42,37 @@ from pism_emulator.emulators.nnemulator import LegacyNNEmulator as NNEmulator
 from pism_emulator.utils import param_keys_dict as keys_dict
 
 
-def current_script_directory():
-    import inspect
+def current_script_directory() -> str:
+    """
+    Return the absolute directory containing the calling script.
 
-    filename = inspect.stack(0)[0][1]
+    This helper inspects the current call stack to find the file path of the
+    frame at index 0 (the immediate call site within this function) and returns
+    its directory as an absolute path.
+
+    Returns
+    -------
+    str
+        Absolute path to the directory containing the script file.
+
+    Raises
+    ------
+    RuntimeError
+        If the script path cannot be determined (e.g., in some interactive
+        environments where frames may not have a filename).
+
+    Notes
+    -----
+    In notebooks, REPLs, or frozen/packaged applications, stack-based filename
+    inspection can be unreliable. If you need a more robust approach, consider
+    passing a reference path explicitly or using ``__file__`` when available.
+    """
+    frame = inspect.stack(context=0)[0]
+    filename = frame.filename
+    if not filename:
+        raise RuntimeError(
+            "Unable to determine current script directory from call stack."
+        )
     return realpath(dirname(filename))
 
 
@@ -325,9 +359,8 @@ if __name__ == "__main__":
     else:
         mode = "train"
 
-    fig_dir = f"{emulator_dir}/{mode}"
-    if not isdir(fig_dir):
-        mkdir(fig_dir)
+    fig_dir = Path(f"{emulator_dir}/{mode}")
+    fig_dir.mkdir(parents=True, exist_ok=True)
 
     fig_name = join(fig_dir, f"speed_emulator_{mode}.pdf")
     print(f"Saving to {fig_name}")

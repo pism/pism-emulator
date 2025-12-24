@@ -18,15 +18,16 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=redefined-builtin,too-many-branches,too-many-statements
+
 """
 Evaluate emulators.
 """
 
+import inspect
 import random
 from argparse import ArgumentParser
-from glob import glob
-from os import mkdir
-from os.path import abspath, dirname, isdir, join, realpath
+from os.path import dirname, realpath
 from pathlib import Path
 from typing import Mapping
 
@@ -36,6 +37,7 @@ import matplotlib.pylab as plt
 import numpy as np
 import torch
 from matplotlib.colors import LogNorm
+from matplotlib.figure import Figure
 from scipy.stats import pearsonr
 from sklearn.metrics import mean_absolute_error, r2_score
 from tqdm.auto import tqdm
@@ -63,7 +65,53 @@ rcparams = {
 mpl.rcParams.update(rcparams)
 
 
-def add_final_score_footer(fig, mae, mbe, rmse, r, r2, y=0.01, fontsize=9):
+def add_final_score_footer(
+    fig: Figure,
+    mae: float,
+    mbe: float,
+    rmse: float,
+    r: float,
+    r2: float,
+    y: float = 0.01,
+    fontsize: int = 9,
+) -> None:
+    """
+    Add a formatted summary of evaluation metrics to the bottom of a figure.
+
+    The footer is added using :meth:`matplotlib.figure.Figure.supxlabel`, which
+    generally cooperates well with ``constrained_layout`` and reserves space for
+    the label.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure that will receive the footer.
+    mae : float
+        Mean Absolute Error in m/yr.
+    mbe : float
+        Mean Bias Error (signed) in m/yr.
+    rmse : float
+        Root Mean Squared Error in m/yr.
+    r : float
+        Pearson correlation coefficient.
+    r2 : float
+        Coefficient of determination (r-squared).
+    y : float, optional
+        Vertical position of the footer in figure coordinates. Default is 0.01.
+    fontsize : int, optional
+        Font size used for the footer text. Default is 9.
+
+    Returns
+    -------
+    None
+        The function modifies ``fig`` in place.
+
+    Notes
+    -----
+    Values are formatted for display (e.g., MAE/MBE with two decimals, RMSE with
+    zero decimals). If you need different units or precision, pass pre-scaled
+    values or adjust the formatting in this function.
+    """
     score = (
         f"MAE={mae:.2f} m/yr, "
         f"MBE={mbe:.2f} m/yr, "
@@ -71,14 +119,40 @@ def add_final_score_footer(fig, mae, mbe, rmse, r, r2, y=0.01, fontsize=9):
         f"Pearson r={r:.2f}, "
         f"r²={r2:.2f}"
     )
-    # `supxlabel` plays nicely with constrained_layout and reserves space
     fig.supxlabel(f"Mean Score: {score}", y=y, fontsize=fontsize)
 
 
-def current_script_directory():
-    import inspect
+def current_script_directory() -> str:
+    """
+    Return the absolute directory containing the calling script.
 
-    filename = inspect.stack(0)[0][1]
+    This helper inspects the current call stack to find the file path of the
+    frame at index 0 (the immediate call site within this function) and returns
+    its directory as an absolute path.
+
+    Returns
+    -------
+    str
+        Absolute path to the directory containing the script file.
+
+    Raises
+    ------
+    RuntimeError
+        If the script path cannot be determined (e.g., in some interactive
+        environments where frames may not have a filename).
+
+    Notes
+    -----
+    In notebooks, REPLs, or frozen/packaged applications, stack-based filename
+    inspection can be unreliable. If you need a more robust approach, consider
+    passing a reference path explicitly or using ``__file__`` when available.
+    """
+    frame = inspect.stack(context=0)[0]
+    filename = frame.filename
+    if not filename:
+        raise RuntimeError(
+            "Unable to determine current script directory from call stack."
+        )
     return realpath(dirname(filename))
 
 
@@ -86,7 +160,9 @@ script_directory = current_script_directory()
 
 
 def main():
-
+    """
+    Main.
+    """
     parser = ArgumentParser()
     parser.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
     tmp, _ = parser.parse_known_args()
@@ -119,7 +195,6 @@ def main():
         Emulator = DNNEmulator
 
     args = parser.parse_args()
-    hparams = vars(args)
 
     emulator_dir = args.emulator_dir
     emulator_files = args.EMULATOR_FILES
@@ -214,7 +289,7 @@ def main():
     n_emulators = len(emulator_files)
 
     n_glaciers = len(glaciers)
-    p_emulators = tqdm(
+    _ = tqdm(
         total=n_emulators, position=0, leave=True, desc="Emulators", dynamic_ncols=True
     )
     p_glaciers = tqdm(
@@ -290,13 +365,13 @@ def main():
             F_val_2d = np.ma.array(data=F_val_2d, mask=mask)
             F_pred_2d = np.ma.array(data=F_pred_2d, mask=mask)
 
-            c1 = axs_top[0, k].imshow(
+            _ = axs_top[0, k].imshow(
                 F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
             )
             axs_top[1, k].imshow(
                 F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
             )
-            c2 = axs_top[2, k].imshow(
+            _ = axs_top[2, k].imshow(
                 F_pred_2d - F_val_2d,
                 origin="lower",
                 vmin=-50,
@@ -359,9 +434,8 @@ def main():
     else:
         mode = "train"
 
-    fig_dir = f"{emulator_dir}/{mode}"
-    if not isdir(fig_dir):
-        mkdir(fig_dir)
+    fig_dir = Path(f"{emulator_dir}/{mode}")
+    fig_dir.mkdir(parents=True, exist_ok=True)
 
     fig_name = fig_dir / Path(f"speed_emulator_{mode}.pdf")
     print(f"Saving to {fig_name.resolve()}")

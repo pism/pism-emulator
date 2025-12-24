@@ -1,5 +1,5 @@
 #!/bin/env python3
-# Copyright (C) 2021-22 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-22,25 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -16,6 +16,11 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+# pylint: disable=redefined-builtin,no-member
+"""
+Plotting.
+"""
 
 from argparse import ArgumentParser
 from os.path import join
@@ -51,7 +56,6 @@ params = {
     "ytick.major.width": 0.25,
     "legend.fontsize": fontsize,
     "lines.markersize": markersize,
-    "font.size": fontsize,
 }
 
 plt.rcParams.update(params)
@@ -185,7 +189,7 @@ if __name__ == "__main__":
                 axs[i, j].text(
                     0.5,
                     0.5,
-                    "{0:.2f}".format(C_0[i, j]),
+                    f"{C_0[i, j]:.2f}",
                     fontsize=6,
                     horizontalalignment="center",
                     verticalalignment="center",

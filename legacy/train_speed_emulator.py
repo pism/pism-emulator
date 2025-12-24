@@ -18,6 +18,11 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=redefined-builtin
+"""
+Train the speed emulator.
+"""
+import inspect
 import os
 import random
 import warnings
@@ -43,10 +48,37 @@ torch.set_float32_matmul_precision("high")  # faster GEMMs on Ada/L40S
 torch.backends.cudnn.benchmark = True
 
 
-def current_script_directory():
-    import inspect
+def current_script_directory() -> str:
+    """
+    Return the absolute directory containing the calling script.
 
-    filename = inspect.stack(0)[0][1]
+    This helper inspects the current call stack to find the file path of the
+    frame at index 0 (the immediate call site within this function) and returns
+    its directory as an absolute path.
+
+    Returns
+    -------
+    str
+        Absolute path to the directory containing the script file.
+
+    Raises
+    ------
+    RuntimeError
+        If the script path cannot be determined (e.g., in some interactive
+        environments where frames may not have a filename).
+
+    Notes
+    -----
+    In notebooks, REPLs, or frozen/packaged applications, stack-based filename
+    inspection can be unreliable. If you need a more robust approach, consider
+    passing a reference path explicitly or using ``__file__`` when available.
+    """
+    frame = inspect.stack(context=0)[0]
+    filename = frame.filename
+    if not filename:
+        raise RuntimeError(
+            "Unable to determine current script directory from call stack."
+        )
     return realpath(dirname(filename))
 
 
