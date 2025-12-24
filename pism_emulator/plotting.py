@@ -21,8 +21,7 @@ Plotting.
 
 from __future__ import annotations
 
-from os import mkdir
-from os.path import isdir, join
+from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
@@ -151,15 +150,75 @@ def plot_compare(
 
 
 def plot_eigenglaciers(
-    dataset,
-    data_loader,
-    model_index,
-    emulator_dir,
-    nrows=2,
-    ncols=3,
-    figsize=(3.2, 3.6),
+    dataset: Any,
+    data_loader: Any,
+    model_index: int,
+    emulator_dir: str | Path,
+    nrows: int = 2,
+    ncols: int = 3,
+    figsize: tuple[float, float] = (3.2, 3.6),
     q: int = 6,
-):
+) -> None:
+    """
+    Plot and save eigenglacier basis vectors as 2D fields.
+
+    This function retrieves the first ``q`` eigenglaciers from ``data_loader``,
+    maps each basis vector from a sparse 1D representation back to a 2D grid
+    using indices and masking provided by ``dataset.target``, and saves a PDF
+    figure containing the first ``nrows * ncols`` eigenglaciers. Each panel is
+    annotated with the corresponding normalized eigenvalue contribution
+    (percentage of total).
+
+    Parameters
+    ----------
+    dataset : Any
+        Dataset providing grid metadata through ``dataset.target``. The target is
+        expected to define:
+
+        - ``nx`` and ``ny``: grid dimensions (ints)
+        - ``sparse_idx_1d``: 1D indices into a flattened ``(ny, nx)`` array
+        - ``mask_2d``: boolean mask with shape ``(ny, nx)`` (True = masked)
+    data_loader : Any
+        Object providing eigenglaciers via ``get_eigenglaciers(q=...)`` returning
+        ``(V_hat, _, _, lamda)`` where:
+
+        - ``V_hat`` has shape ``(n_nodes, q)``
+        - ``lamda`` has shape ``(q,)`` and contains eigenvalues
+    model_index : int
+        Identifier used in the output filename
+        (``eigenglaciers_{model_index}.pdf``).
+    emulator_dir : str or pathlib.Path
+        Base directory where the figure will be written under the subdirectory
+        ``eigenglaciers``.
+    nrows : int, optional
+        Number of subplot rows. Default is 2.
+    ncols : int, optional
+        Number of subplot columns. Default is 3.
+    figsize : tuple of float, optional
+        Figure size in inches ``(width, height)``. Default is ``(3.2, 3.6)``.
+    q : int, optional
+        Number of eigenglaciers to retrieve from the loader. Default is 6.
+
+    Returns
+    -------
+    None
+        The figure is saved to disk.
+
+    Raises
+    ------
+    ValueError
+        If ``q <= 0`` or if the loader returns arrays with incompatible shapes.
+    ZeroDivisionError
+        If the eigenvalue sum is zero (cannot compute percentages).
+    OSError
+        If the output directory cannot be created or the figure cannot be saved.
+
+    Notes
+    -----
+    Only the first ``nrows * ncols`` eigenglaciers are plotted. If
+    ``nrows * ncols > q`` this function will raise an ``IndexError`` unless you
+    guard against it (e.g., by iterating to ``min(q, nrows*ncols)``).
+    """
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(q=q)
 
     lamda_scaled = lamda / lamda.sum() * 100
@@ -184,23 +243,84 @@ def plot_eigenglaciers(
         ax.axis("off")
     fig.subplots_adjust(wspace=0.05, hspace=0.05)
     plt.tight_layout()
-    fig_dir = f"{emulator_dir}/eigenglaciers"
-    if not isdir(fig_dir):
-        mkdir(fig_dir)
 
-    fig.savefig(join(fig_dir, f"eigenglaciers_{model_index}.pdf"))
+    fig_dir = Path(emulator_dir) / "eigenglaciers"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    fig.savefig(fig_dir / f"eigenglaciers_{model_index}.pdf")
 
 
 def plot_legacy_eigenglaciers(
-    dataset,
-    data_loader,
-    model_index,
-    emulator_dir,
-    nrows=2,
-    ncols=3,
-    figsize=(3.2, 3.6),
+    dataset: Any,
+    data_loader: Any,
+    model_index: int,
+    emulator_dir: str | Path,
+    nrows: int = 2,
+    ncols: int = 3,
+    figsize: tuple[float, float] = (3.2, 3.6),
     q: int = 6,
-):
+) -> None:
+    """
+    Plot and save legacy eigenglacier basis vectors as 2D fields.
+
+    This is the legacy variant of :func:`plot_eigenglaciers`. It expects grid
+    metadata to be available directly on ``dataset`` (rather than
+    ``dataset.target``). The function retrieves eigenglaciers from ``data_loader``,
+    maps each basis vector from a sparse 1D representation back to a 2D grid,
+    and saves a PDF containing the first ``nrows * ncols`` eigenglaciers. Each
+    panel is annotated with the corresponding normalized eigenvalue contribution
+    (percentage of total).
+
+    Parameters
+    ----------
+    dataset : Any
+        Dataset providing grid metadata directly. Expected attributes:
+
+        - ``nx`` and ``ny``: grid dimensions (ints)
+        - ``sparse_idx_1d``: 1D indices into a flattened ``(ny, nx)`` array
+        - ``mask_2d``: boolean mask with shape ``(ny, nx)`` (True = masked)
+    data_loader : Any
+        Object providing eigenglaciers via
+        ``get_eigenglaciers(eigenvalues=True, q=...)`` returning
+        ``(V_hat, _, _, lamda)`` where:
+
+        - ``V_hat`` has shape ``(n_nodes, q)``
+        - ``lamda`` has shape ``(q,)`` and contains eigenvalues
+    model_index : int
+        Identifier used in the output filename
+        (``eigenglaciers_{model_index}.pdf``).
+    emulator_dir : str or pathlib.Path
+        Base directory where the figure will be written under the subdirectory
+        ``eigenglaciers``.
+    nrows : int, optional
+        Number of subplot rows. Default is 2.
+    ncols : int, optional
+        Number of subplot columns. Default is 3.
+    figsize : tuple of float, optional
+        Figure size in inches ``(width, height)``. Default is ``(3.2, 3.6)``.
+    q : int, optional
+        Number of eigenglaciers to retrieve from the loader. Default is 6.
+
+    Returns
+    -------
+    None
+        The figure is saved to disk.
+
+    Raises
+    ------
+    ValueError
+        If ``q <= 0`` or if the loader returns arrays with incompatible shapes.
+    ZeroDivisionError
+        If the eigenvalue sum is zero (cannot compute percentages).
+    OSError
+        If the output directory cannot be created or the figure cannot be saved.
+
+    Notes
+    -----
+    Only the first ``nrows * ncols`` eigenglaciers are plotted. If
+    ``nrows * ncols > q`` this function will raise an ``IndexError`` unless you
+    guard against it (e.g., by iterating to ``min(q, nrows*ncols)``).
+    """
     V_hat, _, _, lamda = data_loader.get_eigenglaciers(eigenvalues=True, q=q)
 
     lamda_scaled = lamda / lamda.sum() * 100
@@ -225,8 +345,8 @@ def plot_legacy_eigenglaciers(
         ax.axis("off")
     fig.subplots_adjust(wspace=0.05, hspace=0.05)
     plt.tight_layout()
-    fig_dir = f"{emulator_dir}/eigenglaciers"
-    if not isdir(fig_dir):
-        mkdir(fig_dir)
 
-    fig.savefig(join(fig_dir, f"eigenglaciers_{model_index}.pdf"))
+    fig_dir = Path(emulator_dir) / "eigenglaciers"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    fig.savefig(fig_dir / f"eigenglaciers_{model_index}.pdf")

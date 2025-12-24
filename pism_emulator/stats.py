@@ -422,7 +422,9 @@ def stepwise_bic(
                 cand_mains = [m for m in cand_mains if m != term]
                 # remove any interactions involving this main
                 cand_inters = [
-                    (a, b) for (a, b) in cand_inters if (a != term and b != term)
+                    (a, b)
+                    for (a, b) in cand_inters
+                    if (a != term and b != term)  # pylint: disable=consider-using-in
                 ]
             elif action == "add_inter":
                 a, b = payload

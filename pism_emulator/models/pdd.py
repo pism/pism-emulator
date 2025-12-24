@@ -1,4 +1,4 @@
-# Copyright (C) 2023-24 Andy Aschwanden
+# Copyright (C) 2023-25 Andy Aschwanden
 #
 # This file is part of pism-emulator.
 #
@@ -16,18 +16,22 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+# pylint: disable=too-many-lines,too-many-instance-attributes
+
+"""
+PPD model implementations.
+"""
+
 import argparse
 from collections.abc import Callable
 from functools import wraps
-from types import SimpleNamespace
-from typing import Any, Sequence, TypeAlias, TypedDict, TypeVar, Union, cast
+from typing import Any, TypeAlias, TypedDict, TypeVar, cast
 
 import lightning as pl
 import numpy as np
 import numpy.typing as npt
 import scipy.special as sp
 import torch
-import xarray as xr
 from scipy.interpolate import interp1d
 from torch import Tensor
 
@@ -415,7 +419,6 @@ class ReferencePDDModel:
         ValueError
             If the input has fewer than 1 time sample.
         """
-        from scipy.interpolate import interp1d
 
         rule: str = str(self.interpolate_rule)
         npts: int = int(self.interpolate_n)
@@ -460,7 +463,6 @@ class ReferencePDDModel:
         Where ``stdv == 0``, this reduces to the positive part of ``temp``.
         The result is multiplied by 365.242198781 to convert to degree-days.
         """
-        import scipy.special as sp
 
         t = _as_float_array(temp)
         s = _as_float_array(stdv)
@@ -474,7 +476,9 @@ class ReferencePDDModel:
 
         calovgreve = s / np.sqrt(2.0 * np.pi) * np.exp(-(normtemp**2)) + (
             t / 2.0
-        ) * sp.erfc(-normtemp)
+        ) * sp.erfc(  # pylint: disable=no-member
+            -normtemp
+        )
 
         teff = np.where(s == 0.0, positivepart, calovgreve)
         return _as_float_array(teff) * 365.242198781
@@ -685,32 +689,16 @@ class PDD(pl.LightningModule):
 
         return parent_parser
 
-    def forward(self, x: Sequence[Tensor], **kwargs):
+    def forward(self, *args: Any, **kwargs: Any) -> Tensor:
         """
         Compute PDD diagnostics from parameter tensors.
 
         Parameters
         ----------
-        x : Sequence[torch.Tensor]
-            Ordered sequence of six parameter tensors:
-
-            ``(pdd_factor_snow, pdd_factor_ice, refreeze_snow, refreeze_ice,
-            temp_snow, temp_rain)``.
-
-            Parameters must be broadcast-compatible with the internal ``temp`` and
-            ``precip`` buffers. Scalars are allowed.
-
-            Interpreted units/conventions:
-            * ``pdd_factor_snow`` : snow degree-day factor, mm w.e. d⁻¹ °C⁻¹
-            * ``pdd_factor_ice``  : ice degree-day factor, mm w.e. d⁻¹ °C⁻¹
-            * ``refreeze_snow``   : fraction of snow melt that refreezes (0–1)
-            * ``refreeze_ice``    : fraction of ice melt that refreezes (0–1)
-            * ``temp_snow``       : °C, snow/rain transition lower bound
-            * ``temp_rain``       : °C, snow/rain transition upper bound
-
+        *args
+            Positional arguments. If provided, ``args[0]`` must be ``X``.
         **kwargs
-            Additional keyword arguments accepted for API compatibility.
-            Currently unused.
+            Keyword arguments. Must contain ``X`` if ``*args`` is empty.
 
         Returns
         -------
@@ -731,6 +719,13 @@ class PDD(pl.LightningModule):
           fraction in ``[temp_snow, temp_rain]`` and are clamped outside this range.
         * Gradients flow through the linear region; clamps have zero gradients outside.
         """
+        if args:
+            X = args[0]
+        elif "X" in kwargs:
+            X = kwargs["X"]
+        else:
+            raise TypeError("forward() missing required argument: X")
+
         (
             pdd_factor_snow,
             pdd_factor_ice,
@@ -738,7 +733,7 @@ class PDD(pl.LightningModule):
             refreeze_ice,
             temp_snow,
             temp_rain,
-        ) = x
+        ) = X
 
         inst_pdd = self.inst_pdd(self.temp, self.stdv)
         accumulation_rate = self.accumulation_rate(
@@ -1032,17 +1027,21 @@ class VecPDD(pl.LightningModule):
 
         return parent_parser
 
-    def forward(self, x: Sequence[Tensor], **kwargs):
+    def forward(self, *args: Any, **kwargs: Any) -> Tensor:
         """
         Compute PDD diagnostics from parameter tensors.
 
         Parameters
         ----------
-        x : Sequence[torch.Tensor]
-            Ordered sequence of six parameter tensors:
+        *args
+            Positional arguments. If provided, ``args[0]`` must be ``X``.
+        **kwargs
+            Keyword arguments. Must contain ``X`` if ``*args`` is empty.
 
-            ``(pdd_factor_snow, pdd_factor_ice, refreeze_snow, refreeze_ice,
-            temp_snow, temp_rain)``.
+        Returns
+        -------
+        torch.Tensor
+            Model prediction consistent with ``Y_target`` shape.
 
             Parameters must be broadcast-compatible with the internal ``temp`` and
             ``precip`` buffers. Scalars are allowed.
@@ -1055,19 +1054,6 @@ class VecPDD(pl.LightningModule):
             * ``temp_snow``       : °C, snow/rain transition lower bound
             * ``temp_rain``       : °C, snow/rain transition upper bound
 
-        **kwargs
-            Additional keyword arguments accepted for API compatibility.
-            Currently unused.
-
-        Returns
-        -------
-        dict[str, torch.Tensor] or torch.Tensor
-            If ``predictor_vars`` is None, returns a diagnostics dictionary with
-            keys including (non-exhaustive): ``"inst_pdd"``, ``"accumulation_rate"``,
-            ``"snow_melt_rate"``, ``"ice_melt_rate"``, ``"runoff_rate"``, ``"inst_smb"``,
-            and annual integrals such as ``"pdd"``, ``"accumulation"``, ``"melt"``,
-            ``"runoff"``, ``"refreeze"``, ``"smb"``, etc.
-
             If ``predictor_vars`` is provided, returns a 2D tensor of shape
             ``(N, K)`` where ``K = len(predictor_vars)`` and ``N`` is the number of
             elements in the broadcasted field (flattened by the stacking logic).
@@ -1078,6 +1064,13 @@ class VecPDD(pl.LightningModule):
           fraction in ``[temp_snow, temp_rain]`` and are clamped outside this range.
         * Gradients flow through the linear region; clamps have zero gradients outside.
         """
+        if args:
+            X = args[0]
+        elif "X" in kwargs:
+            X = kwargs["X"]
+        else:
+            raise TypeError("forward() missing required argument: X")
+
         (
             pdd_factor_snow,
             pdd_factor_ice,
@@ -1085,7 +1078,7 @@ class VecPDD(pl.LightningModule):
             refreeze_ice,
             temp_snow,
             temp_rain,
-        ) = x
+        ) = X
 
         inst_pdd = self.inst_pdd(self.temp, self.stdv)
         accumulation_rate = self.accumulation_rate(
@@ -1190,7 +1183,6 @@ class VecPDD(pl.LightningModule):
         positivepart = torch.clamp(temp, min=0.0)
 
         sqrt2 = temp.new_tensor(2.0).sqrt()
-        sqrt2pi = temp.new_tensor(2.0 * torch.pi).sqrt()
         normtemp = temp / (sqrt2 * stdv)
         calovgreve = stdv / torch.sqrt(
             torch.tensor(2.0 * torch.pi, device=temp.device)
