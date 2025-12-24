@@ -88,17 +88,12 @@ script_directory = current_script_directory()
 def main():
 
     parser = ArgumentParser()
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
+    parser.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
     tmp, _ = parser.parse_known_args()
     parser.add_argument("--emulator-dir", default="emulator_ensemble")
     parser.add_argument("--mode", choices=["train", "validation"], default="train")
     parser.add_argument(
-        "--samples-file",
-        default=abspath(
-            join(
-                script_directory, "../data/samples/velocity_calibration_samples_50.csv"
-            )
-        ),
+        "--samples-file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
     parser.add_argument(
         "--target-file",
@@ -144,7 +139,6 @@ def main():
     training_files = args.training_files
     torch.manual_seed(0)
     rng = np.random.default_rng(2021)
-
     dataset = PISMDataset(
         training_files=training_files,
         samples_file=samples_file,
@@ -156,7 +150,8 @@ def main():
     )
     X = dataset.samples.X
     F = dataset.samples.Y
-    y_params = dataset.y_transform_params
+    y_params = dict(dataset.cfg.y_transform_kwargs or {})
+
     n_members = len(F)
     if sample_size <= n_members:
         glaciers = sorted(random.sample(range(n_members), k=sample_size))

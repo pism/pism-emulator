@@ -15,7 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-
+"""
+Test Torch PDD models.
+"""
 
 from typing import Literal
 
@@ -248,7 +250,7 @@ def make_fake_climate_2d(filename: str | None = None) -> xr.Dataset:
         "snow_depth": {"long_name": "depth of snow cover", "units": "m"},
     }
 
-    # FIXME code could be simplified a lot more but we need a better test not
+    # code could be simplified a lot more but we need a better test not
     # relying on exact reproducibility of this toy climate data.
 
     # assign coordinate values

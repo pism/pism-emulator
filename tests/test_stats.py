@@ -1,4 +1,4 @@
-# Copyright (C) 2019 Rachel Chen, Andy Aschwanden
+# Copyright (C) 2019-25 Rachel Chen, Andy Aschwanden
 #
 # This file is part of pism-emulator.
 #
@@ -15,7 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-
+"""
+Test statistical functions.
+"""
 import math
 from io import StringIO
 
@@ -23,7 +25,6 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import pytest
-from numpy.testing import assert_array_almost_equal
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression
 
@@ -40,6 +41,14 @@ from pism_emulator.stats import calc_bic, gelman_rubin, kl_divergence, stepwise_
 
 @pytest.fixture(name="dp16data")
 def fixture_dp16_df() -> pd.DataFrame:
+    """
+    Create Deconto and Pollard dataset.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with DP16.
+    """
     dp16_data = StringIO(
         """
 , OCFAC, CREVLIQ, VCLIF, BIAS, LIG, PLIO, RCP45_pres, RCP26_2100, RCP45_2100, RCP85_2100
@@ -351,7 +360,7 @@ def test_stepwise_bic(dp16data: pd.DataFrame) -> None:
         "OCFAC*VCLIF",
     ]
 
-    selected, model, X_final, history = stepwise_bic(
+    selected, _, _, _ = stepwise_bic(
         X,
         Y,
         varnames=list(X.columns) if isinstance(X, pd.DataFrame) else None,
@@ -366,7 +375,7 @@ def test_stepwise_bic(dp16data: pd.DataFrame) -> None:
     )
     assert selected == dp16_no_interactions
 
-    selected, model, X_final, history = stepwise_bic(
+    selected, _, _, _ = stepwise_bic(
         X,
         Y,
         varnames=list(X.columns) if isinstance(X, pd.DataFrame) else None,
@@ -403,7 +412,7 @@ def test_calc_bic_linear_regression():
     assert np.isfinite(bic), "BIC should be a finite number."
     assert isinstance(bic, float), "BIC should be a float."
     # Check reasonable magnitude
-    assert bic > -1e5 and bic < 1e5, "BIC seems unreasonably large or small."
+    assert -1e5 < bic < 1e5, "BIC seems unreasonably large or small."
 
 
 def test_calc_bic_logistic_regression():

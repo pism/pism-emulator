@@ -21,11 +21,10 @@
 Surrogate model training.
 """
 
-import os
 import random
 import warnings
 from argparse import ArgumentParser
-from os.path import abspath, dirname, join, realpath
+from pathlib import Path
 from typing import Any, Mapping
 
 import lightning as pl
@@ -182,7 +181,7 @@ def main():
     """
     parser = ArgumentParser()
     parser.add_argument(
-        "--emulator", choices=["NN", "NN5", "DNN", "LegacyNN"], default="NN"
+        "--emulator", choices=["NN", "NN5", "DNN", "LegacyNN"], default="DNN"
     )
     tmp, _ = parser.parse_known_args()
 
@@ -190,15 +189,13 @@ def main():
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--cutoff", type=float, default=None)
     parser.add_argument("--devices", default="auto")
+    parser.add_argument("--drop-out", type=float, default=0.1)
     parser.add_argument("--emulator-dir", default="emulator_ensemble")
     parser.add_argument("--engine", default="netcdf4")
-    parser.add_argument("--y-transform", default="log10")
     parser.add_argument("--max-epochs", type=int, default=1000)
     parser.add_argument("--model-index", type=int, default=0)
     parser.add_argument("--num-workers", type=int, default=1)
     parser.add_argument("-q", type=int, default=100)
-    parser.add_argument("--drop-out", type=float, default=0.1)
-    parser.add_argument("--y-lim", type=float, nargs=2, default=[1, 10e3])
     parser.add_argument(
         "--samples-file", default="../data/samples/velocity_calibration_samples_50.csv"
     )
@@ -213,6 +210,8 @@ def main():
     )
     parser.add_argument("--target-var", type=str, default="velsurf_mag")
     parser.add_argument("--target-error-var", type=str, default="velsurf_mag_error")
+    parser.add_argument("--y-lim", type=float, nargs=2, default=[1, 10e3])
+    parser.add_argument("--y-transform", default="log10")
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
     cls = EMULATORS[tmp.emulator]
@@ -276,9 +275,10 @@ def main():
     n_parameters = dataset.samples.n_parameters
     n_samples = dataset.samples.n_samples
 
-    if not os.path.isdir(emulator_dir):
-        os.makedirs(emulator_dir)
-        os.makedirs(os.path.join(emulator_dir, "emulator"))
+    emulator_dir = Path(emulator_dir)
+    emulator_dir.mkdir(parents=True, exist_ok=True)
+    result_dir = emulator_dir / Path("emulator")
+    result_dir.mkdir(parents=True, exist_ok=True)
 
     f = Figlet(font="standard")
     banner = f.renderText("pism-emulator")
@@ -340,7 +340,7 @@ def main():
     )
 
     trainer.fit(e, datamodule=dm)
-    final_ckpt = f"{emulator_dir}/emulator/emulator_{model_index}.ckpt"
+    final_ckpt = result_dir / Path(f"emulator_{model_index}.ckpt")
     trainer.save_checkpoint(final_ckpt)
     rank_zero_info(f"Training took {timer.time_elapsed():.0f}s")
 

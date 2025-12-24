@@ -21,7 +21,6 @@
 """
 MALA Sampling.
 """
-import os
 import time as time_m
 import warnings
 from argparse import ArgumentParser
@@ -350,6 +349,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--burn", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--alpha", type=float, default=0.01)
+    parser.add_argument("--result-dir", default="posterior")
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -359,9 +359,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     samples = args.samples
     burn = args.burn
 
-    posterior_dir = "posterior_samples/"
-    if not os.path.isdir(posterior_dir):
-        os.makedirs(posterior_dir)
+    posterior_dir = Path(args.result_dir[0])
+    posterior_dir.mkdir(parents=True, exist_ok=True)
 
     f = Figlet(font="standard")
     banner = f.renderText("pism-emulator")
@@ -503,9 +502,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         prior=prior,
         sample_stats=sample_stats if sample_stats else None,
     )
-    # Save to Zarr (overwrite)
-    out_dir = Path(posterior_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Optional: cast to float32 to shrink size
     for grp in ("posterior", "prior"):
@@ -514,7 +510,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
             setattr(idata, grp, ds.astype({v: "float32" for v in ds.data_vars}))
 
     # Save + load
-    out_nc = out_dir / "X_posterior_model.nc"
+    out_nc = posterior_dir / Path("X_posterior_model.nc")
     az.to_netcdf(idata, out_nc)  # write
 
     # Robust plotting: drop (near-)constant vars and use hist with fewer bins
@@ -590,7 +586,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
             fig = axes.flatten()[0].get_figure()
             fig.suptitle("Posterior Traces")
-            out_png = out_dir / "X_posterior_model_trace.png"
+            out_png = posterior_dir / Path("posterior_trace.png")
             plt.savefig(out_png, dpi=300, bbox_inches="tight")
             plt.close("all")
         else:

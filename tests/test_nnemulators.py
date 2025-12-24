@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Andy Aschwanden
+# Copyright (C) 2021, 2025 Andy Aschwanden
 #
 # This file is part of pism-emulator.
 #
@@ -19,14 +19,10 @@
 Test emulators.
 """
 
-import random
-
 import lightning as pl
 import numpy as np
 import torch
-from numpy.testing import assert_array_almost_equal
 from scipy.stats import dirichlet
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics.regression import MeanSquaredError
 
@@ -58,7 +54,6 @@ def nn_setup(Emulator: pl.LightningModule) -> torch.tensor:
     n_eigenglaciers = 10
     n_grid_points = 1000
     n_samples = 1000
-    num_workers = 0
 
     V_hat = torch.rand(n_grid_points, n_eigenglaciers, dtype=torch.float32)
     F_mean = torch.rand(n_grid_points, dtype=torch.float32)

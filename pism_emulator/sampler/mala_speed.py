@@ -17,15 +17,17 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import datetime
-import datetime as dt
-import os
+# pylint: disable=too-many-statements,too-many-branches,redefined-builtin
+
+
+"""
+MALA Speed sampler.
+"""
 import time
 import warnings
 from argparse import ArgumentParser
-from os.path import join
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping, Sequence, cast
+from typing import Any, Mapping, Sequence, cast
 
 import arviz as az
 import lightning as pl
@@ -34,19 +36,13 @@ import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
 import torch
-from joblib import Parallel, delayed
-from lightning import LightningModule
-from lightning.pytorch.callbacks import Timer
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from pyfiglet import Figlet
 from scipy.stats import beta
-from torch import Tensor
-from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
 
 from pism_emulator.datasets import PISMInterpolatedDataset as PISMDataset
 from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
-from pism_emulator.sampler.mala import ChainInitDataset, MALASamplerModule, run_sampling
+from pism_emulator.sampler.mala import MALASamplerModule, run_sampling
 from pism_emulator.utils import param_keys_dict as keys_dict
 
 EMULATORS: Mapping[str, type[pl.LightningModule]] = {
@@ -73,29 +69,57 @@ rcparams = {
 
 
 def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
+    """
+    Run MALA sampling for the speed posterior and assemble an ArviZ InferenceData.
+
+    This function is the programmatic entry point. It parses command-line style
+    arguments, runs the sampler, and returns a dictionary containing the resulting
+    `arviz.InferenceData` object (and optionally other intermediate artifacts).
+
+    Parameters
+    ----------
+    argv : sequence of str or None, optional
+        Command-line arguments **excluding** the program name (i.e., like
+        ``sys.argv[1:]``). If ``None`` (default), arguments are taken from the
+        current process' ``sys.argv[1:]``. Passing ``argv=[]`` is recommended
+        when calling from a Jupyter notebook to avoid ipykernel arguments.
+
+    Returns
+    -------
+    dict[str, Any]
+        Results dictionary. At minimum this includes:
+
+        - ``"idata"``: :class:`arviz.InferenceData`
+          InferenceData containing ``posterior`` and ``prior`` groups, and
+          optionally a ``sample_stats`` group (e.g., log-probability, step sizes,
+          acceptance indicators) if available.
+
+        Additional keys may be included depending on the configuration and
+        sampler implementation (for example, raw prior/posterior arrays, runtime
+        metadata, or filenames of saved outputs).
+    """
 
     parser = ArgumentParser()
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="NN")
+    parser.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
     tmp, _ = parser.parse_known_args()
     parser.add_argument("--accelerator", type=str, default="auto")
-    parser.add_argument("--checkpoint", default=False, action="store_true")
-    parser.add_argument("--chains", type=int, default=1)
-    parser.add_argument("--emulator_dir", default="emulator_ensemble")
-    parser.add_argument("--model_index", type=int, default=0)
-    parser.add_argument("--out_format", choices=["csv", "parquet"], default="parquet")
-    parser.add_argument("--burn", type=int, default=1000)
-    parser.add_argument("--samples", type=int, default=10_000)
-    parser.add_argument("--target_var", type=str, default="velsurf_mag")
-    parser.add_argument("--target_error_var", type=str, default="velsurf_mag_error")
-    parser.add_argument("--y_lim", nargs=2, type=float, default=[0.1, 10e3])
     parser.add_argument("--alpha", type=float, default=0.01)
+    parser.add_argument("--burn", type=int, default=1000)
+    parser.add_argument("--chains", type=int, default=1)
+    parser.add_argument("--emulator-dir", default="emulator_ensemble")
+    parser.add_argument("--model-index", type=int, default=0)
+    parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument(
-        "--samples_file", default="../data/samples/velocity_calibration_samples_100.csv"
+        "--samples-file", default="../data/samples/velocity_calibration_samples_100.csv"
     )
     parser.add_argument(
-        "--target_file",
+        "--target-file",
         default="../data/observed_speeds/greenland_vel_mosaic250_v1_g9000m.nc",
     )
+    parser.add_argument("--target-var", type=str, default="velsurf_mag")
+    parser.add_argument("--target-error-var", type=str, default="velsurf_mag_error")
+    parser.add_argument("--y-lim", type=float, nargs=2, default=[1, 10e3])
+    parser.add_argument("--y-transform", default="log10")
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
     parser.add_argument("MODEL_FILE", nargs=1, help="Emulator ckpt")
 
@@ -109,18 +133,16 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         Emulator = DNNEmulator
 
     args = parser.parse_args()
-    hparams = vars(args)
 
     accelerator = args.accelerator
-    checkpoint = args.checkpoint
     emulator_dir = args.emulator_dir
     alpha = args.alpha
     model_index = args.model_index
     chains = args.chains
     samples = args.samples
     y_lim = args.y_lim
+    y_transform = args.y_transform
     burn = args.burn
-    out_format = args.out_format
     samples_file = args.samples_file
     target_file = args.target_file
     training_files = args.TRAINING_FILES
@@ -128,16 +150,17 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     target_var = args.target_var
     target_error_var = args.target_error_var
 
-    posterior_dir = f"{emulator_dir}/posterior_samples/"
-    if not os.path.isdir(posterior_dir):
-        os.makedirs(posterior_dir)
+    emulator_dir = Path(emulator_dir)
+    emulator_dir.mkdir(parents=True, exist_ok=True)
+    posterior_dir = emulator_dir / Path("posterior")
+    posterior_dir.mkdir(parents=True, exist_ok=True)
 
     f = Figlet(font="standard")
     banner = f.renderText("pism-emulator")
     rank_zero_info("=" * 80)
     rank_zero_info(banner)
     rank_zero_info("=" * 80)
-    rank_zero_info(f"MALA Sampler")
+    rank_zero_info("MALA Sampler")
     rank_zero_info("-" * 80)
     rank_zero_info("")
 
@@ -149,6 +172,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         target_error_var=target_error_var,
         target_var=target_var,
         y_lim=y_lim,
+        y_transform=y_transform,
     )
 
     X = dataset.samples.X
@@ -195,7 +219,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         X_max,
         Y_target,
         sigma_hat,
-        log_y=False,
+        alpha=alpha,
         metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
