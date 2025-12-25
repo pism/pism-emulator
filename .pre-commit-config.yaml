@@ -4,7 +4,7 @@ fail_fast: true
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -13,13 +13,13 @@ repos:
 
   # Can run individually with `pre-commit run black --all-files`
   - repo: https://github.com/psf/black
-    rev: 24.4.2
+    rev: 25.12.0
     hooks:
       - id: black
 
   # Can run individually with `pre-commit run isort --all-files`
   - repo: https://github.com/timothycrosley/isort
-    rev: 5.13.2
+    rev: 7.0.0
     hooks:
       - id: isort
         args:
@@ -28,13 +28,13 @@ repos:
 
   # Numpydoc
   - repo: https://github.com/numpy/numpydoc
-    rev: v1.9.0
+    rev: v1.10.0
     hooks:
       - id: numpydoc-validation
 
   # Can run individually with `pre-commit run mypy --all-files`
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.17.0
+    rev: v1.19.1
     hooks:
       - id: mypy
         args: ["--config-file", "pyproject.toml", "--ignore-missing-imports"]
