@@ -1,5 +1,7 @@
 arviz
 bokeh
+cdo
+cf_xarray
 dask[distributed,dataframe]
 earthaccess
 h5netcdf
@@ -11,6 +13,7 @@ netcdf4
 notebook
 numpy
 pandas
+pint_xarray
 pyDOE3
 pyfiglet
 pylint
