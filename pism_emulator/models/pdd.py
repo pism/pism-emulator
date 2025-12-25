@@ -1140,24 +1140,23 @@ class VecPDD(pl.LightningModule):
             "runoff_rate": runoff_rate,
             "inst_smb": inst_smb,
             "snow_depth": snow_depth,
-            "pdd": self._integrate(inst_pdd),
-            "accumulation": self._integrate(accumulation_rate),
-            "snow_melt": self._integrate(snow_melt_rate),
-            "ice_melt": self._integrate(ice_melt_rate),
-            "melt": self._integrate(melt_rate),
-            "runoff": self._integrate(runoff_rate),
-            "refreeze": self._integrate(refreeze_rate),
-            "snow_refreeze": self._integrate(snow_refreeze_rate),
-            "ice_refreeze": self._integrate(ice_refreeze_rate),
-            "smb": self._integrate(inst_smb),
+            "pdd": self._integrate(inst_pdd).view(-1, 1),
+            "accumulation": self._integrate(accumulation_rate).view(1, -1),
+            "snow_melt": self._integrate(snow_melt_rate).view(1, -1),
+            "ice_melt": self._integrate(ice_melt_rate).view(1, -1),
+            "melt": self._integrate(melt_rate).view(1, -1),
+            "runoff": self._integrate(runoff_rate).view(1, -1),
+            "refreeze": self._integrate(refreeze_rate).view(1, -1),
+            "snow_refreeze": self._integrate(snow_refreeze_rate).view(1, -1),
+            "ice_refreeze": self._integrate(ice_refreeze_rate).view(1, -1),
+            "smb": self._integrate(inst_smb).view(1, -1),
         }
-
         if self.predictor_vars is not None:
-            obs_pred = [result[k] for k in self.predictor_vars]
-            return torch.vstack(obs_pred).T
-
-        return result
-
+            Y = [v for k, v in result.items() if k in self.predictor_vars]
+        else:
+            Y = [v for k, v in result.items()]
+        return torch.vstack(Y).T
+ 
     def inst_pdd(self, temp: Tensor, stdv: Tensor) -> Tensor:
         """
         Compute instantaneous positive degree-days (PDD).
@@ -1257,4 +1256,4 @@ class VecPDD(pl.LightningModule):
 
         which behaves like an average when ``array`` represents samples over a year.
         """
-        return torch.sum(array, dim=0) / max(self.hparams.n_interpolate - 1, 1)
+        return (torch.sum(array, dim=0) / max(self.hparams.n_interpolate - 1, 1))

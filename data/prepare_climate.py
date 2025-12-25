@@ -19,7 +19,7 @@
 """
 Prepare Climate.
 """
-# pylint: disable=unused-import,broad-exception-caught,too-many-positional-arguments
+# pylint: disable=unused-import,broad-exception-caught,too-many-positional-arguments,redefined-builtin,redefined-outer-name,too-many-statements
 # mypy: ignore-errors
 
 import tarfile
@@ -250,15 +250,6 @@ def process_hirham_cdo(
         overwrite=overwrite,
         max_workers=max_workers,
     )
-
-    # Initialize an empty list to store the parts of the string
-    chname_parts = []
-
-    # Iterate over the dictionary items
-    for key, value in vars_dict.items():
-        chname_parts.append(key)
-        chname_parts.append(value["pism_name"])
-    chname = ",".join(chname_parts)
 
     # Initialize an empty list to store the parts of the string
     setattribute_parts = []

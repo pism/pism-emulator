@@ -32,8 +32,8 @@ import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
-import pint
-import pint_xarray  # noqa: F401  (registers accessor)
+import pint  # pylint: disable=unused-import
+import pint_xarray  # noqa: F401  (registers accessor) # pylint: disable=unused-import
 import torch
 import xarray as xr
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
@@ -221,15 +221,16 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         chunks="auto",
     ).drop_vars(["lon", "lat"])
 
-    ds = ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn"]]
+    ds = ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn"]].rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"}).sel(time="1980")
     ds["sn"].attrs.update({"units": "m"})
     ds["rfrz"].attrs.update({"units": "m day^-1"})
     ds = ds.pint.quantify()
     ds["tas"] = ds["tas"].pint.to("celsius")
     ds["precipitation"] = ds["rainfall"] + ds["snfall"]
     ds = ds.rename_vars(hh5_vars)
+    ds = ds.stack(z=("rlat", "rlon")).dropna(dim="z")
     train_vars = ["precipitation", "temp", "temp_std"]
-    predictor_vars = ["smb", "runoff", "refreeze", "snow_depth"]
+    predictor_vars = ["smb", "runoff", "refreeze"]
 
     temp_monthly_mean = ds["temp"].resample(time="MS").mean("time")
     precipitation_monthly_sum = ds["precipitation"].resample(time="MS").sum("time")
@@ -238,49 +239,42 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     temp_monthly_std = ds["temp"].resample(time="MS").std("time")
     temp_monthly_std.name = "temp_std"
     train = xr.merge([temp_monthly_mean, temp_monthly_std, precipitation_monthly_sum])
-    predict = ds[predictor_vars].resample(time="YS").sum("time") * day
-    predict["refreeze"] = predict["refreeze"].rename({"ncl4": "y", "ncl5": "x"})
-
-    train = train.stack(z=("rlat", "rlon")).dropna(dim="z")
-    predict = predict.stack(z=("y", "x")).dropna(dim="z")
-
+    # train = (
+    #     train.assign_coords(
+    #     year=("time", train.time.dt.year),
+    #     month=("time", train.time.dt.month)
+    # ).set_index(time=("year", "month"))
+    # .unstack("time")                 # (year, month, z)
+    # .transpose("month", "year", "z") # (month, year, z)
+    # )
+    predict = (ds[predictor_vars].resample(time="YS").sum("time") * day)
+    # predict = (
+    #     predict.assign_coords(
+    #     year=("time", predict.time.dt.year),
+    #     month=("time", predict.time.dt.month),
+    # ).set_index(time=("year", "month"))
+    # .unstack("time")                 # (year, month, z)
+    # .transpose("month", "year", "z") # (month, year, z)
+    # )
+    
     train_flat = {
-        v: np.hstack([d.values for _, d in train[v].groupby("time.year")]).astype(
+        v: np.vstack([d.values for _, d in train[v].groupby("time.year")]).astype(
             np.float32, copy=False
         )
         for v in train_vars
     }
     predict_flat = {
-        v: np.hstack([d.values for _, d in predict[v].groupby("time.year")]).astype(
+        v: np.vstack([d.values for _, d in predict[v].groupby("time.year")]).astype(
             np.float32, copy=False
         )
         for v in predictor_vars
     }
-
     temp = torch.from_numpy(train_flat["temp"])
     precip = torch.from_numpy(train_flat["precipitation"])
     sd = torch.from_numpy(train_flat["temp_std"])
     model = PDD(temp, precip, sd, predictor_vars=predictor_vars)
 
-    true_vals = {
-        "pdd_factor_snow": 4.2,
-        "pdd_factor_ice": 8.0,
-        "refreeze_snow": 0.6,
-        "refreeze_ice": 0.2,
-        "temp_snow": -0.5,
-        "temp_rain": 1.6,
-    }
-    x_true = torch.tensor(
-        [
-            true_vals["pdd_factor_snow"],
-            true_vals["pdd_factor_ice"],
-            true_vals["refreeze_snow"],
-            true_vals["refreeze_ice"],
-            true_vals["temp_snow"],
-            true_vals["temp_rain"],
-        ]
-    )
-    Y_true = model.forward(x_true)
+    Y_true = torch.vstack([torch.from_numpy(v) for _, v in predict_flat.items()]).T
 
     X_prior = torch.from_numpy(prior_df.values)
     X_min = X_prior.cpu().numpy().min(axis=0)
@@ -399,14 +393,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
             for i, vname in enumerate(var_names):
                 hist_ax = axes[i, 0]  # histogram axis (usually column 1)
-                tv = true_vals.get(vname)
-
-                hist_ax.axvline(
-                    tv,
-                    linestyle=":",  # dotted
-                    linewidth=1.5,
-                    alpha=0.9,
-                )
             if hasattr(idata, "prior"):
                 for i, vname in enumerate(var_names):
                     hist_ax = axes[i, 0]  # histogram axis (usually column 1)
