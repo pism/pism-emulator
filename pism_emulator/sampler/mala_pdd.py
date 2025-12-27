@@ -224,16 +224,17 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     ds = (
         ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn"]]
         .rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"})
-        .sel(time="1980")
-    )
+        .thin({"rlat": 2, "rlon": 2})
+        .sel(time=slice("1980", "1984"))
+    ).fillna(0)
     ds["sn"].attrs.update({"units": "m"})
     ds["rfrz"].attrs.update({"units": "m day^-1"})
     ds = ds.pint.quantify()
     ds["tas"] = ds["tas"].pint.to("celsius")
     ds["precipitation"] = ds["rainfall"] + ds["snfall"]
     ds = ds.rename_vars(hh5_vars)
-    ds = ds.stack(z=("rlat", "rlon")).dropna(dim="z")
-    train_vars = ["precipitation", "temp", "temp_std"]
+    ds = ds.transpose("rlat", "rlon", "time")
+
     predictor_vars = ["smb", "runoff", "refreeze"]
 
     temp_monthly_mean = ds["temp"].resample(time="MS").mean("time")
@@ -242,49 +243,43 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     precipitation_monthly_sum /= rho_w
     temp_monthly_std = ds["temp"].resample(time="MS").std("time")
     temp_monthly_std.name = "temp_std"
-    train = xr.merge([temp_monthly_mean, temp_monthly_std, precipitation_monthly_sum])
-    # train = (
-    #     train.assign_coords(
-    #     year=("time", train.time.dt.year),
-    #     month=("time", train.time.dt.month)
-    # ).set_index(time=("year", "month"))
-    # .unstack("time")                 # (year, month, z)
-    # .transpose("month", "year", "z") # (month, year, z)
-    # )
-    predict = ds[predictor_vars].resample(time="YS").sum("time") * day
-    # predict = (
-    #     predict.assign_coords(
-    #     year=("time", predict.time.dt.year),
-    #     month=("time", predict.time.dt.month),
-    # ).set_index(time=("year", "month"))
-    # .unstack("time")                 # (year, month, z)
-    # .transpose("month", "year", "z") # (month, year, z)
-    # )
 
-    train_flat = {
-        v: np.vstack([d.values for _, d in train[v].groupby("time.year")]).astype(
-            np.float32, copy=False
+    train = xr.merge([temp_monthly_mean, temp_monthly_std, precipitation_monthly_sum])
+    train = (
+        train.assign_coords(
+            year=train["time"].dt.year,
+            month=train["time"].dt.month,
         )
-        for v in train_vars
-    }
-    predict_flat = {
-        v: np.vstack([d.values for _, d in predict[v].groupby("time.year")]).astype(
-            np.float32, copy=False
+        .set_index(time=("year", "month"))
+        .unstack("time")
+    )
+
+    predict = ds[predictor_vars].resample(time="YS").sum("time") * day
+    predict = (
+        predict.assign_coords(
+            year=predict["time"].dt.year,
+            month=predict["time"].dt.month,
         )
-        for v in predictor_vars
-    }
-    temp = torch.from_numpy(train_flat["temp"])
-    precip = torch.from_numpy(train_flat["precipitation"])
-    sd = torch.from_numpy(train_flat["temp_std"])
+        .set_index(time=("year", "month"))
+        .unstack("time")
+    )
+
+    temp = torch.from_numpy(train["temp"].to_numpy().astype(np.float32, copy=False))
+    precip = torch.from_numpy(
+        train["precipitation"].to_numpy().astype(np.float32, copy=False)
+    )
+    sd = torch.from_numpy(train["temp_std"].to_numpy().astype(np.float32, copy=False))
     model = PDD(temp, precip, sd, predictor_vars=predictor_vars)
 
-    Y_true = torch.vstack([torch.from_numpy(v) for _, v in predict_flat.items()]).T
+    cols = [torch.from_numpy(predict[v].to_numpy()) for v in predictor_vars]
+    cols2 = list(cols)
+    Y_true = torch.cat(cols2, dim=-1)
 
     X_prior = torch.from_numpy(prior_df.values)
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
-    sigma = 0.025
+    sigma = 0.01
     sh = torch.ones_like(Y_true)
     sigma_hat = sh * torch.tensor([sigma])
 
