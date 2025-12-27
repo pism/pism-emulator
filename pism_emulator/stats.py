@@ -245,7 +245,7 @@ def calc_bic(
         y_pred = model.predict(X)
         residuals = y - y_pred
         RSS = np.sum(residuals**2)
-        RSS = np.maximum(RSS, np.finfo(float).eps)
+        RSS = np.maximum(RSS, np.finfo(float).eps)  # pylint: disable=no-member
         bic = n * np.log(RSS / n) + k * np.log(n)
     else:
         # Classification case (Bernoulli or multinomial likelihood)

@@ -42,7 +42,7 @@ from pyfiglet import Figlet
 from scipy.stats import beta
 from scipy.stats.distributions import uniform
 
-from pism_emulator.models.pdd import VecPDD as PDD
+from pism_emulator.models.pdd import PDD
 from pism_emulator.sampler.mala import MALASamplerModule, run_sampling
 
 xr.set_options(keep_attrs=True)
@@ -221,7 +221,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         chunks="auto",
     ).drop_vars(["lon", "lat"])
 
-    ds = ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn"]].rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"}).sel(time="1980")
+    ds = (
+        ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn"]]
+        .rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"})
+        .sel(time="1980")
+    )
     ds["sn"].attrs.update({"units": "m"})
     ds["rfrz"].attrs.update({"units": "m day^-1"})
     ds = ds.pint.quantify()
@@ -247,7 +251,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     # .unstack("time")                 # (year, month, z)
     # .transpose("month", "year", "z") # (month, year, z)
     # )
-    predict = (ds[predictor_vars].resample(time="YS").sum("time") * day)
+    predict = ds[predictor_vars].resample(time="YS").sum("time") * day
     # predict = (
     #     predict.assign_coords(
     #     year=("time", predict.time.dt.year),
@@ -256,7 +260,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     # .unstack("time")                 # (year, month, z)
     # .transpose("month", "year", "z") # (month, year, z)
     # )
-    
+
     train_flat = {
         v: np.vstack([d.values for _, d in train[v].groupby("time.year")]).astype(
             np.float32, copy=False

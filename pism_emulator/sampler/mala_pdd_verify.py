@@ -33,14 +33,13 @@ import matplotlib.pylab as plt
 import numpy as np
 import pandas as pd
 import torch
-import xarray as xr
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from pyDOE3 import lhs
 from pyfiglet import Figlet
 from scipy.stats import beta
 from scipy.stats.distributions import uniform
 
-from pism_emulator.models.pdd import VecPDD as PDD
+from pism_emulator.models.pdd import PDD, make_fake_climate_2d
 from pism_emulator.sampler.mala import MALASamplerModule, run_sampling
 
 warnings.filterwarnings(
@@ -59,179 +58,6 @@ rcparams = {
     "hatch.linewidth": 0.15,
     "font.size": 6,
 }
-
-
-def make_fake_climate_2d(filename: str | None = None) -> xr.Dataset:
-    """
-    Create an idealized 2D synthetic climate dataset for tests.
-
-    This generates an artificial monthly (12-point) climatology on a Cartesian
-    grid with dimensions ``(time, x, y)``. The resulting dataset contains
-    near-surface air temperature (``temp``), precipitation rate (``prec``), and
-    temperature standard deviation (``stdv``), along with CF-style coordinate
-    metadata and a ``time_bounds`` coordinate.
-
-    Parameters
-    ----------
-    filename : str, optional
-        If provided, write the dataset to this NetCDF file via ``to_netcdf``.
-        If None (default), no file is written.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with data variables:
-
-        - ``temp`` : near-surface air temperature (degC), shape ``(time, x, y)``
-        - ``prec`` : ice-equivalent precipitation rate (m yr-1), shape ``(time, x, y)``
-        - ``stdv`` : standard deviation of near-surface air temperature (K),
-          shape ``(time, x, y)``
-
-        And coordinates:
-
-        - ``time`` : monthly midpoints in fractional years, shape ``(time,)``
-        - ``x`` / ``y`` : Cartesian coordinates in meters, shapes ``(x,)`` and ``(y,)``
-        - ``time_bounds`` : bounds for ``time``, shape ``(time, 2)``
-
-    Notes
-    -----
-    The construction order, dtype casts, and transposes are intentionally kept
-    stable to preserve legacy test behavior (e.g., reproducibility checksums).
-    """
-    ATTRIBUTES = {
-        # coordinate variables
-        "x": {
-            "axis": "X",
-            "long_name": "x-coordinate in Cartesian system",
-            "standard_name": "projection_x_coordinate",
-            "units": "m",
-        },
-        "y": {
-            "axis": "Y",
-            "long_name": "y-coordinate in Cartesian system",
-            "standard_name": "projection_y_coordinate",
-            "units": "m",
-        },
-        "time": {
-            "axis": "T",
-            "long_name": "time",
-            "standard_name": "time",
-            "bounds": "time_bounds",
-            "units": "yr",
-        },
-        "time_bounds": {},
-        # climatic variables
-        "temp": {"long_name": "near-surface air temperature", "units": "degC"},
-        "prec": {"long_name": "ice-equivalent precipitation rate", "units": "m yr-1"},
-        "stdv": {
-            "long_name": "standard deviation of near-surface air temperature",
-            "units": "K",
-        },
-        # cumulative quantities
-        "smb": {
-            "standard_name": "land_ice_surface_specific_mass_balance",
-            "long_name": "cumulative ice-equivalent surface mass balance",
-            "units": "m yr-1",
-        },
-        "pdd": {
-            "long_name": "cumulative number of positive degree days",
-            "units": "degC day",
-        },
-        "accu": {
-            "long_name": "cumulative ice-equivalent surface accumulation",
-            "units": "m",
-        },
-        "snow_melt": {
-            "long_name": "cumulative ice-equivalent surface melt of snow",
-            "units": "m",
-        },
-        "ice_melt": {
-            "long_name": "cumulative ice-equivalent surface melt of ice",
-            "units": "m",
-        },
-        "melt": {"long_name": "cumulative ice-equivalent surface melt", "units": "m"},
-        "runoff": {
-            "long_name": "cumulative ice-equivalent surface meltwater runoff",
-            "units": "m yr-1",
-        },
-        # instantaneous quantities
-        "inst_pdd": {
-            "long_name": "instantaneous positive degree days",
-            "units": "degC day",
-        },
-        "accu_rate": {
-            "long_name": "instantaneous ice-equivalent surface accumulation rate",
-            "units": "m yr-1",
-        },
-        "snow_melt_rate": {
-            "long_name": "instantaneous ice-equivalent surface melt rate of snow",
-            "units": "m yr-1",
-        },
-        "ice_melt_rate": {
-            "long_name": "instantaneous ice-equivalent surface melt rate of ice",
-            "units": "m yr-1",
-        },
-        "melt_rate": {
-            "long_name": "instantaneous ice-equivalent surface melt rate",
-            "units": "m yr-1",
-        },
-        "runoff_rate": {
-            "long_name": "instantaneous ice-equivalent surface runoff rate",
-            "units": "m yr-1",
-        },
-        "inst_smb": {
-            "long_name": "instantaneous ice-equivalent surface mass balance",
-            "units": "m yr-1",
-        },
-        "snow_depth": {"long_name": "depth of snow cover", "units": "m"},
-    }
-
-    # code could be simplified a lot more but we need a better test not
-    # relying on exact reproducibility of this toy climate data.
-
-    # assign coordinate values
-    lx = ly = 750000
-    x = xr.DataArray(np.linspace(-lx, lx, 201, dtype="f4"), dims="x")
-    y = xr.DataArray(np.linspace(-ly, ly, 201, dtype="f4"), dims="y")
-    time = xr.DataArray((np.arange(12, dtype="f4") + 0.5) / 12, dims="time")
-    tboundsvar = np.empty((12, 2), dtype="f4")
-    tboundsvar[:, 0] = time[:] - 1.0 / 24
-    tboundsvar[:, 1] = time[:] + 1.0 / 24
-
-    # seasonality index from winter to summer
-    season = xr.DataArray(-np.cos(np.arange(12) * 2 * np.pi / 12), dims="time")
-
-    # order of operation is dictated by test md5sum and legacy f4 dtype
-    temp = 5 * season - 10 * x / lx + 0 * y
-    prec = y / ly * (season.astype("f4") + 0 * x + np.sign(y))
-    stdv = (2 + y / ly - x / lx) * (1 + season)
-
-    # this is also why transpose is needed here, and final type conversion
-    temp = temp.transpose("time", "x", "y").astype("f4")
-    prec = prec.transpose("time", "x", "y").astype("f4")
-    stdv = stdv.transpose("time", "x", "y").astype("f4")
-
-    # assign variable attributes
-    temp.attrs.update(ATTRIBUTES["temp"])
-    prec.attrs.update(ATTRIBUTES["prec"])
-    stdv.attrs.update(ATTRIBUTES["stdv"])
-
-    # make a dataset
-    ds = xr.Dataset(
-        data_vars={"temp": temp, "prec": prec, "stdv": stdv},
-        coords={
-            "time": time,
-            "x": x,
-            "y": y,
-            "time_bounds": (["time", "nv"], tboundsvar[:]),
-        },
-    )
-
-    # write dataset to file
-    if filename is not None:
-        ds.to_netcdf(filename)
-
-    return ds
 
 
 def draw_samples(n_samples: int = 10_000, random_seed: int = 2) -> pd.DataFrame:
@@ -374,12 +200,13 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     prior_df = draw_samples(n_samples=10_000)
     X_keys = prior_df.columns
 
-    ds = make_fake_climate_2d().stack(z=["y", "x"])
+    ds = make_fake_climate_2d(torch_order=True)
     predictor_vars = ["accumulation", "melt", "runoff", "refreeze", "smb"]
 
     temp = ds["temp"].to_numpy()
     precip = ds["prec"].to_numpy()
     sd = ds["stdv"].to_numpy()
+
     model_true = PDD(temp, precip, sd, predictor_vars=predictor_vars)
     model = PDD(temp, precip, sd, predictor_vars=predictor_vars)
 
@@ -402,7 +229,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         ]
     )
 
-    Y_true = model_true.forward(x_true)
+    Y_true: torch.Tensor = model_true.forward(x_true)
     noise = 0.01 * Y_true * torch.randn_like(Y_true)
     Y_true += noise
 
