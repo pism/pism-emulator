@@ -428,7 +428,7 @@ if __name__ == "__main__":
         "snmel": {"pism_name": "snowmelt", "units": "kg m^-2 day^-1"},
     }
 
-    start_year, end_year = 1980, 1999
+    start_year, end_year = 1980, 1989
     output_file = result_dir / Path(f"HIRHAM5-daily-ERA5_{start_year}_{end_year}.nc")
     process_hirham_cdo(
         data_dir=result_dir,

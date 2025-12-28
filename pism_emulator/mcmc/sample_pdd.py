@@ -121,7 +121,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--result-dir", default="posterior")
-
+    parser.add_argument("--years", nargs=2, default=["1980", "1989"])
+    parser.add_argument("--normalize", action="store_true")
+    parser.add_argument("CLIMATEFILE", nargs=1)
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     accelerator = args.accelerator
@@ -129,6 +131,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     chains = args.chains
     samples = args.samples
     burn = args.burn
+    normalize = args.normalize
+    years = args.years
+    url = args.CLIMATEFILE[0]
 
     posterior_dir = Path(args.result_dir)
     posterior_dir.mkdir(parents=True, exist_ok=True)
@@ -145,7 +150,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     prior_df = draw_samples(n_samples=10_000)
     prior_min, prior_max = prior_df.min(), prior_df.max()
 
-    normalize = True
     if normalize:
         prior_df = (prior_df - prior_min) / (prior_max - prior_min)
     X_keys = prior_df.columns
@@ -160,17 +164,18 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "gld": "smb",
         "rfrz": "refreeze",
         "sn": "snow_depth",
+        "snmel": "snow_melt",
     }
     ds = xr.open_dataset(
-        "/Users/andy/base/pism-emulator/data/climate/HIRHAM5-daily-ERA5_1980_1982.nc",
+        url,
         chunks="auto",
     ).drop_vars(["lon", "lat"])
 
     ds = (
-        ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn"]]
+        ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn", "snmel"]]
         .rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"})
         .thin({"rlat": 4, "rlon": 4})
-        .sel(time=slice("1980", "1984"))
+        .sel(time=slice(*years))
     ).fillna(0)
     ds["sn"].attrs.update({"units": "m"})
     ds["rfrz"].attrs.update({"units": "m day^-1"})
@@ -180,12 +185,13 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     ds = ds.rename_vars(hh5_vars)
     ds = ds.transpose("rlat", "rlon", "time")
 
-    predictor_vars = ["smb", "runoff", "refreeze"]
+    predictor_vars = ["smb", "runoff", "refreeze", "snow_melt"]
 
     temp_monthly_mean = ds["temp"].resample(time="MS").mean("time")
     precipitation_monthly_sum = ds["precipitation"].resample(time="MS").sum("time")
     precipitation_monthly_sum *= day
     precipitation_monthly_sum /= rho_w
+
     temp_monthly_std = ds["temp"].resample(time="MS").std("time")
     temp_monthly_std.name = "temp_std"
 
@@ -225,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     X_max = X_prior.cpu().numpy().max(axis=0)
 
     sigma = 0.05
-    sigma_hat = torch.clamp(sigma * Y_true, min=1e-4)
+    sigma_hat = torch.clamp(torch.abs(sigma * Y_true), min=1e-4)
 
     start = time_m.time()
     sampler = MALASamplerModule(
