@@ -31,19 +31,17 @@ import arviz as az
 import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
-import pandas as pd
 import pint  # pylint: disable=unused-import
 import pint_xarray  # noqa: F401  (registers accessor) # pylint: disable=unused-import
 import torch
 import xarray as xr
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
-from pyDOE3 import lhs
 from pyfiglet import Figlet
 from scipy.stats import beta
-from scipy.stats.distributions import uniform
 
+from pism_emulator.lhs.draw import draw_samples
+from pism_emulator.mcmc.mala import MALASamplerModule, run_sampling
 from pism_emulator.models.pdd import PDD
-from pism_emulator.sampler.mala import MALASamplerModule, run_sampling
 
 xr.set_options(keep_attrs=True)
 
@@ -63,64 +61,6 @@ rcparams = {
     "hatch.linewidth": 0.15,
     "font.size": 6,
 }
-
-
-def draw_samples(n_samples: int = 10_000, random_seed: int = 2) -> pd.DataFrame:
-    """
-    Draw Latin-hypercube samples for PDD model parameters.
-
-    Samples are generated in the unit hypercube using Latin Hypercube Sampling
-    (LHS) and then transformed to user-specified parameter distributions using
-    each distribution's percent-point function (PPF; inverse CDF).
-
-    Parameters
-    ----------
-    n_samples : int, optional
-        Number of parameter sets to draw. Default is 10_000.
-    random_seed : int, optional
-        Seed for NumPy's random number generator used by the sampling routine.
-        Default is 2.
-
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame with shape ``(n_samples, 6)`` containing the sampled parameters.
-        Columns (in order) are:
-
-        - ``pdd_factor_snow`` : snow degree-day factor (uniform in [1, 6])
-        - ``pdd_factor_ice``  : ice degree-day factor (uniform in [3, 15])
-        - ``refreeze_snow``   : snow refreezing fraction (uniform in [0, 0.8])
-        - ``refreeze_ice``    : ice refreezing fraction (uniform in [0, 0.8])
-        - ``temp_snow``       : snow/rain transition lower bound in °C (uniform in [-2, 0])
-        - ``temp_rain``       : snow/rain transition upper bound in °C (uniform in [0, 4])
-
-    Notes
-    -----
-    * LHS produces stratified samples over each dimension of the unit hypercube,
-      which can improve space-filling relative to simple Monte Carlo sampling.
-    * This function calls ``np.random.seed`` to ensure deterministic output given
-      ``random_seed``.
-    """
-    np.random.seed(random_seed)
-
-    distributions = {
-        "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # uniform between 1 and 6
-        "pdd_factor_ice": uniform(loc=3.0, scale=12),  # uniform between 3 and 15
-        "refreeze_snow": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 0.8
-        "refreeze_ice": uniform(loc=0.0, scale=0.8),  # uniform between 0 and 0.8
-        "temp_snow": uniform(loc=-2.0, scale=2.0),  # uniform between -2 and 0
-        "temp_rain": uniform(loc=0.0, scale=4.0),  # uniform between 0 and 4
-    }
-
-    keys = list(distributions.keys())
-
-    unif_sample = lhs(len(keys), n_samples)
-    dist_sample = np.zeros_like(unif_sample)
-
-    for i, key in enumerate(keys):
-        dist_sample[:, i] = distributions[key].ppf(unif_sample[:, i])
-
-    return pd.DataFrame(data=dist_sample, columns=keys)
 
 
 def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
@@ -203,6 +143,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     rank_zero_info("")
 
     prior_df = draw_samples(n_samples=10_000)
+    prior_min, prior_max = prior_df.min(), prior_df.max()
+
+    normalize = True
+    if normalize:
+        prior_df = (prior_df - prior_min) / (prior_max - prior_min)
     X_keys = prior_df.columns
 
     rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
@@ -224,7 +169,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     ds = (
         ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn"]]
         .rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"})
-        .thin({"rlat": 2, "rlon": 2})
+        .thin({"rlat": 4, "rlon": 4})
         .sel(time=slice("1980", "1984"))
     ).fillna(0)
     ds["sn"].attrs.update({"units": "m"})
@@ -279,9 +224,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
-    sigma = 0.01
-    sh = torch.ones_like(Y_true)
-    sigma_hat = sh * torch.tensor([sigma])
+    sigma = 0.05
+    sigma_hat = torch.clamp(sigma * Y_true, min=1e-4)
 
     start = time_m.time()
     sampler = MALASamplerModule(
@@ -331,7 +275,10 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     chains_np = [np.asarray(c) for c in samples]  # each (S, D)
     arr = np.stack(chains_np, axis=0)  # (C, S, D)
-
+    prior_min_np = np.array(prior_min)[(None,) * (arr.ndim - 1)]
+    prior_max_np = np.array(prior_max)[(None,) * (arr.ndim - 1)]
+    if normalize:
+        arr = arr * (prior_max_np - prior_min_np) + prior_min_np
     C, _, D = arr.shape
 
     posterior = {name: arr[:, :, i] for i, name in enumerate(X_keys)}
@@ -342,6 +289,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     S_prior = S_prior_total // C_prior
 
     X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
+    print(X_prior_reshaped.shape)
+    if normalize:
+        X_prior_reshaped = (
+            X_prior_reshaped * (prior_max_np - prior_min_np) + prior_min_np
+        )
 
     prior = {
         name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)

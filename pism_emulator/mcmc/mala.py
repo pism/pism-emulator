@@ -39,7 +39,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from pism_emulator.sampler.writer import DiskPredictionWriter
+from pism_emulator.mcmc.writer import DiskPredictionWriter
 
 tqdm.set_lock(tqdm.get_lock())
 _TQDM_NONFATAL = (AttributeError, ValueError, OSError)

@@ -425,9 +425,10 @@ if __name__ == "__main__":
         "gld": {"pism_name": "climatic_mass_balance", "units": "kg m^-2 day^-1"},
         "rainfall": {"pism_name": "rainfall", "units": "kg m^-2 day^-1"},
         "snfall": {"pism_name": "snowfall", "units": "kg m^-2 day^-1"},
+        "snmel": {"pism_name": "snowmelt", "units": "kg m^-2 day^-1"},
     }
 
-    start_year, end_year = 1980, 1982
+    start_year, end_year = 1980, 1999
     output_file = result_dir / Path(f"HIRHAM5-daily-ERA5_{start_year}_{end_year}.nc")
     process_hirham_cdo(
         data_dir=result_dir,

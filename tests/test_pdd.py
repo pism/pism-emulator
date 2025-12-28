@@ -88,7 +88,7 @@ def test_torch_model():
             temp_rain,
         ]
     )
-    result_pl = pdd_torch_pl.forward(x, as_dict=True)
+    result_pl = pdd_torch_pl.forward(x, return_dict=True)
     for m_var in PDD_COMPARE_VARS:
         print(f"Comparing Reference and Torch implementation for variable {m_var}")
         assert_array_almost_equal(
