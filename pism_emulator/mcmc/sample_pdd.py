@@ -163,29 +163,23 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "rogl": "runoff",
         "gld": "smb",
         "rfrz": "refreeze",
-        "sn": "snow_depth",
+        "sn": "snow",
         "snmel": "snow_melt",
     }
     ds = xr.open_dataset(
         url,
         chunks="auto",
-    ).drop_vars(["lon", "lat"])
+    )
 
-    ds = (
-        ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn", "snmel"]]
-        .rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"})
-        .thin({"rlat": 4, "rlon": 4})
-        .sel(time=slice(*years))
-    ).fillna(0)
-    ds["sn"].attrs.update({"units": "m"})
-    ds["rfrz"].attrs.update({"units": "m day^-1"})
-    ds = ds.pint.quantify()
-    ds["tas"] = ds["tas"].pint.to("celsius")
-    ds["precipitation"] = ds["rainfall"] + ds["snfall"]
+    ds = (ds.thin({"rlat": 4, "rlon": 4}).sel(time=slice(*years))).fillna(0)
     ds = ds.rename_vars(hh5_vars)
     ds = ds.transpose("rlat", "rlon", "time")
+    ds = ds.stack(z=("rlat", "rlon")).dropna(dim="z").unify_chunks()
 
-    predictor_vars = ["smb", "runoff", "refreeze", "snow_melt"]
+    predictor_rate_vars = ["smb", "runoff", "refreeze", "snow_melt"]
+    predictor_sum_vars = ["snow"]
+    predictor_vars = predictor_rate_vars + predictor_sum_vars
+    # predictor_vars = predictor_rate_vars
 
     temp_monthly_mean = ds["temp"].resample(time="MS").mean("time")
     precipitation_monthly_sum = ds["precipitation"].resample(time="MS").sum("time")
@@ -205,7 +199,15 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         .unstack("time")
     )
 
-    predict = ds[predictor_vars].resample(time="YS").sum("time") * day
+    predict_rates = ds[predictor_rate_vars].resample(time="YS").sum("time") * day
+    predict_sums = ds[predictor_sum_vars]
+    predict_sums = predict_sums.groupby("time.year") - predict_sums.groupby(
+        "time.year"
+    ).first("time")
+    predict_sums = predict_sums.resample(time="YS").max("time")
+    predict = xr.merge([predict_rates, predict_sums])
+    # predict = predict_rates
+
     predict = (
         predict.assign_coords(
             year=predict["time"].dt.year,
@@ -263,10 +265,13 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     )
 
     X_map = X_map.detach().to(dtype=torch.float32)
+    X_map_n = X_map.numpy()
+    if normalize:
+        X_map_n = X_map_n * (prior_max.values - prior_min.values) + prior_min.values
     rank_zero_info("-" * 80)
     rank_zero_info("MAP Point")
     rank_zero_info("-" * 80)
-    rank_zero_info(X_map)
+    rank_zero_info(X_map_n)
 
     inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
     stats = run_sampling(sampler, inits, accelerator=accelerator)
@@ -295,7 +300,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     S_prior = S_prior_total // C_prior
 
     X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
-    print(X_prior_reshaped.shape)
     if normalize:
         X_prior_reshaped = (
             X_prior_reshaped * (prior_max_np - prior_min_np) + prior_min_np

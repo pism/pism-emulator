@@ -23,7 +23,7 @@ Prepare Climate.
 # mypy: ignore-errors
 
 import tarfile
-import time
+import time as time_m
 import zipfile
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,14 +33,13 @@ from urllib.request import urlopen
 
 import cf_xarray
 import numpy as np
+import pandas as pd
+import pint  # pylint: disable=unused-import
+import pint_xarray  # noqa: F401  (registers accessor) # pylint: disable=unused-import
 import requests
 import xarray as xr
-from cdo import Cdo
 from dask.diagnostics import ProgressBar
 from tqdm.auto import tqdm
-
-cdo = Cdo()
-cdo.debug = True
 
 
 def unzip_files(
@@ -112,94 +111,10 @@ def unzip_file(zip_path: str, extract_to: str, overwrite: bool = False) -> None:
                 zip_ref.extract(member=file, path=extract_to)
 
 
-def process_year(
-    year: int, output_dir: Path, vars_dict: dict, start_date: str = "1975-01-01"
-) -> Path:
-    """
-    Prepare and process NetCDF files for a given year and generate a monthly averaged dataset.
-
-    Parameters
-    ----------
-    year : int
-        The year to process.
-    output_dir : Path
-        The directory where the output file will be saved.
-    vars_dict : Dict
-        Dictionary of variables to process with their attributes.
-    start_date : str, optional
-        The reference start date for the time encoding, by default "1975-01-01".
-
-    Returns
-    -------
-    Path
-        The path to the generated NetCDF file.
-    """
-    output_file = output_dir / Path(f"monthly_{year}.nc")
-    p = output_dir / Path(str(year))
-    responses = sorted(p.glob("*.nc"))
-    ds = xr.open_mfdataset(
-        responses, parallel=True, chunks={"time": -1}, engine="netcdf4"
-    )
-    ds = ds[list(vars_dict.keys()) + ["lat", "lon"]]
-
-    for v in ["lat", "lon", "gld", "rogl"]:
-        ds[v] = ds[v].swap_dims({"x": "rlon", "y": "rlat"})
-        if "_CoordinateAxisType" in ds[v].attrs:
-            del ds[v].attrs["_CoordinateAxisType"]
-
-    for k, v in vars_dict.items():
-        if k in ds:
-            ds[k].attrs["units"] = v["units"]
-            if "missing_value" in ds[k].attrs:
-                del ds[k].attrs["missing_value"]
-    time = xr.date_range(str(year), freq="D", periods=ds.time.size + 1)
-    time_centered = time[:-1] + (time[1:] - time[:-1]) / 2
-    ds = ds.assign_coords(time=time_centered)
-
-    ds = ds.resample({"time": "MS"}).mean()
-    time = xr.date_range(str(year), freq="MS", periods=ds.time.size + 1)
-    time_centered = time[:-1] + (time[1:] - time[:-1]) / 2
-    ds = ds.assign_coords(time=time_centered)
-    ds = ds.cf.add_bounds("time")
-
-    for v in ds.data_vars:
-        if "cell_methods" in ds[v].attrs:
-            del ds[v].attrs["cell_methods"]
-        if "_FillValue" in ds[v].attrs:
-            del ds[v].attrs["_FillValue"]
-    ds["time"].encoding = {
-        "units": f"hours since {start_date}",
-    }
-    ds["time"].attrs.update(
-        {
-            "axis": "T",
-            "long_name": "time",
-        }
-    )
-    ds.attrs["Conventions"] = "CF-1.8"
-
-    encoding = {var: {"_FillValue": False} for var in ["rlat", "rlon", "lon", "lat"]}
-    comp = {"zlib": True, "complevel": 2}
-
-    encoding_compression = {
-        var: comp
-        for var in ds.data_vars
-        if var not in ("time", "time_bounds", "time_bnds")
-    }
-    encoding.update(encoding_compression)
-
-    with ProgressBar():
-        ds.to_netcdf(output_file, encoding=encoding)
-    _ = [f.unlink() for f in p.glob("*.nc")]
-    p.rmdir()
-    return output_file
-
-
-def process_hirham_cdo(
+def process_hirham(
     data_dir: str | Path,
     output_file: str | Path,
     base_url: str,
-    vars_dict: dict,
     overwrite: bool = False,
     max_workers: int = 4,
     start_year: int = 1980,
@@ -216,8 +131,6 @@ def process_hirham_cdo(
         Path to the output NetCDF file.
     base_url : str
         Base URL for downloading HIRHAM data.
-    vars_dict : Dict
-        Dictionary of variables to process with their attributes.
     overwrite : bool, optional
         Whether to overwrite existing files, by default False.
     max_workers : int, optional
@@ -251,61 +164,33 @@ def process_hirham_cdo(
         max_workers=max_workers,
     )
 
-    # Initialize an empty list to store the parts of the string
-    setattribute_parts = []
+    rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
+    rho_w.name = "water_density"
 
-    # Iterate over the dictionary items
-    for key, value in vars_dict.items():
-        setattribute_parts.append(f"""{key}@units='{value["units"]}'""")
-    setattribute = ",".join(setattribute_parts)
-
-    print("Merging daily files and calculate monthly means.")
-    for year in range(start_year, end_year + 1):
-        print(f"..processing {year}")
-        p = hirham_nc_dir / Path(str(year))
-        responses = sorted(p.glob("*.nc"))
-        infiles = [str(p.absolute()) for p in responses]
-        infiles = " ".join(infiles)
-        ofile = hirham_nc_dir / Path(f"{year}.nc")
-        outfile = str(ofile.absolute())
-
-        start = time.time()
-        cdo.setreftime(
-            "1975-01-01",
-            input=f"""-settbounds,day -settaxis,"{year}-01-01" -setattribute,{setattribute}  -mergetime """
-            + infiles,
-            output=outfile,
-            options=f"-f nc4 -z zip_2 -P {max_workers}",
-        )
-        end = time.time()
-        time_elapsed = end - start
-        print(f"Time elapsed {time_elapsed:.0f}s")
-
-    start = time.time()
-    infiles = [
-        str((hirham_nc_dir / Path(f"{year}.nc")).absolute())
-        for year in range(start_year, end_year + 1)
-    ]
-    infiles = " ".join(infiles)
-    merged = cdo.mergetime(
-        input=infiles,
-        options=f"-f nc4 -z zip_2 -P {max_workers}",
+    ds = xr.open_mfdataset(
+        sorted(responses),
+        preprocess=preprocess_time,
+        parallel=False,
+        engine="netcdf4",
+        chunks="auto",
     )
-    ds = cdo.settunits(
-        "days",
-        input=merged,
-        returnXDataset=True,
-    )
+    ds.lat.attrs["units"] = "degree"
+    ds.lon.attrs["units"] = "degree"
+    ds = ds[["tas", "rainfall", "snfall", "rogl", "gld", "rfrz", "sn", "snmel"]]
+    ds = ds.rename({"ncl4": "rlat", "ncl5": "rlon", "y": "rlat", "x": "rlon"})
 
-    ds["rlat"].attrs.update({"standard_name": "grid_latitude"})
-    ds["rlon"].attrs.update({"standard_name": "grid_longitude"})
-    for v in ds.data_vars:
-        if "cell_methods" in ds[v].attrs:
-            del ds[v].attrs["cell_methods"]
-        if "_FillValue" in ds[v].attrs:
-            del ds[v].attrs["_FillValue"]
-
-    ds.attrs["Conventions"] = "CF-1.8"
+    ds["sn"].attrs.update({"units": "m"})
+    ds["rfrz"].attrs.update({"units": "m day^-1"})
+    ds["rogl"].attrs.update({"units": "kg m^-2 day^-1"})
+    ds["gld"].attrs.update({"units": "kg m^-2 day^-1"})
+    ds["rainfall"].attrs.update({"units": "kg m^-2 day^-1"})
+    ds["snfall"].attrs.update({"units": "kg m^-2 day^-1"})
+    ds["snmel"].attrs.update({"units": "kg m^-2 day^-1"})
+    ds = ds.pint.quantify()
+    ds["tas"] = ds["tas"].pint.to("celsius")
+    ds["precipitation"] = ds["rainfall"] + ds["snfall"]
+    ds["precipitation"].attrs.update({"long_name": "precipitation_flux"})
+    ds = ds.pint.dequantify()
 
     encoding = {var: {"_FillValue": False} for var in ["rlat", "rlon"]}
     comp = {"zlib": True, "complevel": 2, "_FillValue": None}
@@ -320,9 +205,69 @@ def process_hirham_cdo(
     with ProgressBar():
         ds.to_netcdf(output_file, encoding=encoding)
 
-    end = time.time()
-    time_elapsed = end - start
-    print(f"Time elapsed {time_elapsed:.0f}s")
+
+def preprocess_time(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
+    """
+    Replace a numeric time coordinate.
+
+    This helper expects the first element of ``ds.time`` to be a floating-point
+    value where the integer part encodes the calendar date as ``YYYYMMDD``.
+    The fractional part is ignored and the resulting timestamp is set to
+    **12:00 (noon)** on that date. The dataset is then assigned a new ``time``
+    coordinate consisting of a single daily timestamp.
+
+    Parameters
+    ----------
+    ds : xr.Dataset or xr.DataArray
+        Input object with a ``time`` coordinate containing at least one value.
+        The first value must be numeric and interpretable as ``YYYYMMDD`` when
+        taking ``floor(time[0])``.
+
+    Returns
+    -------
+    xr.Dataset or xr.DataArray
+        A copy of ``ds`` with its ``time`` coordinate replaced by a length-1
+        ``DatetimeIndex`` at noon of the parsed date.
+
+    Raises
+    ------
+    KeyError
+        If ``ds`` has no ``time`` coordinate.
+    ValueError
+        If the first ``time`` value cannot be parsed as ``YYYYMMDD``.
+
+    Notes
+    -----
+    - The fractional day in ``ds.time`` is not used. The output time is always
+      set to noon (12:00) to avoid edge cases around time zone offsets and
+      midnight.
+    - This function assigns a single timestamp (``periods=1``). If you want a
+      full daily range, adjust ``periods`` accordingly.
+
+    Examples
+    --------
+    >>> ds = ds.assign_coords(time=("time", [19800101.875]))
+    >>> out = preprocess_time(ds)
+    >>> str(out.time.values[0])[:19]
+    '1980-01-01T12:00:00'
+    """
+    t = ds.time.to_numpy()[0]  # split date and fractional day
+    date_int = np.floor(t).astype(int)
+
+    # parse YYYYMMDD
+    base_date = pd.to_datetime(date_int.astype(str), format="%Y%m%d")
+
+    # add fractional day (currently fixed to noon)
+    dt = base_date + pd.to_timedelta(12, unit="h")
+
+    time = xr.date_range(
+        start=dt,  # 1980-01-01
+        freq="D",
+        periods=1,
+    )
+
+    ds = ds.assign_coords(time=time)
+    return ds
 
 
 def download_file(url: str, output_path: Path) -> None:
@@ -419,20 +364,10 @@ if __name__ == "__main__":
     result_dir = Path("climate")
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    hirham_vars_dict: dict[str, dict[str, str]] = {
-        "tas": {"pism_name": "ice_surface_temp", "units": "kelvin"},
-        "rogl": {"pism_name": "water_input_rate", "units": "kg m^-2 day^-1"},
-        "gld": {"pism_name": "climatic_mass_balance", "units": "kg m^-2 day^-1"},
-        "rainfall": {"pism_name": "rainfall", "units": "kg m^-2 day^-1"},
-        "snfall": {"pism_name": "snowfall", "units": "kg m^-2 day^-1"},
-        "snmel": {"pism_name": "snowmelt", "units": "kg m^-2 day^-1"},
-    }
-
-    start_year, end_year = 1980, 1989
+    start_year, end_year = 1980, 1981
     output_file = result_dir / Path(f"HIRHAM5-daily-ERA5_{start_year}_{end_year}.nc")
-    process_hirham_cdo(
+    process_hirham(
         data_dir=result_dir,
-        vars_dict=hirham_vars_dict,
         start_year=start_year,
         end_year=end_year,
         output_file=output_file,

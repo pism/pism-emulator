@@ -64,12 +64,12 @@ def draw_samples(n_samples: int = 10_000, random_seed: int = 2) -> pd.DataFrame:
       deterministic output.
     """
     distributions = {
-        "pdd_factor_snow": uniform(loc=1.0, scale=5.0),   # [1, 6]
-        "pdd_factor_ice": uniform(loc=3.0, scale=12.0),   # [3, 15]
-        "refreeze_snow": uniform(loc=0.0, scale=0.8),     # [0, 0.8]
-        "refreeze_ice": uniform(loc=0.0, scale=0.8),      # [0, 0.8]
-        "temp_snow": uniform(loc=-2.0, scale=2.0),        # [-2, 0]
-        "temp_rain": uniform(loc=0.0, scale=4.0),         # [0, 4]
+        "pdd_factor_snow": uniform(loc=1.0, scale=5.0),  # [1, 6]
+        "pdd_factor_ice": uniform(loc=3.0, scale=12.0),  # [3, 15]
+        "refreeze_snow": uniform(loc=0.0, scale=0.8),  # [0, 0.8]
+        "refreeze_ice": uniform(loc=0.0, scale=0.8),  # [0, 0.8]
+        "temp_snow": uniform(loc=-2.0, scale=2.0),  # [-2, 0]
+        "temp_rain": uniform(loc=0.0, scale=4.0),  # [0, 4]
     }
     keys = list(distributions.keys())
     d = len(keys)
@@ -77,12 +77,10 @@ def draw_samples(n_samples: int = 10_000, random_seed: int = 2) -> pd.DataFrame:
     # SciPy QMC uses a NumPy Generator for reproducibility
     rng = np.random.default_rng(random_seed)
     sampler = qmc.LatinHypercube(d=d, seed=rng)  # you can also pass seed=random_seed
-    unif_sample = sampler.random(n=n_samples)    # shape (n_samples, d)
+    unif_sample = sampler.random(n=n_samples)  # shape (n_samples, d)
 
     dist_sample = np.empty_like(unif_sample)
     for i, key in enumerate(keys):
         dist_sample[:, i] = distributions[key].ppf(unif_sample[:, i])
 
     return pd.DataFrame(dist_sample, columns=keys)
-
-

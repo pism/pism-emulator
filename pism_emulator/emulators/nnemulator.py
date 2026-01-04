@@ -212,7 +212,7 @@ class DNNEmulator(pl.LightningModule):
             Common keys include:
 
             * ``width`` : int, hidden width (default 128)
-            * ``depth`` : int, number of residual blocks (default 4)
+            * ``depth`` : int, number of residual blocks (default 3)
             * ``dropout`` : float, dropout probability (default 0.5)
             * ``activation`` : {"relu","silu","gelu"}, activation function (default "relu")
             * ``learning_rate`` : float, optimizer learning rate (default 1e-2)
@@ -250,7 +250,7 @@ class DNNEmulator(pl.LightningModule):
         )
 
         width: int = int(self.hparams.get("width", 128))
-        depth: int = int(self.hparams.get("depth", 4))
+        depth: int = int(self.hparams.get("depth", 3))
         p_drop: float = float(self.hparams.get("dropout", 0.5))
         activation: str = str(self.hparams.get("activation", "relu"))
 

@@ -2,10 +2,10 @@ name: pism-emulator
 channels:
   - conda-forge
 dependencies:
-  - cdo
-  - python=3.11.6
-  - pre-commit
   - mypy
+  - pre-commit
+  - python=3.11.6
+  - wget
   - pip
   - pip:
       - -r requirements.txt

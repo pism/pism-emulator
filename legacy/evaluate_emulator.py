@@ -178,7 +178,7 @@ if __name__ == "__main__":
         F_pred = np.zeros((num_models, F.shape[1]))
         for model_index in range(n_models):
             p_models.update(1)
-            emulator_file = join(emulator_dir, "emulator", f"emulator_{model_index}.h5")
+            emulator_file = join(emulator_dir, f"emulator_{model_index}.h5")
             state_dict = torch.load(emulator_file)
             e = NNEmulator(
                 state_dict["l_1.weight"].shape[1],
@@ -249,34 +249,19 @@ if __name__ == "__main__":
                 vmax=50,
                 cmap="coolwarm",
             )
-            try:
-                axs[-1, k].text(
-                    0.01,
-                    0.0,
-                    "\n".join(
-                        [
-                            f"{keys_dict[i]}: {j:.3f}"
-                            for i, j in zip(dataset.X_keys, X_val_unscaled)
-                        ]
-                    ),
-                    c="k",
-                    size=7,
-                    transform=axs[-1, k].transAxes,
-                )
-            except:
-                axs[-1, k].text(
-                    0.01,
-                    0.0,
-                    "\n".join(
-                        [
-                            f"{i}: {j:.3f}"
-                            for i, j in zip(dataset.X_keys, X_val_unscaled)
-                        ]
-                    ),
-                    c="k",
-                    size=7,
-                    transform=axs[-1, k].transAxes,
-                )
+            axs[-1, k].text(
+                0.01,
+                0.0,
+                "\n".join(
+                    [
+                        f"{keys_dict[i]}: {j:.3f}"
+                        for i, j in zip(dataset.X_keys, X_val_unscaled)
+                    ]
+                ),
+                c="k",
+                size=7,
+                transform=axs[-1, k].transAxes,
+            )
 
             axs[-1, k].text(
                 0.01,
@@ -332,26 +317,26 @@ if __name__ == "__main__":
         weight="bold",
         transform=axs[2, 0].transAxes,
     )
-    cb_ax = fig.add_axes([0.88, 0.65, 0.025, 0.15])
-    plt.colorbar(
-        c1,
-        cax=cb_ax,
-        shrink=0.9,
-        label="speed (m/yr)",
-        orientation="vertical",
-        extend="both",
-    )
-    cb_ax2 = fig.add_axes([0.88, 0.3, 0.025, 0.15])
-    plt.colorbar(
-        c2,
-        cax=cb_ax2,
-        shrink=0.9,
-        label="diff. (m/yr)",
-        orientation="vertical",
-        extend="both",
-    )
-    cb_ax.tick_params(labelsize=7)
-    cb_ax2.tick_params(labelsize=7)
+    # cb_ax = fig.add_axes([0.88, 0.65, 0.025, 0.15])
+    # plt.colorbar(
+    #     c1,
+    #     cax=cb_ax,
+    #     shrink=0.9,
+    #     label="speed (m/yr)",
+    #     orientation="vertical",
+    #     extend="both",
+    # )
+    # cb_ax2 = fig.add_axes([0.88, 0.3, 0.025, 0.15])
+    # plt.colorbar(
+    #     c2,
+    #     cax=cb_ax2,
+    #     shrink=0.9,
+    #     label="diff. (m/yr)",
+    #     orientation="vertical",
+    #     extend="both",
+    # )
+    # cb_ax.tick_params(labelsize=7)
+    # cb_ax2.tick_params(labelsize=7)
     fig.subplots_adjust(wspace=0.0, hspace=0.0)
 
     if validation:

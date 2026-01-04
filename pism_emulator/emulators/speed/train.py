@@ -249,11 +249,13 @@ def main():
     training_files = args.TRAINING_FILES
     y_lim = args.y_lim
 
-    np.random.seed(model_index)
-    random.seed(model_index)
-    np.random.seed(model_index)
-    torch.manual_seed(model_index)
-    pl.seed_everything(model_index, workers=True)
+    g = torch.Generator()
+    g.manual_seed(0)
+
+    np.random.seed(0)
+    random.seed(0)
+    torch.manual_seed(0)
+    pl.seed_everything(0, workers=True)
 
     callbacks: list = [EpochProgressBar(desc="Training")]
 

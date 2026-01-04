@@ -168,6 +168,8 @@ class MALASamplerModule(pl.LightningModule):
         Minimum allowed step size during adaptation.
     h_max : float, default=1.0
         Maximum allowed step size during adaptation.
+    use_eig : bool, default=False
+        Use linalg.eigh to compute :math:`H(x)`.
     acc_target : float, default=0.25
         Target acceptance probability used by the adaptation logic.
     dual_t0 : float, default=10.0
@@ -274,6 +276,7 @@ class MALASamplerModule(pl.LightningModule):
         h0: float = 0.1,
         h_min: float = 1e-3,
         h_max: float = 1.0,
+        use_eig: bool = False,
         acc_target: float = 0.25,
         dual_t0: float = 10.0,
         dual_kappa: float = 0.75,
@@ -346,21 +349,22 @@ class MALASamplerModule(pl.LightningModule):
         self.register_buffer("q", torch.tensor(q, dtype=torch.int), persistent=False)
 
         # Numerics / state
+        self._base_seed: int = 0 if seed is None else int(seed)
         self._eps_beta: float = 1e-7
         self._eps_eig: float = 1e-6
-        self.hessian_counter: int = 0
-        self.show_progress: bool = show_progress
-        self.pbar_update_every: int = int(pbar_update_every)
         self._pbar: Optional[tqdm] = None
         self._rank: int = 0
+        self._step_count: int = 0
         self._total_steps: int = 0
         self.burn: int = int(burn)
-        self.samples: int = int(samples)
         self.delayed_accept: bool = bool(delayed_accept)
-        self.metric_mode: Literal["manifold", "current"] = metric_mode
-        self._step_count: int = 0
+        self.hessian_counter: int = 0
         self.hess_refresh: int = int(hess_refresh)
-        self._base_seed: int = 0 if seed is None else int(seed)
+        self.metric_mode: Literal["manifold", "current"] = metric_mode
+        self.pbar_update_every: int = int(pbar_update_every)
+        self.samples: int = int(samples)
+        self.show_progress: bool = show_progress
+        self.use_eig: bool = use_eig
 
     def configure_optimizers(self) -> None:
         """
@@ -416,14 +420,6 @@ class MALASamplerModule(pl.LightningModule):
         t = r / self.sigma_hat
         nu = self.nu
 
-        # sigma = torch.clamp(self.sigma_hat, 1e-8)
-
-        # t_elem = torch.distributions.StudentT(
-        #     df=nu, loc=0.0, scale=sigma
-        # )  # elementwise
-        # t_joint = torch.distributions.Independent(t_elem, reinterpreted_batch_ndims=1)
-        # log_like = t_joint.log_prob(r)
-
         # Student-t log-likelihood (sum over observation dimension)
         log_like = (
             torch.special.gammaln((nu + 1) * 0.5)
@@ -447,15 +443,6 @@ class MALASamplerModule(pl.LightningModule):
             - torch.lgamma(self.beta_b)
         ).sum()
 
-        # alpha = self.alpha_b.expand_as(X_bar)
-        # beta = self.beta_b.expand_as(X_bar)
-        # beta_elem = torch.distributions.Beta(
-        #     alpha, beta
-        # )  # batch_shape=(D,), event_shape=()
-        # beta_joint = torch.distributions.Independent(
-        #     beta_elem, 1
-        # )  # reinterpret last batch dim as event
-        # log_prior = beta_joint.log_prob(X_bar)
         return -(self.alpha * log_like + log_prior)
 
     @torch.enable_grad()
@@ -746,7 +733,10 @@ class MALASamplerModule(pl.LightningModule):
             or (self.hess_refresh == 1)
             or (self._step_count % self.hess_refresh == 0)
         ):
-            local = self._local_geometry(X)
+            if self.use_eig:
+                local = self._local_geometry_eig(X)
+            else:
+                local = self._local_geometry(X)
         log_pi, _, H, Hinv, log_det_Hinv = local
 
         # Propose

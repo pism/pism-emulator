@@ -426,6 +426,7 @@ class PDDResult(TypedDict):
     melt: NDArrayF
     runoff: NDArrayF
     smb: NDArrayF
+    snow: NDArrayF
 
 
 @freeze_it
@@ -612,6 +613,7 @@ class ReferencePDDModel:
             "melt": self._integrate(melt_rate),
             "runoff": self._integrate(runoff_rate),
             "smb": self._integrate(inst_smb),
+            "snow": self._integrate(snow_depth),
         }
         return result
 
@@ -1077,6 +1079,7 @@ class PDD(pl.LightningModule):
         snow_refreeze = self._integrate(snow_refreeze_rate).unsqueeze(-1)
         ice_refreeze = self._integrate(ice_refreeze_rate).unsqueeze(-1)
         smb = self._integrate(inst_smb).unsqueeze(-1)
+        snow = self._integrate(snow_depth).unsqueeze(-1)
 
         result: dict[str, Tensor] = {
             "inst_pdd": inst_pdd,
@@ -1100,6 +1103,7 @@ class PDD(pl.LightningModule):
             "snow_refreeze": snow_refreeze,
             "ice_refreeze": ice_refreeze,
             "smb": smb,
+            "snow": snow,
         }
 
         if return_dict:

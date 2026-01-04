@@ -1524,6 +1524,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
 
         X = torch.from_numpy(np.array(samples[keep], dtype=np.float32))
         Y = torch.from_numpy(np.array(response[keep], dtype=np.float32))
+        Y[Y < 0] = 0
 
         self.X_mean = X.mean(axis=0)
         self.X_std = X.std(axis=0)
@@ -2072,18 +2073,15 @@ class PISMInterpolatedDataset(Dataset):
 
         end_time = time()
         rank_zero_info(f"Reading training data took {(end_time - start_time):.0f}s")
-        # Same run filtering policy: use upper y_lim bound in *physical* space proxy.
-        good = response.max(axis=1) < cfg.y_lim[1]
 
-        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
-        Y = torch.from_numpy(response.astype(np.float32)[good])
+        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))
+        Y = torch.from_numpy(response.astype(np.float32))
         Y = torch.clamp(Y, *cfg.y_lim)
 
         name = cfg.y_transform
         params = dict(cfg.y_transform_kwargs or {})
 
         Y, params = _apply_y_transform(Y, name=name, y_lim=cfg.y_lim, params=params)
-
         # Apply same transform to the target vector (already clamped in _load_target_and_mask)
         tY = self.target.Y_target
         tY, _ = _apply_y_transform(tY, name=name, y_lim=cfg.y_lim, params=params)

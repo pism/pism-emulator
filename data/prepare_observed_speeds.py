@@ -99,7 +99,7 @@ def main():
     ds["velsurf_mag_error"] = (ds["ex"] ** 2 + ds["ey"] ** 2) ** (1.0 / 2)
     ds["velsurf_mag"].attrs.update({"units": "m/yr"})
     ds["velsurf_mag_error"].attrs.update({"units": "m/yr"})
-
+    ds.to_netcdf("observed_speeds/greenland_vel_mosaic250_v1.nc")
     ds_t = xr.open_dataset(
         "speeds_v2/velsurf_mag_gris_g1800m_v4_id_0_0_50.nc"
     ).squeeze()

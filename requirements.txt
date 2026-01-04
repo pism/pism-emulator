@@ -1,6 +1,5 @@
 arviz
 bokeh
-cdo
 cf_xarray
 dask[distributed,dataframe]
 earthaccess
