@@ -167,13 +167,14 @@ def process_hirham(
     rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
     rho_w.name = "water_density"
 
-    # Use parallel=True and optimize chunks for time series data
     ds = xr.open_mfdataset(
         responses,
         preprocess=preprocess_time,
-        parallel=True,
+        parallel=False,
         engine="netcdf4",
-        chunks={"time": 365},  # Chunk by year for better performance
+        chunks={"time": 365, "rlat": -1, "rlon": -1},
+        combine="nested",
+        concat_dim="time",
     )
     ds.lat.attrs["units"] = "degree"
     ds.lon.attrs["units"] = "degree"
@@ -204,15 +205,11 @@ def process_hirham(
     }
     encoding.update(encoding_compression)
 
-    print(f"Writing to {output_file}")
-    print("This may take several minutes. Progress bar may not update smoothly.")
-
-    # Compute the dataset before writing to show real progress
-    print("Computing dataset (this is the slow part)...")
+    print("Computing dataset...")
     with ProgressBar():
         ds_computed = ds.compute()
 
-    print("Writing computed data to disk (fast)...")
+    print(f"Writing to {output_file}")
     ds_computed.to_netcdf(output_file, encoding=encoding)
 
 
