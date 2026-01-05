@@ -45,6 +45,9 @@ from pism_emulator.models.pdd import PDD
 
 xr.set_options(keep_attrs=True)
 
+torch.set_float32_matmul_precision("medium")
+torch.backends.cudnn.conv.fp32_precision = "tf32"
+
 warnings.filterwarnings(
     "ignore",
     message=r".*'predict_dataloader' does not have many workers.*",
