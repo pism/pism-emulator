@@ -167,12 +167,13 @@ def process_hirham(
     rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
     rho_w.name = "water_density"
 
+    # Use parallel=True and optimize chunks for time series data
     ds = xr.open_mfdataset(
         responses,
         preprocess=preprocess_time,
-        parallel=False,
+        parallel=True,
         engine="netcdf4",
-        chunks="auto",
+        chunks={"time": 365},  # Chunk by year for better performance
     )
     ds.lat.attrs["units"] = "degree"
     ds.lon.attrs["units"] = "degree"
@@ -193,7 +194,8 @@ def process_hirham(
     ds = ds.pint.dequantify()
 
     encoding = {var: {"_FillValue": False} for var in ["rlat", "rlon"]}
-    comp = {"zlib": True, "complevel": 2, "_FillValue": None}
+    # Use complevel=1 for faster writes (was 2)
+    comp = {"zlib": True, "complevel": 1, "_FillValue": None}
 
     encoding_compression = {
         var: comp
@@ -201,9 +203,17 @@ def process_hirham(
         if var not in ("time", "time_bounds", "time_bnds")
     }
     encoding.update(encoding_compression)
+
     print(f"Writing to {output_file}")
+    print("This may take several minutes. Progress bar may not update smoothly.")
+
+    # Compute the dataset before writing to show real progress
+    print("Computing dataset (this is the slow part)...")
     with ProgressBar():
-        ds.to_netcdf(output_file, encoding=encoding)
+        ds_computed = ds.compute()
+
+    print("Writing computed data to disk (fast)...")
+    ds_computed.to_netcdf(output_file, encoding=encoding)
 
 
 def preprocess_time(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
