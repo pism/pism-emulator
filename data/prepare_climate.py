@@ -19,7 +19,7 @@
 """
 Prepare Climate.
 """
-# pylint: disable=unused-import,broad-exception-caught,too-many-positional-arguments,redefined-builtin,redefined-outer-name,too-many-statements
+# pylint: disable=unused-import,broad-exception-caught,too-many-positional-arguments,redefined-builtin,redefined-outer-name,too-many-statements,no-member
 # mypy: ignore-errors
 
 import tarfile
@@ -163,12 +163,12 @@ def process_hirham(
         overwrite=overwrite,
         max_workers=max_workers,
     )
-
+    responses = sorted(responses)
     rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
     rho_w.name = "water_density"
 
     ds = xr.open_mfdataset(
-        sorted(responses),
+        responses,
         preprocess=preprocess_time,
         parallel=False,
         engine="netcdf4",
@@ -254,7 +254,9 @@ def preprocess_time(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
     # Check if time is already datetime objects
     if np.issubdtype(time_values.dtype, np.datetime64):
         # Already datetimes, just set to noon
-        new_times = pd.DatetimeIndex(time_values).normalize() + pd.to_timedelta(12, unit="h")
+        new_times = pd.DatetimeIndex(time_values).normalize() + pd.to_timedelta(
+            12, unit="h"
+        )
     else:
         # Numeric format (YYYYMMDD.fraction) - process all values
         date_ints = np.floor(time_values).astype(int)
@@ -351,17 +353,18 @@ if __name__ == "__main__":
     # set up the option parser
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.description = "Prepare climate forcing."
+    parser.add_argument("--years", nargs=2, type=int, default=[1980, 1989])
     parser.add_argument(
         "--n_jobs", help="""Number of parallel jobs.""", type=int, default=8
     )
     options = parser.parse_args()
     max_workers = options.n_jobs
-    overwrite = False
+    years = options.years
 
     result_dir = Path("climate")
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    start_year, end_year = 1980, 1989
+    start_year, end_year = years
     output_file = result_dir / Path(f"HIRHAM5-daily-ERA5_{start_year}_{end_year}.nc")
     process_hirham(
         data_dir=result_dir,
