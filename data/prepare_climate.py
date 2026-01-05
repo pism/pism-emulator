@@ -210,71 +210,60 @@ def preprocess_time(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
     """
     Replace a numeric time coordinate.
 
-    This helper expects the first element of ``ds.time`` to be either:
-    1. A floating-point value where the integer part encodes the calendar date as ``YYYYMMDD``
-    2. A datetime object (in which case it's already processed)
+    This helper expects ``ds.time`` values to be either:
+    1. Floating-point values where the integer part encodes the calendar date as ``YYYYMMDD``
+    2. Datetime objects (in which case they're already processed)
 
-    The fractional part is ignored and the resulting timestamp is set to
-    **12:00 (noon)** on that date. The dataset is then assigned a new ``time``
-    coordinate consisting of a single daily timestamp.
+    The fractional part is ignored and the resulting timestamps are set to
+    **12:00 (noon)** on each date.
 
     Parameters
     ----------
     ds : xr.Dataset or xr.DataArray
-        Input object with a ``time`` coordinate containing at least one value.
-        The first value must be numeric and interpretable as ``YYYYMMDD`` when
-        taking ``floor(time[0])`` or already be a datetime object.
+        Input object with a ``time`` coordinate.
+        Values must be numeric and interpretable as ``YYYYMMDD`` or already be datetime objects.
 
     Returns
     -------
     xr.Dataset or xr.DataArray
-        A copy of ``ds`` with its ``time`` coordinate replaced by a length-1
-        ``DatetimeIndex`` at noon of the parsed date.
+        A copy of ``ds`` with its ``time`` coordinate replaced by datetime values at noon.
 
     Raises
     ------
     KeyError
         If ``ds`` has no ``time`` coordinate.
     ValueError
-        If the first ``time`` value cannot be parsed as ``YYYYMMDD``.
+        If time values cannot be parsed as ``YYYYMMDD``.
 
     Notes
     -----
     - The fractional day in ``ds.time`` is not used. The output time is always
       set to noon (12:00) to avoid edge cases around time zone offsets and
       midnight.
-    - This function assigns a single timestamp (``periods=1``). If you want a
-      full daily range, adjust ``periods`` accordingly.
+    - Preserves the full time dimension length.
 
     Examples
     --------
-    >>> ds = ds.assign_coords(time=("time", [19800101.875]))
+    >>> ds = ds.assign_coords(time=("time", [19800101.875, 19800102.875]))
     >>> out = preprocess_time(ds)
     >>> str(out.time.values[0])[:19]
     '1980-01-01T12:00:00'
     """
-    t = ds.time.to_numpy()[0]
+    time_values = ds.time.to_numpy()
 
-    # Check if time is already a datetime object
-    if np.issubdtype(type(t), np.datetime64):
-        # Already a datetime, just set to noon
-        base_date = pd.Timestamp(t).normalize()
-        dt = base_date + pd.to_timedelta(12, unit="h")
+    # Check if time is already datetime objects
+    if np.issubdtype(time_values.dtype, np.datetime64):
+        # Already datetimes, just set to noon
+        new_times = pd.DatetimeIndex(time_values).normalize() + pd.to_timedelta(12, unit="h")
     else:
-        # Numeric format (YYYYMMDD.fraction)
-        date_int = np.floor(t).astype(int)
-        # parse YYYYMMDD
-        base_date = pd.to_datetime(date_int.astype(str), format="%Y%m%d")
-        # add fractional day (currently fixed to noon)
-        dt = base_date + pd.to_timedelta(12, unit="h")
+        # Numeric format (YYYYMMDD.fraction) - process all values
+        date_ints = np.floor(time_values).astype(int)
+        # Parse YYYYMMDD for all dates
+        base_dates = pd.to_datetime(date_ints.astype(str), format="%Y%m%d")
+        # Set all to noon
+        new_times = base_dates + pd.to_timedelta(12, unit="h")
 
-    time = xr.date_range(
-        start=dt,
-        freq="D",
-        periods=1,
-    )
-
-    ds = ds.assign_coords(time=time)
+    ds = ds.assign_coords(time=new_times)
     return ds
 
 
