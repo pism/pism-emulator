@@ -123,17 +123,19 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--result-dir", default="posterior")
     parser.add_argument("--years", nargs=2, default=["1980", "1989"])
     parser.add_argument("--normalize", action="store_true")
+    parser.add_argument("--use-eig", action="store_true")
     parser.add_argument("CLIMATEFILE", nargs=1)
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     accelerator = args.accelerator
     alpha = args.alpha
-    chains = args.chains
-    samples = args.samples
     burn = args.burn
+    chains = args.chains
     normalize = args.normalize
-    years = args.years
+    samples = args.samples
+    use_eig = args.use_eig
     url = args.CLIMATEFILE[0]
+    years = args.years
 
     posterior_dir = Path(args.result_dir)
     posterior_dir.mkdir(parents=True, exist_ok=True)
@@ -250,6 +252,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         samples=samples,
         h0=0.1,
         acc_target=0.25,
+        use_eig=use_eig,
     )
 
     alpha_b = 3.0

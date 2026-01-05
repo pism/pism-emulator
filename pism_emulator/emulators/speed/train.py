@@ -302,7 +302,10 @@ def main():
         seed=model_index,
     )
 
-    dm.prepare_data(cutoff=cutoff, q=q)
+    svd_dir = Path("svd_cache")
+    svd_dir.mkdir(parents=True, exist_ok=True)
+    svd_cache = svd_dir / Path("svd.h5")
+    dm.prepare_data(cutoff=cutoff, q=q, cache_path=svd_cache)
     dm.setup(stage="fit")
     V_hat = dm.eig.V_hat
     F_mean = dm.eig.F_mean
