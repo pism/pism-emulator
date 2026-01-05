@@ -1,13 +1,13 @@
 # Copyright (C) 2024 Andy Aschwanden
 #
-# This file is part of pism-ragis.
+# This file is part of pism-emulator.
 #
-# PISM-RAGIS is free software; you can redistribute it and/or modify it under the
+# PISM-EMULATOR is free software; you can redistribute it and/or modify it under the
 # terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 3 of the License, or (at your option) any later
 # version.
 #
-# PISM-RAGIS is distributed in the hope that it will be useful, but WITHOUT ANY
+# PISM-EMULATOR is distributed in the hope that it will be useful, but WITHOUT ANY
 # WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
 # details.
@@ -43,7 +43,7 @@ from tqdm.auto import tqdm
 
 
 def unzip_files(
-    files=list[str | Path],
+    files: list[str | Path],
     output_dir: str | Path = ".",
     overwrite: bool = False,
     max_workers: int = 4,
@@ -210,8 +210,10 @@ def preprocess_time(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
     """
     Replace a numeric time coordinate.
 
-    This helper expects the first element of ``ds.time`` to be a floating-point
-    value where the integer part encodes the calendar date as ``YYYYMMDD``.
+    This helper expects the first element of ``ds.time`` to be either:
+    1. A floating-point value where the integer part encodes the calendar date as ``YYYYMMDD``
+    2. A datetime object (in which case it's already processed)
+
     The fractional part is ignored and the resulting timestamp is set to
     **12:00 (noon)** on that date. The dataset is then assigned a new ``time``
     coordinate consisting of a single daily timestamp.
@@ -221,7 +223,7 @@ def preprocess_time(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
     ds : xr.Dataset or xr.DataArray
         Input object with a ``time`` coordinate containing at least one value.
         The first value must be numeric and interpretable as ``YYYYMMDD`` when
-        taking ``floor(time[0])``.
+        taking ``floor(time[0])`` or already be a datetime object.
 
     Returns
     -------
@@ -251,17 +253,23 @@ def preprocess_time(ds: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
     >>> str(out.time.values[0])[:19]
     '1980-01-01T12:00:00'
     """
-    t = ds.time.to_numpy()[0]  # split date and fractional day
-    date_int = np.floor(t).astype(int)
+    t = ds.time.to_numpy()[0]
 
-    # parse YYYYMMDD
-    base_date = pd.to_datetime(date_int.astype(str), format="%Y%m%d")
-
-    # add fractional day (currently fixed to noon)
-    dt = base_date + pd.to_timedelta(12, unit="h")
+    # Check if time is already a datetime object
+    if np.issubdtype(type(t), np.datetime64):
+        # Already a datetime, just set to noon
+        base_date = pd.Timestamp(t).normalize()
+        dt = base_date + pd.to_timedelta(12, unit="h")
+    else:
+        # Numeric format (YYYYMMDD.fraction)
+        date_int = np.floor(t).astype(int)
+        # parse YYYYMMDD
+        base_date = pd.to_datetime(date_int.astype(str), format="%Y%m%d")
+        # add fractional day (currently fixed to noon)
+        dt = base_date + pd.to_timedelta(12, unit="h")
 
     time = xr.date_range(
-        start=dt,  # 1980-01-01
+        start=dt,
         freq="D",
         periods=1,
     )
