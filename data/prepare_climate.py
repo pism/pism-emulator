@@ -364,7 +364,7 @@ if __name__ == "__main__":
     result_dir = Path("climate")
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    start_year, end_year = 1980, 1981
+    start_year, end_year = 1980, 1989
     output_file = result_dir / Path(f"HIRHAM5-daily-ERA5_{start_year}_{end_year}.nc")
     process_hirham(
         data_dir=result_dir,
