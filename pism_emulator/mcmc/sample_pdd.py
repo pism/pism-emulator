@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Sequence, cast
 
 import arviz as az
+from dask.diagnostics import ProgressBar
 import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
@@ -165,6 +166,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
     rho_w.name = "water_density"
     day = xr.DataArray(1).pint.quantify("day")
+    
     hh5_vars = {
         "tas": "temp",
         "precipitation": "precipitation",
@@ -174,12 +176,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "sn": "snow",
         "snmel": "snow_melt",
     }
+
     ds = xr.open_dataset(
         url,
-        chunks="auto",
+        chunks={"time": -1, "rlat": "auto", "rlon": "auto"},
     )
 
-    ds = (ds.thin({"rlat": thin, "rlon": thin}).sel(time=slice(*years))).fillna(0)
+    ds = ds.sel(time=slice(*years))
+    ds = ds.thin({"rlat": thin, "rlon": thin})
     ds = ds.rename_vars(hh5_vars)
     ds = ds.transpose("rlat", "rlon", "time")
     ds = ds.stack(z=("rlat", "rlon")).dropna(dim="z").unify_chunks()
@@ -206,6 +210,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         .set_index(time=("year", "month"))
         .unstack("time")
     )
+    rank_zero_info("Preparing training data")
+    with ProgressBar():
+        train = train.pint.dequantify().compute()
 
     predict_rates = ds[predictor_rate_vars].resample(time="YS").sum("time") * day
     predict_sums = ds[predictor_sum_vars]
@@ -224,6 +231,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         .set_index(time=("year", "month"))
         .unstack("time")
     )
+    rank_zero_info("Preparing prediction data")
+    with ProgressBar():
+        predict = predict.pint.dequantify().compute()
 
     temp = torch.from_numpy(train["temp"].to_numpy().astype(np.float32, copy=False))
     precip = torch.from_numpy(
