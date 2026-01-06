@@ -191,7 +191,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     predictor_rate_vars = ["smb", "runoff", "refreeze", "snow_melt"]
     predictor_sum_vars = ["snow"]
     predictor_vars = predictor_rate_vars + predictor_sum_vars
-    # predictor_vars = predictor_rate_vars
 
     temp_monthly_mean = ds["temp"].resample(time="MS").mean("time")
     precipitation_monthly_sum = ds["precipitation"].resample(time="MS").sum("time")
@@ -221,7 +220,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     ).first("time")
     predict_sums = predict_sums.resample(time="YS").max("time")
     predict = xr.merge([predict_rates, predict_sums])
-    # predict = predict_rates
 
     predict = (
         predict.assign_coords(
