@@ -186,6 +186,11 @@ class MALASamplerModule(pl.LightningModule):
         Number of burn-in iterations (discarded).
     samples : int, default=2000
         Number of post-burn samples stored per chain.
+    reflect_boundaries : bool, default=True
+        If True, reflect proposals at parameter boundaries to enforce hard
+        constraints X_min <= X <= X_max. This prevents the sampler from
+        exploring unphysical parameter regions. If False, proposals outside
+        bounds are simply clamped.
     show_progress : bool, default=True
         If True, render per-chain progress bars via :mod:`tqdm`.
     pbar_update_every : int, default=10
@@ -285,6 +290,7 @@ class MALASamplerModule(pl.LightningModule):
         beta: float = 0.99,
         burn: int = 500,
         samples: int = 2000,
+        reflect_boundaries: bool = True,
         show_progress: bool = True,
         pbar_update_every: int = 10,
         q: int = 100,
@@ -305,6 +311,7 @@ class MALASamplerModule(pl.LightningModule):
             dual_gamma,
             k_adapt,
             beta,
+            reflect_boundaries,
         )
 
         if isinstance(model, torch.nn.Module):
@@ -697,7 +704,7 @@ class MALASamplerModule(pl.LightningModule):
         logdet_Sigma = d * np.log(2.0 * h) + log_det_Hinv
         return -0.5 * (d * torch.log(two_pi) + logdet_Sigma + quad)
 
-    def _mala_step(
+    def _mala_step(  # pylint: disable=too-many-branches
         self,
         X: Tensor,
         h: float,
@@ -744,6 +751,30 @@ class MALASamplerModule(pl.LightningModule):
             L = torch.linalg.cholesky(2.0 * h * Hinv)
             eps = torch.randn_like(X)
             Xp = (X + L @ eps).detach()
+
+            # Enforce boundary constraints
+            if self.hparams.reflect_boundaries:
+                # Reflect at boundaries to keep proposals within [X_min, X_max]
+                # This prevents proposals from exploring unphysical parameter regions
+                max_reflections = 10  # Prevent infinite loops
+                for _ in range(max_reflections):
+                    # Check lower bounds
+                    below = Xp < self.X_min
+                    if below.any():
+                        Xp = torch.where(below, self.X_min + (self.X_min - Xp), Xp)
+
+                    # Check upper bounds
+                    above = Xp > self.X_max
+                    if above.any():
+                        Xp = torch.where(above, self.X_max - (Xp - self.X_max), Xp)
+
+                    # If all components are within bounds, we're done
+                    if not (below.any() or above.any()):
+                        break
+
+            # Final clamping as safety net (always applied)
+            Xp = torch.clamp(Xp, self.X_min, self.X_max)
+
         Xp.requires_grad_(True)
 
         # Target at proposal
@@ -1511,6 +1542,8 @@ class ReparametrizedMALASamplerModule(
         phi: Tensor,
         max_iter: int = 100,
         lr: float = 1.0,
+        use_adam: bool = False,
+        n_restarts: int = 1,
     ) -> Tensor:
         """
         Find MAP estimate in the reparametrized space.
@@ -1520,8 +1553,41 @@ class ReparametrizedMALASamplerModule(
         phi : torch.Tensor
             Initial point in unbounded space.
         max_iter : int, default=100
-            Maximum L-BFGS iterations.
+            Maximum optimizer iterations (per restart if using Adam).
         lr : float, default=1.0
+            Learning rate (1.0 for L-BFGS, 0.01-0.1 recommended for Adam).
+        use_adam : bool, default=False
+            If True, use Adam optimizer with multiple restarts instead of L-BFGS.
+            Adam is more robust to steep gradients near boundaries.
+        n_restarts : int, default=1
+            Number of random restarts when using Adam (ignored for L-BFGS).
+
+        Returns
+        -------
+        torch.Tensor
+            MAP point in unbounded space φ.
+
+        Notes
+        -----
+        For problems with steep gradients near boundaries (common with sigmoid
+        transformations), consider using Adam with multiple restarts:
+        ``find_MAP(phi, use_adam=True, lr=0.05, n_restarts=5, max_iter=1000)``
+        """
+        if use_adam:
+            return self._find_MAP_adam(phi, max_iter, lr, n_restarts)
+        return self._find_MAP_lbfgs(phi, max_iter, lr)
+
+    def _find_MAP_lbfgs(self, phi: Tensor, max_iter: int, lr: float) -> Tensor:
+        """
+        Find MAP using L-BFGS optimizer (original implementation).
+
+        Parameters
+        ----------
+        phi : torch.Tensor
+            Initial point in unbounded space.
+        max_iter : int
+            Maximum number of L-BFGS iterations.
+        lr : float
             L-BFGS learning rate.
 
         Returns
@@ -1546,15 +1612,137 @@ class ReparametrizedMALASamplerModule(
             """
             self.zero_grad(set_to_none=True)
             loss = self.neg_log_prob(phi)
+            if not torch.isfinite(loss):
+                return torch.tensor(1e10, device=loss.device, dtype=loss.dtype)
             loss.backward()
+            if phi.grad is not None:
+                if torch.isnan(phi.grad).any() or torch.isinf(phi.grad).any():
+                    phi.grad.zero_()
+                    return torch.tensor(1e10, device=loss.device, dtype=loss.dtype)
+                torch.nn.utils.clip_grad_norm_([phi], max_norm=100.0)
             return loss
 
         opt = torch.optim.LBFGS(
             [phi], lr=lr, max_iter=max_iter, line_search_fn="strong_wolfe"
         )
-        _ = opt.step(closure)
+        try:
+            _ = opt.step(closure)
+            if torch.isnan(phi).any():
+                raise ValueError("Optimization produced NaN")
+        except (RuntimeError, ValueError) as e:
+            print(f"First optimization attempt failed: {e}")
+            print("Retrying with conservative settings...")
+            phi = (
+                phi.detach()
+                .to(device=self.device, dtype=torch.float32)
+                .requires_grad_(True)
+            )
+            opt = torch.optim.LBFGS(
+                [phi],
+                lr=0.01,
+                max_iter=max_iter * 3,
+                line_search_fn=None,
+                tolerance_grad=1e-4,
+                tolerance_change=1e-6,
+            )
+            _ = opt.step(closure)
+
         self.zero_grad(set_to_none=True)
         return phi
+
+    def _find_MAP_adam(
+        self, phi_init: Tensor, max_iter: int, lr: float, n_restarts: int
+    ) -> Tensor:
+        """
+        Find MAP using Adam optimizer with multiple random restarts.
+
+        More robust to steep gradients near boundaries than L-BFGS.
+
+        Parameters
+        ----------
+        phi_init : torch.Tensor
+            Initial point in unbounded space (used for first restart).
+        max_iter : int
+            Maximum number of Adam iterations per restart.
+        lr : float
+            Adam learning rate (typically 0.01-0.1).
+        n_restarts : int
+            Number of random restarts to try.
+
+        Returns
+        -------
+        torch.Tensor
+            MAP point in unbounded space φ (best across all restarts).
+        """
+        best_phi = None
+        best_loss = float("inf")
+
+        for restart in range(n_restarts):
+            # Initialize: use provided init for first restart, random for others
+            if restart == 0:
+                phi = phi_init.detach().clone()
+            else:
+                # Random initialization: sample from standard normal
+                phi = torch.randn_like(phi_init) * 0.5
+
+            phi = phi.to(device=self.device, dtype=torch.float32).requires_grad_(True)
+
+            # Adam optimizer
+            opt = torch.optim.Adam([phi], lr=lr, betas=(0.9, 0.999))
+
+            # Learning rate scheduler: reduce on plateau
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                opt, mode="min", factor=0.5, patience=50
+            )
+
+            prev_loss = float("inf")
+            patience_counter = 0
+            patience = 100  # Early stopping patience
+
+            for _ in range(max_iter):
+                opt.zero_grad()
+                loss = self.neg_log_prob(phi)
+
+                if not torch.isfinite(loss):
+                    # Skip this restart if we hit numerical issues
+                    break
+
+                loss.backward()
+
+                # Clip gradients
+                if phi.grad is not None:
+                    if torch.isnan(phi.grad).any() or torch.isinf(phi.grad).any():
+                        break
+                    torch.nn.utils.clip_grad_norm_([phi], max_norm=10.0)
+
+                opt.step()
+                scheduler.step(loss)
+
+                # Early stopping: check for convergence
+                if abs(prev_loss - loss.item()) < 1e-6:
+                    patience_counter += 1
+                    if patience_counter >= patience:
+                        break
+                else:
+                    patience_counter = 0
+
+                prev_loss = loss.item()
+
+            # Evaluate final loss
+            with torch.no_grad():
+                final_loss = self.neg_log_prob(phi).item()
+
+            if torch.isfinite(torch.tensor(final_loss)) and final_loss < best_loss:
+                best_loss = final_loss
+                best_phi = phi.detach().clone()
+
+        if best_phi is None:
+            # All restarts failed, return original
+            print("Warning: All Adam restarts failed, returning initial point")
+            return phi_init.detach().to(device=self.device, dtype=torch.float32)
+
+        self.zero_grad(set_to_none=True)
+        return best_phi
 
     def predict_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0

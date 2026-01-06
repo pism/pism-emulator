@@ -37,7 +37,7 @@ from pyfiglet import Figlet
 from scipy.stats import beta
 
 from pism_emulator.lhs.draw import draw_samples
-from pism_emulator.mcmc.mala import MALASamplerModule as MALA
+from pism_emulator.mcmc.mala import ReparametrizedMALASamplerModule as MALA
 from pism_emulator.mcmc.mala import run_sampling
 from pism_emulator.models.pdd import PDD, make_fake_climate_2d
 
@@ -212,33 +212,38 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         beta.rvs(alpha_b, beta_b, size=(10_000, X_prior.shape[-1])) * (X_max - X_min)
         + X_min
     )
+    # Initialize from prior mean
+    # Note: The reparametrized sampler may find different local minima than
+    # the regular sampler due to the sigmoid transformation creating steep
+    # gradients near boundaries. This is a known limitation.
     X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float)
 
-    X_map = sampler.find_MAP(
-        X_0,
+    # Convert X_0 to unbounded space (φ) for ReparametrizedMALASamplerModule
+    phi_0 = sampler.X_to_phi(X_0)
+
+    # Find MAP in unbounded space using Adam with multiple restarts
+    # This is more robust to steep gradients near boundaries
+    rank_zero_info("Finding MAP using Adam with 5 restarts...")
+    phi_map = sampler.find_MAP(
+        phi_0,
+        use_adam=True,
+        lr=0.05,
+        max_iter=2000,
+        n_restarts=5,
     )
 
-    X_map = X_map.detach().to(dtype=torch.float32)
+    # Convert back to bounded space for interpretation
+    X_map = sampler.phi_to_X(phi_map).detach().to(dtype=torch.float32)
+
+    # Display MAP in original parameter space (bounded, physical values)
     rank_zero_info("-" * 80)
-    rank_zero_info("MAP Point (Regular Sampler)")
+    rank_zero_info("MAP Point")
     rank_zero_info("-" * 80)
     rank_zero_info(X_map)
 
-    # Evaluate objective value
-    X_map_test = X_map.clone().detach().requires_grad_(True)
-    neg_log_p_regular = sampler.neg_log_prob(X_map_test)
-    rank_zero_info(f"neg_log_prob(regular_MAP): {neg_log_p_regular.item():.4f}")
-
-    # Also evaluate the Adam-found MAP for comparison
-    X_adam_map = torch.tensor(
-        [1.0031, 3.0143, 0.7898, 0.7976, -0.0255, 0.0096],
-        requires_grad=True,
-        dtype=torch.float32,
-    )
-    neg_log_p_adam = sampler.neg_log_prob(X_adam_map)
-    rank_zero_info(f"neg_log_prob(adam_MAP): {neg_log_p_adam.item():.4f}")
-
-    inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
+    # Initialize chains in unbounded space (φ) for ReparametrizedMALASamplerModule
+    phi_map_tensor = phi_map.detach().cpu()
+    inits = phi_map_tensor.unsqueeze(0).repeat(chains, 1).contiguous()
     stats = run_sampling(sampler, inits, accelerator=accelerator)
     samples = stats["samples"]  # (C, S, D)
     lp = stats.get("lp")  # (C, S) or None

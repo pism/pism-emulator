@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any, Sequence, cast
 
 import arviz as az
-from dask.diagnostics import ProgressBar
 import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
@@ -36,6 +35,7 @@ import pint  # pylint: disable=unused-import
 import pint_xarray  # noqa: F401  (registers accessor) # pylint: disable=unused-import
 import torch
 import xarray as xr
+from dask.diagnostics import ProgressBar
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from pyfiglet import Figlet
 from scipy.stats import beta
@@ -166,7 +166,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
     rho_w.name = "water_density"
     day = xr.DataArray(1).pint.quantify("day")
-    
+
     hh5_vars = {
         "tas": "temp",
         "precipitation": "precipitation",

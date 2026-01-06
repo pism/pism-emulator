@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any, Sequence, cast
 
 import arviz as az
-from dask.diagnostics import ProgressBar
 import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
@@ -36,6 +35,7 @@ import pint  # pylint: disable=unused-import
 import pint_xarray  # noqa: F401  (registers accessor) # pylint: disable=unused-import
 import torch
 import xarray as xr
+from dask.diagnostics import ProgressBar
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from pyfiglet import Figlet
 from scipy.stats import beta
@@ -124,7 +124,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--chains", type=int, default=1)
     parser.add_argument("--burn", type=int, default=1000)
-    parser.add_argument("--normalize", action="store_true")
     parser.add_argument("--result-dir", default="posterior")
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--use-eig", action="store_true")
@@ -137,7 +136,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     alpha = args.alpha
     burn = args.burn
     chains = args.chains
-    normalize = args.normalize
     samples = args.samples
     thin = args.thin
     use_eig = args.use_eig
@@ -157,16 +155,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     rank_zero_info("")
 
     prior_df = draw_samples(n_samples=10_000)
-    prior_min, prior_max = prior_df.min(), prior_df.max()
+    _, prior_max = prior_df.min(), prior_df.max()
 
-    if normalize:
-        prior_df = (prior_df - prior_min) / (prior_max - prior_min)
     X_keys = prior_df.columns
 
     rho_w = xr.DataArray(1000).pint.quantify("kg m^-3")
     rho_w.name = "water_density"
     day = xr.DataArray(1).pint.quantify("day")
-    
+
     hh5_vars = {
         "tas": "temp",
         "precipitation": "precipitation",
@@ -176,7 +172,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "sn": "snow",
         "snmel": "snow_melt",
     }
-    
+
     ds = xr.open_dataset(
         url,
         chunks={"time": -1, "rlat": "auto", "rlon": "auto"},
@@ -288,9 +284,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     # Convert back to bounded space for interpretation
     X_map = sampler.phi_to_X(phi_map).detach().to(dtype=torch.float32)
     X_map_n = X_map.numpy()
-    if normalize:
-        # Transform back to original prior space (before normalization)
-        X_map_n = X_map_n * (prior_max.values - prior_min.values) + prior_min.values
+
     # Display MAP in original parameter space (bounded, physical values)
     rank_zero_info("-" * 80)
     rank_zero_info("MAP Point")
@@ -312,10 +306,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     chains_np = [np.asarray(c) for c in samples]  # each (S, D)
     arr = np.stack(chains_np, axis=0)  # (C, S, D)
-    prior_min_np = np.array(prior_min)[(None,) * (arr.ndim - 1)]
-    prior_max_np = np.array(prior_max)[(None,) * (arr.ndim - 1)]
-    if normalize:
-        arr = arr * (prior_max_np - prior_min_np) + prior_min_np
     C, _, D = arr.shape
 
     posterior = {name: arr[:, :, i] for i, name in enumerate(X_keys)}
@@ -326,11 +316,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     S_prior = S_prior_total // C_prior
 
     X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
-    if normalize:
-        X_prior_reshaped = (
-            X_prior_reshaped * (prior_max_np - prior_min_np) + prior_min_np
-        )
-
     prior = {
         name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)
         for i, name in enumerate(X_keys)

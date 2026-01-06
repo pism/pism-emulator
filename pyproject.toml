@@ -23,6 +23,7 @@ sample-posterior-speed = "pism_emulator.mcmc.sample_speed:cli"
 sample-posterior-pdd = "pism_emulator.mcmc.sample_pdd:cli"
 sample-posterior-pdd-reparametrized = "pism_emulator.mcmc.sample_pdd_reparametrized:cli"
 sample-posterior-pdd-verify = "pism_emulator.mcmc.sample_pdd_verify:cli"
+sample-posterior-pdd-reparametrized-verify = "pism_emulator.mcmc.sample_pdd_reparametrized_verify:cli"
 plot-posterior = "pism_emulator.mcmc.plot_posterior:cli"
 
 [tool.setuptools.packages.find]

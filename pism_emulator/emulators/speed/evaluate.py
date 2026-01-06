@@ -306,6 +306,8 @@ def main():
 
     k = 0
     l = 1
+    im_log = None  # Will be set in the plotting loop
+    im_diff = None  # Will be set in the plotting loop
     for m in glaciers:
         p_glaciers.update(1)
         F_val = np.zeros((n_emulators, F.shape[1]))
@@ -400,6 +402,10 @@ def main():
             )
             k += 1
         l += 1
+
+    # im_log and im_diff are guaranteed to be set since plot_glaciers is non-empty
+    assert im_log is not None, "im_log should be set by plotting loop"
+    assert im_diff is not None, "im_diff should be set by plotting loop"
 
     cb1 = fig.colorbar(im_log, cax=cax_log, extend="both")
     cb1.set_label("m/yr (log scale)")
