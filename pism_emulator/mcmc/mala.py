@@ -16,7 +16,7 @@
 # along with PISM; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-# pylint: disable=not-callable,too-many-lines,too-many-instance-attributes,arguments-differ,too-many-statements
+# pylint: disable=not-callable,too-many-lines,too-many-instance-attributes,arguments-differ,too-many-statements,arguments-renamed
 """
 MALA Sampler.
 """
@@ -971,11 +971,10 @@ class MALASamplerModule(pl.LightningModule):
             # re-leaf for next step
             X = X.detach().requires_grad_(True)
 
-        # stack once, slice burn, move to CPU
-        samples_out = torch.stack(kept).cpu()  # (S, D)
-        lp_arr = torch.stack(lp_hist)[burn:].to(torch.float32).cpu()  # (S,)
-        h_arr = torch.stack(h_hist)[burn:].to(torch.float32).cpu()  # (S,)
-        acc_arr = torch.stack(acc_hist)[burn:].to(torch.bool).cpu()  # (S,)
+        samples_out = torch.stack(kept)  # (S, D)
+        lp_arr = torch.stack(lp_hist)[burn:].to(torch.float32)  # (S,)
+        h_arr = torch.stack(h_hist)[burn:].to(torch.float32)  # (S,)
+        acc_arr = torch.stack(acc_hist)[burn:].to(torch.bool)  # (S,)
 
         return {
             "chain": chain_id,
@@ -1290,7 +1289,9 @@ def run_sampling(
     return stats
 
 
-class ReparametrizedMALASamplerModule(MALASamplerModule):
+class ReparametrizedMALASamplerModule(
+    MALASamplerModule
+):  # pylint: disable=too-many-ancestors
     """
     Reparametrized MALA sampler using sigmoid transformation for bounded parameters.
 
@@ -1351,7 +1352,24 @@ class ReparametrizedMALASamplerModule(MALASamplerModule):
         sigma_hat: Tensor | np.ndarray | list[float],
         **kwargs: Any,
     ) -> None:
-        """Initialize the reparametrized MALA sampler."""
+        """
+        Initialize the reparametrized MALA sampler.
+
+        Parameters
+        ----------
+        model : pl.LightningModule
+            Forward model used inside the likelihood.
+        X_min : Tensor | np.ndarray | list[float]
+            Element-wise lower bounds for parameters.
+        X_max : Tensor | np.ndarray | list[float]
+            Element-wise upper bounds for parameters.
+        Y_target : Tensor | np.ndarray | list[float]
+            Observed target vector.
+        sigma_hat : Tensor | np.ndarray | list[float]
+            Per-node standard deviation used in the Student-t likelihood.
+        **kwargs : Any
+            Additional arguments passed to MALASamplerModule.
+        """
         super().__init__(model, X_min, X_max, Y_target, sigma_hat, **kwargs)
 
         # Precompute range for efficiency
@@ -1429,7 +1447,7 @@ class ReparametrizedMALASamplerModule(MALASamplerModule):
         ).sum()
         return log_jac
 
-    def neg_log_prob(self, phi: Tensor) -> Tensor:
+    def neg_log_prob(self, phi: Tensor) -> Tensor:  # pylint: disable=arguments-renamed
         """
         Negative log-posterior in the reparametrized space.
 
@@ -1512,11 +1530,20 @@ class ReparametrizedMALASamplerModule(MALASamplerModule):
             MAP point in unbounded space φ.
         """
         phi = (
-            phi.detach().to(device=self.device, dtype=torch.float32).requires_grad_(True)
+            phi.detach()
+            .to(device=self.device, dtype=torch.float32)
+            .requires_grad_(True)
         )
 
         def closure() -> Tensor:
-            """Closure for L-BFGS."""
+            """
+            Closure for L-BFGS optimizer.
+
+            Returns
+            -------
+            torch.Tensor
+                Loss value (negative log posterior).
+            """
             self.zero_grad(set_to_none=True)
             loss = self.neg_log_prob(phi)
             loss.backward()
@@ -1570,7 +1597,7 @@ class ReparametrizedMALASamplerModule(MALASamplerModule):
         )  # (S, D) in bounded space
 
         # Return both representations
-        result["samples"] = samples_X.cpu()  # Main output in bounded space
-        result["samples_phi"] = samples_phi.cpu()  # Also save unbounded space
+        result["samples"] = samples_X  # Main output in bounded space
+        result["samples_phi"] = samples_phi  # Also save unbounded space
 
         return result

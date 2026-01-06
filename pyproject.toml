@@ -21,6 +21,7 @@ train-emulator = "pism_emulator.emulators.speed.train:main"
 evaluate-emulator = "pism_emulator.emulators.speed.evaluate:main"
 sample-posterior-speed = "pism_emulator.mcmc.sample_speed:cli"
 sample-posterior-pdd = "pism_emulator.mcmc.sample_pdd:cli"
+sample-posterior-pdd-reparametrized = "pism_emulator.mcmc.sample_pdd_reparametrized:cli"
 sample-posterior-pdd-verify = "pism_emulator.mcmc.sample_pdd_verify:cli"
 plot-posterior = "pism_emulator.mcmc.plot_posterior:cli"
 
