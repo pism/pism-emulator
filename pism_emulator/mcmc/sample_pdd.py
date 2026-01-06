@@ -46,7 +46,7 @@ from pism_emulator.models.pdd import PDD
 xr.set_options(keep_attrs=True)
 
 torch.set_float32_matmul_precision("medium")
-torch.backends.cudnn.conv.fp32_precision = "tf32"
+torch.backends.cudnn.conv.fp32_precision = "tf32"  # pylint: disable=no-member
 
 warnings.filterwarnings(
     "ignore",
@@ -336,7 +336,6 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         sample_stats=sample_stats if sample_stats else None,
     )
 
-    # Optional: cast to float32 to shrink size
     for grp in ("posterior", "prior"):
         if hasattr(idata, grp):
             ds = getattr(idata, grp)
@@ -344,7 +343,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     # Save + load
     out_nc = posterior_dir / Path("X_posterior_model.nc")
-    az.to_netcdf(idata, out_nc)  # write
+    az.to_netcdf(idata, out_nc, engine="netcdf4")
 
     # Robust plotting: drop (near-)constant vars and use hist with fewer bins
     az.style.use(["arviz-white", "arviz-greenish"])
