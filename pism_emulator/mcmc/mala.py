@@ -1288,3 +1288,289 @@ def run_sampling(
         stats = _stack_single_outs(outs)
 
     return stats
+
+
+class ReparametrizedMALASamplerModule(MALASamplerModule):
+    """
+    Reparametrized MALA sampler using sigmoid transformation for bounded parameters.
+
+    This sampler extends MALASamplerModule by transforming bounded parameters to an
+    unbounded space where sampling is performed. The transformation ensures that
+    samples remain within the specified bounds [X_min, X_max] by:
+
+    1. Sampling in unbounded space φ ∈ (-∞, ∞)
+    2. Transforming to bounded space: X = X_min + (X_max - X_min) * sigmoid(φ)
+    3. Adding Jacobian correction to the log probability
+
+    This approach avoids hard rejections at boundaries and can improve mixing for
+    parameters that tend to explore near their bounds.
+
+    Parameters
+    ----------
+    model : pl.LightningModule
+        Forward model used inside the likelihood.
+    X_min : array-like of float or torch.Tensor, shape (D,)
+        Element-wise lower bounds for parameters.
+    X_max : array-like of float or torch.Tensor, shape (D,)
+        Element-wise upper bounds for parameters.
+    Y_target : array-like or torch.Tensor, shape (N,)
+        Observed target vector.
+    sigma_hat : array-like or torch.Tensor, shape (N,)
+        Per-node standard deviation used in the Student-t likelihood.
+    **kwargs : Any
+        Additional arguments passed to MALASamplerModule.
+
+    Notes
+    -----
+    The transformation used is:
+        X(φ) = X_min + (X_max - X_min) * sigmoid(φ)
+
+    where sigmoid(φ) = 1 / (1 + exp(-φ)).
+
+    The Jacobian correction added to the log probability is:
+        log|dX/dφ| = Σ_i [log(X_max[i] - X_min[i]) + log(sigmoid(φ[i])) + log(1 - sigmoid(φ[i]))]
+
+    Examples
+    --------
+    >>> sampler = ReparametrizedMALASamplerModule(
+    ...     model, X_min, X_max, Y_obs, sigma_hat, samples=2000
+    ... )
+    >>> # Initial values in unbounded space (will be transformed to bounded space)
+    >>> phi_init = torch.zeros(6)  # starts at midpoint of bounds
+    >>> dl = DataLoader(ChainInitDataset(phi_init.unsqueeze(0)), batch_size=1)
+    >>> trainer = pl.Trainer(accelerator="cuda", devices=1)
+    >>> preds = trainer.predict(sampler, dl)
+    """
+
+    def __init__(
+        self,
+        model: pl.LightningModule,
+        X_min: Tensor | np.ndarray | list[float],
+        X_max: Tensor | np.ndarray | list[float],
+        Y_target: Tensor | np.ndarray | list[float],
+        sigma_hat: Tensor | np.ndarray | list[float],
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the reparametrized MALA sampler."""
+        super().__init__(model, X_min, X_max, Y_target, sigma_hat, **kwargs)
+
+        # Precompute range for efficiency
+        self.register_buffer(
+            "X_range",
+            self.X_max - self.X_min,
+            persistent=False,
+        )
+
+    def phi_to_X(self, phi: Tensor) -> Tensor:
+        """
+        Transform from unbounded space φ to bounded space X.
+
+        Parameters
+        ----------
+        phi : torch.Tensor
+            Parameter vector in unbounded space.
+
+        Returns
+        -------
+        torch.Tensor
+            Parameter vector in bounded space [X_min, X_max].
+        """
+        sigmoid_phi = torch.sigmoid(phi)
+        return self.X_min + self.X_range * sigmoid_phi
+
+    def X_to_phi(self, X: Tensor) -> Tensor:
+        """
+        Transform from bounded space X to unbounded space φ.
+
+        Uses the logit function (inverse sigmoid).
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Parameter vector in bounded space [X_min, X_max].
+
+        Returns
+        -------
+        torch.Tensor
+            Parameter vector in unbounded space.
+        """
+        # Normalize to [0, 1] with small epsilon to avoid log(0)
+        eps = 1e-7
+        X_normalized = torch.clamp((X - self.X_min) / self.X_range, eps, 1 - eps)
+        # logit(p) = log(p / (1 - p))
+        return torch.log(X_normalized / (1 - X_normalized))
+
+    def log_jacobian(self, phi: Tensor) -> Tensor:
+        """
+        Compute log-determinant of Jacobian for the transformation φ → X.
+
+        For the sigmoid transformation X = a + (b - a) * sigmoid(φ), the Jacobian is:
+            dX_i/dφ_i = (b_i - a_i) * sigmoid(φ_i) * (1 - sigmoid(φ_i))
+
+        Since the transformation is element-wise, the Jacobian is diagonal and:
+            log|det(J)| = Σ_i log|(b_i - a_i) * sigmoid(φ_i) * (1 - sigmoid(φ_i))|
+
+        Parameters
+        ----------
+        phi : torch.Tensor
+            Parameter vector in unbounded space.
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar log-determinant of the Jacobian.
+        """
+        sigmoid_phi = torch.sigmoid(phi)
+        # log|J| = Σ [log(range) + log(sigmoid) + log(1 - sigmoid)]
+        log_jac = (
+            torch.log(self.X_range)
+            + torch.log(sigmoid_phi)
+            + torch.log(1 - sigmoid_phi)
+        ).sum()
+        return log_jac
+
+    def neg_log_prob(self, phi: Tensor) -> Tensor:
+        """
+        Negative log-posterior in the reparametrized space.
+
+        Transforms φ to X, evaluates the original negative log-posterior,
+        and subtracts the Jacobian correction.
+
+        Parameters
+        ----------
+        phi : torch.Tensor
+            Parameter vector in unbounded space (requires grad).
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar negative log-posterior in the reparametrized space.
+        """
+        X = self.phi_to_X(phi)
+
+        # Original negative log-posterior in bounded space
+        neg_log_p_X = super().neg_log_prob(X)
+
+        # Jacobian correction (subtract because we want to add log|J| to log-prob)
+        log_jac = self.log_jacobian(phi)
+
+        # In reparametrized space: -log p(φ) = -log p(X(φ)) - log|dX/dφ|
+        return neg_log_p_X - log_jac
+
+    def forward(self, *args: Any, **kwargs: Any) -> Tensor:
+        """
+        Forward model wrapper for reparametrized space.
+
+        Accepts φ in unbounded space, transforms to X, and evaluates the model.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments. If provided, args[0] must be φ.
+        **kwargs
+            Keyword arguments. Must contain φ if *args is empty.
+
+        Returns
+        -------
+        torch.Tensor
+            Model prediction.
+        """
+        if args:
+            phi = args[0]
+        elif "X" in kwargs:
+            # For compatibility, also accept X keyword
+            phi = kwargs["X"]
+        elif "phi" in kwargs:
+            phi = kwargs["phi"]
+        else:
+            raise TypeError("forward() missing required argument: phi (or X)")
+
+        X = self.phi_to_X(phi)
+        return self.model(X, add_mean=True)
+
+    def find_MAP(
+        self,
+        phi: Tensor,
+        max_iter: int = 100,
+        lr: float = 1.0,
+    ) -> Tensor:
+        """
+        Find MAP estimate in the reparametrized space.
+
+        Parameters
+        ----------
+        phi : torch.Tensor
+            Initial point in unbounded space.
+        max_iter : int, default=100
+            Maximum L-BFGS iterations.
+        lr : float, default=1.0
+            L-BFGS learning rate.
+
+        Returns
+        -------
+        torch.Tensor
+            MAP point in unbounded space φ.
+        """
+        phi = (
+            phi.detach().to(device=self.device, dtype=torch.float32).requires_grad_(True)
+        )
+
+        def closure() -> Tensor:
+            """Closure for L-BFGS."""
+            self.zero_grad(set_to_none=True)
+            loss = self.neg_log_prob(phi)
+            loss.backward()
+            return loss
+
+        opt = torch.optim.LBFGS(
+            [phi], lr=lr, max_iter=max_iter, line_search_fn="strong_wolfe"
+        )
+        _ = opt.step(closure)
+        self.zero_grad(set_to_none=True)
+        return phi
+
+    def predict_step(
+        self, batch: Any, batch_idx: int, dataloader_idx: int = 0
+    ) -> dict[str, Any]:
+        """
+        Run one chain in the reparametrized space.
+
+        The input initial state should be in unbounded space (φ). The output
+        samples are transformed back to bounded space (X) for interpretability.
+
+        Parameters
+        ----------
+        batch : Any
+            Tuple-like batch where batch[0] is chain id and batch[1] is φ_init.
+        batch_idx : int
+            Lightning-provided batch index.
+        dataloader_idx : int, optional
+            Dataloader index.
+
+        Returns
+        -------
+        dict
+            Dictionary with:
+            - "chain" : int
+            - "samples" : (S, D) tensor in BOUNDED space X (transformed from φ)
+            - "samples_phi" : (S, D) tensor in UNBOUNDED space φ
+            - "lp" : (S,) log posterior
+            - "step_size" : (S,) step sizes
+            - "accept" : (S,) acceptance indicators
+        """
+        # Call parent's predict_step which runs MALA in φ space
+        result = super().predict_step(batch, batch_idx, dataloader_idx)
+
+        # result["samples"] are in φ space, transform to X space for output
+        samples_phi = result["samples"]  # (S, D) in unbounded space
+
+        # Transform each sample to bounded space
+        samples_X = torch.stack(
+            [self.phi_to_X(phi) for phi in samples_phi]
+        )  # (S, D) in bounded space
+
+        # Return both representations
+        result["samples"] = samples_X.cpu()  # Main output in bounded space
+        result["samples_phi"] = samples_phi.cpu()  # Also save unbounded space
+
+        return result

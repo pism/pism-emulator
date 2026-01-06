@@ -40,7 +40,7 @@ from pyfiglet import Figlet
 from scipy.stats import beta
 
 from pism_emulator.lhs.draw import draw_samples
-from pism_emulator.mcmc.mala import MALASamplerModule, run_sampling
+from pism_emulator.mcmc.mala import MALASamplerModule, run_sampling, ReparametrizedMALASamplerModule
 from pism_emulator.models.pdd import PDD
 
 xr.set_options(keep_attrs=True)
@@ -119,13 +119,13 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     parser = ArgumentParser()
     parser.add_argument("--accelerator", type=str, default="auto")
+    parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--chains", type=int, default=1)
     parser.add_argument("--burn", type=int, default=1000)
-    parser.add_argument("--samples", type=int, default=10_000)
-    parser.add_argument("--alpha", type=float, default=0.01)
-    parser.add_argument("--result-dir", default="posterior")
-    parser.add_argument("--years", nargs=2, default=["1980", "1989"])
     parser.add_argument("--normalize", action="store_true")
+    parser.add_argument("--years", nargs=2, default=["1980", "1989"])
+    parser.add_argument("--result-dir", default="posterior")
+    parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--use-eig", action="store_true")
     parser.add_argument("CLIMATEFILE", nargs=1)
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -241,7 +241,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     sigma_hat = torch.clamp(torch.abs(sigma * Y_true), min=1e-4)
 
     start = time_m.time()
-    sampler = MALASamplerModule(
+    sampler = ReparametrizedMALASamplerModule(
         model,
         X_min,
         X_max,
@@ -266,20 +266,29 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     )
     X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float)
 
-    X_map = sampler.find_MAP(
-        X_0,
+    # Convert X_0 to unbounded space (φ) for ReparametrizedMALASamplerModule
+    phi_0 = sampler.X_to_phi(X_0)
+
+    # Find MAP in unbounded space
+    phi_map = sampler.find_MAP(
+        phi_0,
     )
 
-    X_map = X_map.detach().to(dtype=torch.float32)
+    # Convert back to bounded space for interpretation
+    X_map = sampler.phi_to_X(phi_map).detach().to(dtype=torch.float32)
     X_map_n = X_map.numpy()
     if normalize:
+        # Transform back to original prior space (before normalization)
         X_map_n = X_map_n * (prior_max.values - prior_min.values) + prior_min.values
+    # Display MAP in original parameter space (bounded, physical values)
     rank_zero_info("-" * 80)
     rank_zero_info("MAP Point")
     rank_zero_info("-" * 80)
     rank_zero_info(X_map_n)
 
-    inits = X_map.unsqueeze(0).repeat(chains, 1).contiguous()
+    # Initialize chains in unbounded space (φ) for ReparametrizedMALASamplerModule
+    phi_map_tensor = phi_map.detach().cpu()
+    inits = phi_map_tensor.unsqueeze(0).repeat(chains, 1).contiguous()
     stats = run_sampling(sampler, inits, accelerator=accelerator)
     samples = stats["samples"]  # (C, S, D)
     lp = stats.get("lp")  # (C, S) or None
