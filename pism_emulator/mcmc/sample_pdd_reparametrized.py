@@ -179,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     )
 
     ds = ds.sel(time=slice(*years))
-    ds = ds.thin({"rlat": thin, "rlon": thin})
+    ds = ds.thin({"rlat": thin, "rlon": thin}).fillna(0)
     ds = ds.rename_vars(hh5_vars)
     ds = ds.transpose("rlat", "rlon", "time")
     ds = ds.stack(z=("rlat", "rlon")).dropna(dim="z").unify_chunks()

@@ -81,6 +81,9 @@ pism_emulator/
 │   ├── mala.py         # MALA sampler implementation
 │   ├── sample_speed.py # Speed parameter sampling
 │   ├── sample_pdd.py   # PDD parameter sampling
+│   ├── sample_pdd_reparametrized.py  # Reparametrized PDD sampler
+│   ├── sample_pdd_verify.py          # Verification variant
+│   ├── sample_pdd_reparametrized_verify.py  # Reparametrized verify variant
 │   ├── plot_posterior.py
 │   └── writer.py       # Checkpoint/output writers
 ├── models/
@@ -151,9 +154,10 @@ All emulators:
 #### 5. PDD Model (`models/pdd.py`)
 
 Positive Degree Day model for surface mass balance:
-- Implemented as PyTorch module for gradient computation
+- **ReferencePDDModel**: NumPy-based reference implementation (time is first axis)
+- **PDD**: PyTorch Lightning module for gradient computation (time is last axis)
 - Uses `freeze_it` decorator to prevent attribute modification after init
-- Supports both NumPy and PyTorch backends
+- Key parameters: degree-day factors, refreezing fractions, temperature thresholds
 
 ## Command-Line Tools
 
@@ -199,6 +203,13 @@ sample-posterior-pdd \
     --chains 4 \
     --accelerator cuda \
     CLIMATEFILE.nc
+
+# Reparametrized variant
+sample-posterior-pdd-reparametrized [same options]
+
+# Verification variants (for debugging/testing)
+sample-posterior-pdd-verify [same options]
+sample-posterior-pdd-reparametrized-verify [same options]
 ```
 
 ### Plotting Posterior
@@ -286,6 +297,7 @@ The complete two-step calibration process:
 4. **Pre-commit failures:** Run `pre-commit run --all-files` before committing
 5. **Import errors:** Some imports are in-function to avoid circular dependencies
 6. **Legacy code warnings:** `calibration/calibrate-as19.py` disables many pylint checks - this is intentional
+7. **PDD time axis:** ReferencePDDModel uses time as first axis; PyTorch PDD uses time as last axis
 
 ## Data Files
 
