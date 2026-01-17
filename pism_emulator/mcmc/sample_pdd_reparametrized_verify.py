@@ -1,5 +1,5 @@
 #!/bin/env python3
-# Copyright (C) 2021-25 Andy Aschwanden, Douglas C Brinkerhoff
+# Copyright (C) 2021-26 Andy Aschwanden, Douglas C Brinkerhoff
 #
 # This file is part of pism-emulator.
 #
@@ -48,7 +48,7 @@ warnings.filterwarnings(
     module=r"lightning\.pytorch",
 )
 
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision("medium")
 
 rcparams = {
     "axes.linewidth": 0.15,
@@ -206,46 +206,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         use_eig=use_eig,
     )
 
-    alpha_b = 3.0
-    beta_b = 3.0
-    # Set random seed for reproducible prior samples
     np.random.seed(42)
-    X_prior = (
-        beta.rvs(alpha_b, beta_b, size=(10_000, X_prior.shape[-1])) * (X_max - X_min)
-        + X_min
-    )
-    # Initialize from prior mean
-    # Note: The reparametrized sampler may find different local minima than
-    # the regular sampler due to the sigmoid transformation creating steep
-    # gradients near boundaries. This is a known limitation.
-    X_0 = torch.tensor(X_prior.mean(axis=0), requires_grad=True, dtype=torch.float)
+    # We initialize with 0, which is the center of [-1, -1].
+    X_0 = torch.zeros(X_min.size)
 
-    # Convert X_0 to unbounded space (φ) for ReparametrizedMALASamplerModule
-    phi_0 = sampler.X_to_phi(X_0)
-
-    # Find MAP in unbounded space using Adam with multiple restarts
-    # This is more robust to steep gradients near boundaries
-    rank_zero_info("Finding MAP using Adam with 5 restarts...")
-    phi_map = sampler.find_MAP(
-        phi_0,
-        use_adam=True,
-        lr=0.05,
-        max_iter=2000,
-        n_restarts=5,
-    )
-
-    # Convert back to bounded space for interpretation
-    X_map = sampler.phi_to_X(phi_map).detach().to(dtype=torch.float32)
-
-    # Display MAP in original parameter space (bounded, physical values)
-    rank_zero_info("-" * 80)
-    rank_zero_info("MAP Point")
-    rank_zero_info("-" * 80)
-    rank_zero_info(X_map)
-
-    # Initialize chains in unbounded space (φ) for ReparametrizedMALASamplerModule
-    phi_map_tensor = phi_map.detach().cpu()
-    inits = phi_map_tensor.unsqueeze(0).repeat(chains, 1).contiguous()
+    inits = X_0.unsqueeze(0).repeat(chains, 1).contiguous()
     stats = run_sampling(sampler, inits, accelerator=accelerator)
     samples = stats["samples"]  # (C, S, D)
     lp = stats.get("lp")  # (C, S) or None

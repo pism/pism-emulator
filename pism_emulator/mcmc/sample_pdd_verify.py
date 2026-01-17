@@ -47,7 +47,7 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"lightning\.pytorch",
 )
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision("medium")
 
 
 rcparams = {

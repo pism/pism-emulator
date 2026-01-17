@@ -186,11 +186,6 @@ class MALASamplerModule(pl.LightningModule):
         Number of burn-in iterations (discarded).
     samples : int, default=2000
         Number of post-burn samples stored per chain.
-    reflect_boundaries : bool, default=True
-        If True, reflect proposals at parameter boundaries to enforce hard
-        constraints X_min <= X <= X_max. This prevents the sampler from
-        exploring unphysical parameter regions. If False, proposals outside
-        bounds are simply clamped.
     show_progress : bool, default=True
         If True, render per-chain progress bars via :mod:`tqdm`.
     pbar_update_every : int, default=10
@@ -290,7 +285,6 @@ class MALASamplerModule(pl.LightningModule):
         beta: float = 0.99,
         burn: int = 500,
         samples: int = 2000,
-        reflect_boundaries: bool = True,
         show_progress: bool = True,
         pbar_update_every: int = 10,
         q: int = 100,
@@ -311,7 +305,6 @@ class MALASamplerModule(pl.LightningModule):
             dual_gamma,
             k_adapt,
             beta,
-            reflect_boundaries,
         )
 
         if isinstance(model, torch.nn.Module):
@@ -704,7 +697,7 @@ class MALASamplerModule(pl.LightningModule):
         logdet_Sigma = d * np.log(2.0 * h) + log_det_Hinv
         return -0.5 * (d * torch.log(two_pi) + logdet_Sigma + quad)
 
-    def _mala_step(  # pylint: disable=too-many-branches
+    def _mala_step(
         self,
         X: Tensor,
         h: float,
@@ -751,30 +744,6 @@ class MALASamplerModule(pl.LightningModule):
             L = torch.linalg.cholesky(2.0 * h * Hinv)
             eps = torch.randn_like(X)
             Xp = (X + L @ eps).detach()
-
-            # Enforce boundary constraints
-            if self.hparams.reflect_boundaries:
-                # Reflect at boundaries to keep proposals within [X_min, X_max]
-                # This prevents proposals from exploring unphysical parameter regions
-                max_reflections = 10  # Prevent infinite loops
-                for _ in range(max_reflections):
-                    # Check lower bounds
-                    below = Xp < self.X_min
-                    if below.any():
-                        Xp = torch.where(below, self.X_min + (self.X_min - Xp), Xp)
-
-                    # Check upper bounds
-                    above = Xp > self.X_max
-                    if above.any():
-                        Xp = torch.where(above, self.X_max - (Xp - self.X_max), Xp)
-
-                    # If all components are within bounds, we're done
-                    if not (below.any() or above.any()):
-                        break
-
-            # Final clamping as safety net (always applied)
-            Xp = torch.clamp(Xp, self.X_min, self.X_max)
-
         Xp.requires_grad_(True)
 
         # Target at proposal
@@ -1716,7 +1685,7 @@ class ReparametrizedMALASamplerModule(
                     torch.nn.utils.clip_grad_norm_([phi], max_norm=10.0)
 
                 opt.step()
-                scheduler.step(loss)
+                scheduler.step(loss.detach())
 
                 # Early stopping: check for convergence
                 if abs(prev_loss - loss.item()) < 1e-6:
