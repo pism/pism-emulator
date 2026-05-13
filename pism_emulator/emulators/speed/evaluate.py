@@ -162,9 +162,11 @@ def main():
     """
     Main.
     """
-    parser = ArgumentParser()
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
-    tmp, _ = parser.parse_known_args()
+    peek = ArgumentParser(add_help=False)
+    peek.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
+    tmp, _ = peek.parse_known_args()
+
+    parser = ArgumentParser(parents=[peek])
     parser.add_argument("--emulator-dir", default="emulator_ensemble")
     parser.add_argument("--mode", choices=["train", "validation"], default="train")
     parser.add_argument(
@@ -184,14 +186,8 @@ def main():
     )
     parser.add_argument("EMULATOR_FILES", nargs="*", help="Emulator ckpt")
 
-    cls = EMULATORS[tmp.emulator]
-    cls.add_model_specific_args(parser)
-    Emulator = cls  # type: type[pl.LightningModule]
-    # let the chosen model extend the parser
-    if tmp.emulator == "NN":
-        Emulator = NNEmulator
-    elif tmp.emulator == "DNN":
-        Emulator = DNNEmulator
+    Emulator = EMULATORS[tmp.emulator]
+    Emulator.add_model_specific_args(parser)
 
     args = parser.parse_args()
 

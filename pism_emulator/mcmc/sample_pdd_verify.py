@@ -21,6 +21,7 @@
 """
 MALA Sampling.
 """
+
 import time as time_m
 import warnings
 from argparse import ArgumentParser

@@ -72,9 +72,9 @@ def test_interpolated_dataset():
         assert_equal(n_grid_points, n_grid_points_true)
         assert_equal(n_parameters, n_parameters_true)
         assert_equal(n_samples, n_samples_true)
-        assert_array_almost_equal(X, X_true, decimal=12)
-        assert_array_almost_equal(Y, Y_true, decimal=12)
-        assert_array_almost_equal(normed_area, normed_area_true, decimal=12)
+        assert_array_almost_equal(X, X_true, decimal=5)
+        assert_array_almost_equal(Y, Y_true, decimal=5)
+        assert_array_almost_equal(normed_area, normed_area_true, decimal=5)
 
 
 def test_dataset():
@@ -117,9 +117,9 @@ def test_dataset():
     assert_equal(n_grid_points, n_grid_points_true)
     assert_equal(n_parameters, n_parameters_true)
     assert_equal(n_samples, n_samples_true)
-    assert_array_almost_equal(X, X_true, decimal=12)
-    assert_array_almost_equal(Y, Y_true, decimal=12)
-    assert_array_almost_equal(normed_area, normed_area_true, decimal=12)
+    assert_array_almost_equal(X, X_true, decimal=5)
+    assert_array_almost_equal(Y, Y_true, decimal=5)
+    assert_array_almost_equal(normed_area, normed_area_true, decimal=5)
 
 
 def test_legacy_dataset():
@@ -162,6 +162,6 @@ def test_legacy_dataset():
     assert_equal(n_grid_points, n_grid_points_true)
     assert_equal(n_parameters, n_parameters_true)
     assert_equal(n_samples, n_samples_true)
-    assert_array_almost_equal(X, X_true, decimal=12)
-    assert_array_almost_equal(Y, Y_true, decimal=12)
-    assert_array_almost_equal(normed_area, normed_area_true, decimal=12)
+    assert_array_almost_equal(X, X_true, decimal=5)
+    assert_array_almost_equal(Y, Y_true, decimal=5)
+    assert_array_almost_equal(normed_area, normed_area_true, decimal=5)

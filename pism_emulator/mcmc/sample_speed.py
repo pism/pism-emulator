@@ -23,6 +23,7 @@
 """
 MALA Speed sampler.
 """
+
 import time
 import warnings
 from argparse import ArgumentParser

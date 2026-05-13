@@ -21,6 +21,7 @@
 """
 MALA Sampling.
 """
+
 import time as time_m
 import warnings
 from argparse import ArgumentParser
@@ -34,7 +35,6 @@ import numpy as np
 import torch
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 from pyfiglet import Figlet
-from scipy.stats import beta
 
 from pism_emulator.lhs.draw import draw_samples
 from pism_emulator.mcmc.mala import ReparametrizedMALASamplerModule as MALA

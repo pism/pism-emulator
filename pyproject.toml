@@ -111,6 +111,19 @@ exclude = '''
  )/
 '''
 
+[tool.pylint."MASTER"]
+jobs = 1
+ignored-modules = [
+    "torch",
+    "torch.*",
+    "lightning",
+    "lightning.*",
+    "arviz",
+    "matplotlib",
+    "matplotlib.*",
+    "scipy.stats",
+]
+
 [tool.pylint.messages_control]
 disable = """
     too-many-lines,

@@ -20,7 +20,6 @@
 Metrics Module.
 """
 
-
 import torch
 from torch import Tensor
 from torchmetrics import Metric
