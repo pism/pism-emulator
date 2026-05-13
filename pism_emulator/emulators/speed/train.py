@@ -181,12 +181,13 @@ def main():
     """
     Main.
     """
-    parser = ArgumentParser()
-    parser.add_argument(
+    peek = ArgumentParser(add_help=False)
+    peek.add_argument(
         "--emulator", choices=["NN", "NN5", "DNN", "LegacyNN"], default="DNN"
     )
-    tmp, _ = parser.parse_known_args()
+    tmp, _ = peek.parse_known_args()
 
+    parser = ArgumentParser(parents=[peek])
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--cutoff", type=float, default=None)
@@ -215,16 +216,8 @@ def main():
     parser.add_argument("--y-transform", default="log10")
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    cls = EMULATORS[tmp.emulator]
-    cls.add_model_specific_args(parser)
-    Emulator = cls  # type: type[pl.LightningModule]
-    # let the chosen model extend the parser
-    if tmp.emulator == "NN":
-        Emulator = NNEmulator
-    elif tmp.emulator == "DNN":
-        Emulator = DNNEmulator
-    elif tmp.emulator == "LegacyNN":
-        Emulator = LegacyNNEmulator
+    Emulator = EMULATORS[tmp.emulator]
+    Emulator.add_model_specific_args(parser)
 
     args = parser.parse_args()
     hparams = vars(args)
