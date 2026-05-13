@@ -340,7 +340,7 @@ class DNNEmulator(pl.LightningModule):
         parser.add_argument(
             "--activation", type=str, default="relu", choices=["relu", "silu", "gelu"]
         )
-        parser.add_argument("--learning_rate", type=float, default=1e-2)
+        parser.add_argument("--learning-rate", type=float, default=1e-2)
         parser.add_argument(
             "--compile", action="store_true", help="Use torch.compile if available"
         )
@@ -592,8 +592,8 @@ class NNEmulator(pl.LightningModule):
             The updated parser with DNNEmulator options added.
         """
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--n_hidden", type=int, default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.1)
+        parser.add_argument("--n-hidden", type=int, default=128)
+        parser.add_argument("--learning-rate", type=float, default=0.1)
 
         return parent_parser
 
@@ -811,8 +811,8 @@ class NN5Emulator(pl.LightningModule):
             The updated parser with NNEmulator options added.
         """
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--n_hidden", type=int, default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.01)
+        parser.add_argument("--n-hidden", type=int, default=128)
+        parser.add_argument("--learning-rate", type=float, default=0.01)
 
         return parent_parser
 
@@ -1017,11 +1017,11 @@ class LegacyNNEmulator(pl.LightningModule):
             The updated parser with NNEmulator options added.
         """
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--n_hidden_1", type=int, default=128)
-        parser.add_argument("--n_hidden_2", type=int, default=128)
-        parser.add_argument("--n_hidden_3", type=int, default=128)
-        parser.add_argument("--n_hidden_4", type=int, default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.01)
+        parser.add_argument("--n-hidden-1", type=int, default=128)
+        parser.add_argument("--n-hidden-2", type=int, default=128)
+        parser.add_argument("--n-hidden-3", type=int, default=128)
+        parser.add_argument("--n-hidden-4", type=int, default=128)
+        parser.add_argument("--learning-rate", type=float, default=0.01)
 
         return parent_parser
 

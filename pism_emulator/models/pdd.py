@@ -963,10 +963,10 @@ class PDD(pl.LightningModule):
 
         Notes
         -----
-        This helper currently adds the ``--n_interpolate`` argument.
+        This helper currently adds the ``--n-interpolate`` argument.
         """
         parser = parent_parser.add_argument_group("PDD")
-        parser.add_argument("--n_interpolate", type=int, default=12)
+        parser.add_argument("--n-interpolate", type=int, default=12)
         return parent_parser
 
     def forward(self, *args: Any, **kwargs: Any) -> Tensor | dict[str, Tensor]:
