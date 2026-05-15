@@ -18,6 +18,7 @@
 """
 Test statistical functions.
 """
+
 import math
 from io import StringIO
 
@@ -49,8 +50,7 @@ def fixture_dp16_df() -> pd.DataFrame:
     pd.DataFrame
         DataFrame with DP16.
     """
-    dp16_data = StringIO(
-        """
+    dp16_data = StringIO("""
 , OCFAC, CREVLIQ, VCLIF, BIAS, LIG, PLIO, RCP45_pres, RCP26_2100, RCP45_2100, RCP85_2100
 1,0.1,0,0,0,-0.45,3.54,-0.047,-0.276,-0.253,-0.144
 2,0.1,0,1,0,-0.44,3.52,-0.047,-0.277,-0.255,-0.144
@@ -180,8 +180,7 @@ def fixture_dp16_df() -> pd.DataFrame:
 126,10,150,1,1,7.82,9.97,0.049,0.447,0.645,0.908
 127,10,150,3,1,8.93,11.97,0.077,0.584,1.213,1.642
 128,10,150,5,1,9.04,12.41,0.096,1.171,1.863,2.458
-"""
-    )
+""")
     return pd.read_csv(dp16_data, skipinitialspace=True)
 
 

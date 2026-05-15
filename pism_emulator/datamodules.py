@@ -420,8 +420,8 @@ class PISMDataModule(pl.LightningDataModule):
             else:
                 S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar
                 lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
-                lamda = lamda[:, 0].squeeze()
-
+                lamda = lamda.flip(0)
+                V = V.flip(1)
             if cutoff is not None:
                 cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
                 lamda_truncated = lamda.detach()[:cutoff_index]

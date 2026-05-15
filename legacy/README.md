@@ -6,23 +6,24 @@ How can I check the published emulators and the error statistics given?
 
 First, download the emulators and training data from arcticdata.io:
 
-    $ ./download_data.sh
+    cd ../data
+    sh download_legacy_training_data.sh
+    cd ../legacy
 
 Next, evaluate the emulators using the Legacy emalator and dataset classes.
 If you diff the NNEmualtor and LegacyNNEmulator you will see that LegacyNNEmulator has
 
     self.norm_4 = nn.LayerNorm(n_hidden_3)
 
-which looks like a bug. Fortunately, the training used *n_hidden_{1,2,3,4}=128* which means this typo has/had no consequences.
-The NNEmulator has this typo fixed.
+which looks like a bug. Fortunately, the training used *n_hidden_{1,2,3,4}=128* which means this typo has/had no consequences. The NNEmulator has this typo fixed.
 
 To get the error statistics, run
 
-    $ python evaluate_emulator_legacy.py --num_models 50 --emulator_dir .  --data_dir speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv
+    python evaluate_emulator_legacy.py --num_models 50 --emulator_dir ../data/emulators/  --data_dir ../data/speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv
 
 Yes, this script is incredibly slow. New version have been improved for speed considerably.
 
-    $ python evaluate_emulator.py --num_models 50 --emulator_dir .  --data_dir speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv
+    python evaluate_emulator.py  --num_models 50 --emulator_dir ../data/emulators/  --data_dir ../data/speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv
 
 You should get:
 ```
@@ -41,6 +42,13 @@ MAE=42.06m/yr, MBE=-12.12 m/yr, RMSE=4224 m/yr, Pearson r=1.00, r2=0.99
 
 # Create your own emulators
 
-    $ python train_speed_emulator.py --emulator_dir emulators_legacy  --data_dir speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv
+    max_epochs=20
+    model_index=0
 
-    $ train-emulator --y_lim 0.1 100e3 --model_index $m --emulator DNN --emulator_dir emulators_dnn  --depth 3  --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv speeds_v2/vel*.nc
+    python train_speed_emulator.py --emulator_dir emulators_legacy  --max_epochs $max_epochs --model_index $model_index --data_dir ../data/speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv
+
+    python evaluate_emulator_legacy.py --num_models 1 --mode train --emulator_dir emulators_legacy/emulator/  --data_dir ../data/speeds_v2/ --target_file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples_file ../data/samples/velocity_calibration_samples_100.csv
+
+    train-emulator --y-lim 1 100e3 --max-epochs $max_epochs --model-index $model_index --emulator DNN --emulator-dir emulators_dnn  --depth 3  --target-file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples-file ../data/samples/velocity_calibration_samples_100.csv ../data/speeds_v2/vel*.nc
+
+    evaluate-emulator --y-lim 1 100e3  --emulator DNN --emulator-dir emulators_dnn --depth 3  --target-file observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc --samples-file ../data/samples/velocity_calibration_samples_100.csv --training-files ../data/speeds_v2/vel*.nc -- emulators_dnn/emulator/emulator_*.ckpt

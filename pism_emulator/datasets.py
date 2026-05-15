@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from glob import glob
 from os.path import join
 from pathlib import Path
-from re import Pattern
 from time import time
 from typing import Final, Literal, Sequence, cast
 
@@ -49,7 +48,59 @@ from torch import Tensor
 from torch.utils.data import Dataset, get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
-ID_RE: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
+_UQ_RE: Final[re.Pattern[str]] = re.compile(r"uq_(?P<id>\d+)_")
+_ID_RE_LEGACY: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
+# Filenames in newer datasets often contain BOTH ``id_<N>_`` and ``uq_<M>_``;
+# in that case ``uq_<M>_`` is the meaningful run identifier, so try it first.
+ID_RE: Final[re.Pattern[str]] = re.compile(r"(?:uq|id)_(?P<id>\d+)_")
+
+
+def search_run_id(name: str) -> re.Match[str] | None:
+    """
+    Find a run-id substring in ``name``, preferring ``uq_<N>_`` over ``id_<N>_``.
+
+    Parameters
+    ----------
+    name : str
+        Filename (or basename) to search.
+
+    Returns
+    -------
+    re.Match or None
+        A match object with named group ``id``, or ``None`` if neither pattern is present.
+    """
+    return _UQ_RE.search(name) or _ID_RE_LEGACY.search(name)
+
+
+ID_COLUMN_CANDIDATES: Final[tuple[str, ...]] = ("uq", "id")
+
+
+def pick_id_column(columns: Sequence[str]) -> str:
+    """
+    Return whichever of :data:`ID_COLUMN_CANDIDATES` is present in ``columns``.
+
+    Parameters
+    ----------
+    columns : sequence of str
+        Column labels to search, e.g. a pandas ``DataFrame.columns``.
+
+    Returns
+    -------
+    str
+        The first matching column name from :data:`ID_COLUMN_CANDIDATES`.
+
+    Raises
+    ------
+    KeyError
+        If none of :data:`ID_COLUMN_CANDIDATES` appears in ``columns``.
+    """
+    for c in ID_COLUMN_CANDIDATES:
+        if c in columns:
+            return c
+    raise KeyError(
+        f"None of {ID_COLUMN_CANDIDATES} found in samples columns: {list(columns)}"
+    )
+
 
 YTransformName = Literal["none", "log10", "robust"]
 
@@ -429,7 +480,7 @@ def id_key(path: str | Path) -> int:
     ValueError
         If the pattern is not found in the basename.
     """
-    m = ID_RE.search(Path(path).name)
+    m = search_run_id(Path(path).name)
     if m is None:
         raise ValueError(
             f"Could not parse id from {path!s} using pattern {ID_RE.pattern!r}"
@@ -460,7 +511,7 @@ def parse_id_from_path(p: str | Path) -> int:
     ValueError
         If the pattern is not found in the basename.
     """
-    m = ID_RE.search(Path(p).name)
+    m = search_run_id(Path(p).name)
     if not m:
         raise ValueError(
             f"Could not parse id from {p!s} using pattern {ID_RE.pattern!r}"
@@ -964,10 +1015,12 @@ class PISMDataset(Dataset):
 
     @staticmethod
     def _parse_id(path: str) -> int:
-        m = re.search(r"id_(\d+)_", Path(path).name)
+        m = search_run_id(Path(path).name)
         if not m:
-            raise ValueError(f"Could not parse id from filename: {path}")
-        return int(m.group(1))
+            raise ValueError(
+                f"Could not parse id from {path!r} using pattern {ID_RE.pattern!r}"
+            )
+        return int(m.group("id"))
 
     # ---------- target/mask ----------
 
@@ -1089,11 +1142,11 @@ class PISMDataset(Dataset):
         ids = [self._parse_id(p) for p in cfg.training_files]
         files_by_id = dict(zip(ids, cfg.training_files))
 
-        samples = (
-            pd.read_csv(cfg.samples_file, delimiter=",", skipinitialspace=True)
-            .sort_values("id")
-            .set_index("id", drop=True)
+        samples_raw = pd.read_csv(
+            cfg.samples_file, delimiter=",", skipinitialspace=True
         )
+        id_col = pick_id_column(samples_raw.columns)
+        samples = samples_raw.sort_values(id_col).set_index(id_col, drop=True)
 
         keep_ids = [i for i in sorted(files_by_id) if i in samples.index]
         if cfg.verbose:
@@ -1445,39 +1498,40 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
         """
         epsilon = self.epsilon
 
-        identifier_name = "id"
         training_var = self.training_var
         training_files = glob(join(self.data_dir, "*.nc"))
         training_files = list(OrderedDict.fromkeys(training_files))
 
-        pat: Pattern[str] = re.compile(r"id_(\d+)_")
-
         ids: list[int] = []
         for f in training_files:
-            if (m := pat.search(f)) is None:
-                raise ValueError(f"Could not find id_..._ in filename: {f!r}")
-            ids.append(int(m.group(1)))
+            if (m := search_run_id(Path(f).name)) is None:
+                raise ValueError(
+                    f"Could not find run id in filename {f!r} using pattern {ID_RE.pattern!r}"
+                )
+            ids.append(int(m.group("id")))
 
-        samples = (
-            pd.read_csv(self.samples_file, delimiter=",", skipinitialspace=True)
-            .squeeze("columns")
-            .sort_values(by=identifier_name)
-        )
+        samples = pd.read_csv(
+            self.samples_file, delimiter=",", skipinitialspace=True
+        ).squeeze("columns")
+        identifier_name = pick_id_column(samples.columns)
+        samples = samples.sort_values(by=identifier_name)
         samples.index = samples[identifier_name]
         samples.index.name = None
 
-        ids_df = pd.DataFrame(data=ids, columns=["id"])
+        ids_df = pd.DataFrame(data=ids, columns=[identifier_name])
         ids_df.index = ids_df[identifier_name]
         ids_df.index.name = None
 
-        missing_ids = list(set(samples["id"]).difference(ids_df["id"]))
+        missing_ids = list(
+            set(samples[identifier_name]).difference(ids_df[identifier_name])
+        )
         if missing_ids:
             if self.verbose:
                 rank_zero_info(
                     f"The following simulations are missing:\n   {missing_ids}"
                 )
                 rank_zero_info("  adjusting priors")
-            samples = samples[~samples["id"].isin(missing_ids)]
+            samples = samples[~samples[identifier_name].isin(missing_ids)]
 
         samples = samples.drop(samples.columns[0], axis=1)
         self.X_keys = samples.keys()
@@ -1493,13 +1547,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
 
         rank_zero_info("  Loading data sets...")
 
-        def _id_key(path: str) -> int:
-            m = pat.search(path)
-            if m is None:
-                raise ValueError(f"Could not find id_..._ in filename: {path!r}")
-            return int(m.group(1))
-
-        training_files.sort(key=_id_key)
+        training_files.sort(key=id_key)
 
         start_time = time()
         for idx, m_file in tqdm_rank0(
@@ -1524,6 +1572,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
 
         X = torch.from_numpy(np.array(samples[keep], dtype=np.float32))
         Y = torch.from_numpy(np.array(response[keep], dtype=np.float32))
+        Y[Y < 0] = 0
 
         self.X_mean = X.mean(axis=0)
         self.X_std = X.std(axis=0)
@@ -1811,7 +1860,7 @@ class PISMInterpolatedDataset(Dataset):
         ----------
         path : str
             Path to a training file. The filename must contain a substring
-            matching ``id_(\\d+)_``.
+            matching :data:`ID_RE` (``id_<n>_`` or ``uq_<n>_``).
 
         Returns
         -------
@@ -1823,10 +1872,12 @@ class PISMInterpolatedDataset(Dataset):
         ValueError
             If the id cannot be parsed from the filename.
         """
-        m = re.search(r"id_(\d+)_", Path(path).name)
+        m = search_run_id(Path(path).name)
         if not m:
-            raise ValueError(f"Could not parse id from filename: {path}")
-        return int(m.group(1))
+            raise ValueError(
+                f"Could not parse id from {path!r} using pattern {ID_RE.pattern!r}"
+            )
+        return int(m.group("id"))
 
     def _load_target_interp_and_mask(self) -> TargetData:
         """
@@ -2017,11 +2068,11 @@ class PISMInterpolatedDataset(Dataset):
         ids = [self._parse_id(p) for p in cfg.training_files]
         files_by_id = dict(zip(ids, cfg.training_files))
 
-        samples = (
-            pd.read_csv(cfg.samples_file, delimiter=",", skipinitialspace=True)
-            .sort_values("id")
-            .set_index("id", drop=True)
+        samples_raw = pd.read_csv(
+            cfg.samples_file, delimiter=",", skipinitialspace=True
         )
+        id_col = pick_id_column(samples_raw.columns)
+        samples = samples_raw.sort_values(id_col).set_index(id_col, drop=True)
 
         keep_ids = [i for i in sorted(files_by_id) if i in samples.index]
 
@@ -2072,18 +2123,15 @@ class PISMInterpolatedDataset(Dataset):
 
         end_time = time()
         rank_zero_info(f"Reading training data took {(end_time - start_time):.0f}s")
-        # Same run filtering policy: use upper y_lim bound in *physical* space proxy.
-        good = response.max(axis=1) < cfg.y_lim[1]
 
-        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))[good]
-        Y = torch.from_numpy(response.astype(np.float32)[good])
+        X = torch.from_numpy(samples.to_numpy(dtype=np.float32))
+        Y = torch.from_numpy(response.astype(np.float32))
         Y = torch.clamp(Y, *cfg.y_lim)
 
         name = cfg.y_transform
         params = dict(cfg.y_transform_kwargs or {})
 
         Y, params = _apply_y_transform(Y, name=name, y_lim=cfg.y_lim, params=params)
-
         # Apply same transform to the target vector (already clamped in _load_target_and_mask)
         tY = self.target.Y_target
         tY, _ = _apply_y_transform(tY, name=name, y_lim=cfg.y_lim, params=params)

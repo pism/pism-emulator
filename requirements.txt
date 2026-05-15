@@ -1,8 +1,11 @@
 arviz
 bokeh
+cf_xarray
 dask[distributed,dataframe]
 earthaccess
 h5netcdf
+h5py
+identify
 ipywidgets
 joblib
 lightning
@@ -11,7 +14,7 @@ netcdf4
 notebook
 numpy
 pandas
-pyDOE3
+pint_xarray
 pyfiglet
 pylint
 pytest

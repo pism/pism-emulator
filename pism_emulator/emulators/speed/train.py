@@ -56,7 +56,7 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "LegacyNN": LegacyNNEmulator,
 }
 
-
+torch.set_float32_matmul_precision("medium")
 torch.use_deterministic_algorithms(True)
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -181,12 +181,13 @@ def main():
     """
     Main.
     """
-    parser = ArgumentParser()
-    parser.add_argument(
+    peek = ArgumentParser(add_help=False)
+    peek.add_argument(
         "--emulator", choices=["NN", "NN5", "DNN", "LegacyNN"], default="DNN"
     )
-    tmp, _ = parser.parse_known_args()
+    tmp, _ = peek.parse_known_args()
 
+    parser = ArgumentParser(parents=[peek])
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--cutoff", type=float, default=None)
@@ -215,16 +216,8 @@ def main():
     parser.add_argument("--y-transform", default="log10")
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
-    cls = EMULATORS[tmp.emulator]
-    cls.add_model_specific_args(parser)
-    Emulator = cls  # type: type[pl.LightningModule]
-    # let the chosen model extend the parser
-    if tmp.emulator == "NN":
-        Emulator = NNEmulator
-    elif tmp.emulator == "DNN":
-        Emulator = DNNEmulator
-    elif tmp.emulator == "LegacyNN":
-        Emulator = LegacyNNEmulator
+    Emulator = EMULATORS[tmp.emulator]
+    Emulator.add_model_specific_args(parser)
 
     args = parser.parse_args()
     hparams = vars(args)
@@ -249,11 +242,13 @@ def main():
     training_files = args.TRAINING_FILES
     y_lim = args.y_lim
 
-    np.random.seed(model_index)
-    random.seed(model_index)
-    np.random.seed(model_index)
-    torch.manual_seed(model_index)
-    pl.seed_everything(model_index, workers=True)
+    g = torch.Generator()
+    g.manual_seed(0)
+
+    np.random.seed(0)
+    random.seed(0)
+    torch.manual_seed(0)
+    pl.seed_everything(0, workers=True)
 
     callbacks: list = [EpochProgressBar(desc="Training")]
 
@@ -300,7 +295,10 @@ def main():
         seed=model_index,
     )
 
-    dm.prepare_data(cutoff=cutoff, q=q)
+    svd_dir = Path("svd_cache")
+    svd_dir.mkdir(parents=True, exist_ok=True)
+    svd_cache = svd_dir / Path("svd.h5")
+    dm.prepare_data(cutoff=cutoff, q=q, cache_path=svd_cache)
     dm.setup(stage="fit")
     V_hat = dm.eig.V_hat
     F_mean = dm.eig.F_mean

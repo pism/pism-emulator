@@ -25,7 +25,6 @@ Evaluate emulators.
 """
 
 import inspect
-import random
 from argparse import ArgumentParser
 from os.path import dirname, realpath
 from pathlib import Path
@@ -163,9 +162,11 @@ def main():
     """
     Main.
     """
-    parser = ArgumentParser()
-    parser.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
-    tmp, _ = parser.parse_known_args()
+    peek = ArgumentParser(add_help=False)
+    peek.add_argument("--emulator", choices=["NN", "DNN"], default="DNN")
+    tmp, _ = peek.parse_known_args()
+
+    parser = ArgumentParser(parents=[peek])
     parser.add_argument("--emulator-dir", default="emulator_ensemble")
     parser.add_argument("--mode", choices=["train", "validation"], default="train")
     parser.add_argument(
@@ -178,21 +179,15 @@ def main():
     parser.add_argument("--target-var", type=str, default="velsurf_mag")
     parser.add_argument("--target-error-var", type=str, default="velsurf_mag_error")
     parser.add_argument("--sample-size", type=int, default=80)
-    parser.add_argument("--y-lim", nargs=2, type=float, default=[0.1, 10e3])
+    parser.add_argument("--y-lim", nargs=2, type=float, default=[1, 10e3])
     parser.add_argument("--y-transform", default="log10")
     parser.add_argument(
         "--training-files", nargs="+", help="PISM netCDF files", default=None
     )
     parser.add_argument("EMULATOR_FILES", nargs="*", help="Emulator ckpt")
 
-    cls = EMULATORS[tmp.emulator]
-    cls.add_model_specific_args(parser)
-    Emulator = cls  # type: type[pl.LightningModule]
-    # let the chosen model extend the parser
-    if tmp.emulator == "NN":
-        Emulator = NNEmulator
-    elif tmp.emulator == "DNN":
-        Emulator = DNNEmulator
+    Emulator = EMULATORS[tmp.emulator]
+    Emulator.add_model_specific_args(parser)
 
     args = parser.parse_args()
 
@@ -212,8 +207,10 @@ def main():
     else:
         validation = True
     training_files = args.training_files
+
     torch.manual_seed(0)
     rng = np.random.default_rng(2021)
+
     dataset = PISMDataset(
         training_files=training_files,
         samples_file=samples_file,
@@ -228,10 +225,9 @@ def main():
     y_params = dict(dataset.cfg.y_transform_kwargs or {})
 
     n_members = len(F)
-    if sample_size <= n_members:
-        glaciers = sorted(random.sample(range(n_members), k=sample_size))
-    else:
-        glaciers = list(range(n_members))
+    k = min(sample_size, n_members)
+
+    glaciers = sorted(rng.choice(n_members, size=k, replace=False).tolist())
     print(f"Glaciers selected: {glaciers}")
 
     # Calculate the mean by looping over emulators
@@ -242,6 +238,7 @@ def main():
     r2s = []
 
     plot_glaciers = sorted(rng.choice(glaciers, size=4, replace=False))
+    print(f"Plot gllaciers selected: {plot_glaciers}")
     cmap = "viridis"
     fig = plt.figure(figsize=(6.4, 4.8), layout="constrained")
 
@@ -251,16 +248,17 @@ def main():
     # Add a skinny column on the left for row titles
     gs_top = outer[0].subgridspec(
         3,
-        5,  # 3 rows, 5 cols (1 skinny + 4 plots)
-        width_ratios=[0.12, 1, 1, 1, 1],
+        6,  # was 5; add 1 column for colorbars
+        width_ratios=[0.12, 1, 1, 1, 1, 0.06],  # last is cbar column
         wspace=0.025,
         hspace=0.025,
     )
-
     # Axes for the 4 plot columns
     axs_top = np.array(
         [[fig.add_subplot(gs_top[r, c]) for c in range(1, 5)] for r in range(3)]
     )
+    cax_log = fig.add_subplot(gs_top[0:2, 5])  # spans rows 0-1
+    cax_diff = fig.add_subplot(gs_top[2, 5])  # spans row 2 only
 
     # Title column axes (one per row)
     row_titles = ["True", "Predicted", "Error"]
@@ -296,7 +294,6 @@ def main():
         total=n_glaciers, position=1, leave=True, desc="Glaciers", dynamic_ncols=True
     )
 
-    # text-only "bar" that stays as a single line
     p_metrics = tqdm(
         total=1, position=2, leave=True, bar_format="{desc}", dynamic_ncols=True
     )
@@ -305,11 +302,13 @@ def main():
 
     k = 0
     l = 1
+    im_log = None  # Will be set in the plotting loop
+    im_diff = None  # Will be set in the plotting loop
     for m in glaciers:
         p_glaciers.update(1)
         F_val = np.zeros((n_emulators, F.shape[1]))
         F_pred = np.zeros((n_emulators, F.shape[1]))
-        for emulator_index, emulator_file in tqdm(enumerate(emulator_files)):
+        for emulator_index, emulator_file in enumerate(emulator_files):
             e = Emulator.load_from_checkpoint(
                 emulator_file,
                 map_location="cpu",
@@ -326,7 +325,6 @@ def main():
                 F_v = F[m].detach().cpu().numpy()  # (n_nodes,)
                 F_p = e(X_val, add_mean=True).detach().cpu().numpy()  # (1, n_nodes)
 
-            # store per-emulator predictions; we'll ensemble by mean later
             F_val[emulator_index, :] = inverse_y_transform_np(
                 F_v, name=y_transform, params=y_params, y_lim=y_lim
             )
@@ -365,17 +363,17 @@ def main():
             F_val_2d = np.ma.array(data=F_val_2d, mask=mask)
             F_pred_2d = np.ma.array(data=F_pred_2d, mask=mask)
 
-            _ = axs_top[0, k].imshow(
-                F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
+            im_log = axs_top[0, k].imshow(
+                F_val_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1e0, vmax=1e3)
             )
             axs_top[1, k].imshow(
-                F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1, vmax=1e3)
+                F_pred_2d, origin="lower", cmap=cmap, norm=LogNorm(vmin=1e0, vmax=1e3)
             )
-            _ = axs_top[2, k].imshow(
-                F_pred_2d - F_val_2d,
+            im_diff = axs_top[2, k].imshow(
+                (F_pred_2d - F_val_2d) / F_val_2d,
                 origin="lower",
-                vmin=-50,
-                vmax=50,
+                vmin=-0.2,
+                vmax=0.2,
                 cmap="coolwarm",
             )
             axs_bot[0, k].text(
@@ -400,6 +398,16 @@ def main():
             )
             k += 1
         l += 1
+
+    # im_log and im_diff are guaranteed to be set since plot_glaciers is non-empty
+    assert im_log is not None, "im_log should be set by plotting loop"
+    assert im_diff is not None, "im_diff should be set by plotting loop"
+
+    cb1 = fig.colorbar(im_log, cax=cax_log, extend="both")
+    cb1.set_label("m/yr (log scale)")
+
+    cb2 = fig.colorbar(im_diff, cax=cax_diff, extend="both")
+    cb2.set_label("Relative error")
 
     rmse_mean = np.array(rmses).mean()
     mae_mean = np.array(maes).mean()

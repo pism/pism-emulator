@@ -22,6 +22,7 @@
 """
 Train the speed emulator.
 """
+
 import inspect
 import os
 import random

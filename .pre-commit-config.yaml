@@ -4,37 +4,39 @@ fail_fast: true
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
+      - id: check-toml
       - id: check-yaml
         exclude: conda/meta.yaml
 
   # Can run individually with `pre-commit run black --all-files`
   - repo: https://github.com/psf/black
-    rev: 24.4.2
+    rev: 26.3.1
     hooks:
       - id: black
 
   # Can run individually with `pre-commit run isort --all-files`
   - repo: https://github.com/timothycrosley/isort
-    rev: 5.13.2
+    rev: 9.0.0a3
     hooks:
       - id: isort
         args:
           - --profile
           - black
 
+
   # Numpydoc
   - repo: https://github.com/numpy/numpydoc
-    rev: v1.9.0
+    rev: v1.10.0
     hooks:
       - id: numpydoc-validation
 
   # Can run individually with `pre-commit run mypy --all-files`
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.17.0
+    rev: v2.1.0
     hooks:
       - id: mypy
         args: ["--config-file", "pyproject.toml", "--ignore-missing-imports"]
@@ -55,3 +57,16 @@ repos:
             "-sn", # Don't display the score
             "--extension-pkg-whitelist=scipy",
           ]
+
+
+  - repo: local
+    hooks:
+    - id: pytest
+      name: pytest
+      entry: pytest tests
+      language: system
+      types: [python]
+      exclude: ^venv/ ^.git/ ^.vscode/ ^.DS_Store ^uq/ ^hindcasts/
+      always_run: true
+      pass_filenames: false
+      stages: [pre-push]

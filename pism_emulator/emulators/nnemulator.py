@@ -20,6 +20,7 @@
 """
 Neural Network Emulators.
 """
+
 import math
 import warnings
 from argparse import ArgumentParser
@@ -212,7 +213,7 @@ class DNNEmulator(pl.LightningModule):
             Common keys include:
 
             * ``width`` : int, hidden width (default 128)
-            * ``depth`` : int, number of residual blocks (default 4)
+            * ``depth`` : int, number of residual blocks (default 3)
             * ``dropout`` : float, dropout probability (default 0.5)
             * ``activation`` : {"relu","silu","gelu"}, activation function (default "relu")
             * ``learning_rate`` : float, optimizer learning rate (default 1e-2)
@@ -250,7 +251,7 @@ class DNNEmulator(pl.LightningModule):
         )
 
         width: int = int(self.hparams.get("width", 128))
-        depth: int = int(self.hparams.get("depth", 4))
+        depth: int = int(self.hparams.get("depth", 3))
         p_drop: float = float(self.hparams.get("dropout", 0.5))
         activation: str = str(self.hparams.get("activation", "relu"))
 
@@ -340,7 +341,7 @@ class DNNEmulator(pl.LightningModule):
         parser.add_argument(
             "--activation", type=str, default="relu", choices=["relu", "silu", "gelu"]
         )
-        parser.add_argument("--learning_rate", type=float, default=1e-2)
+        parser.add_argument("--learning-rate", type=float, default=1e-2)
         parser.add_argument(
             "--compile", action="store_true", help="Use torch.compile if available"
         )
@@ -592,8 +593,8 @@ class NNEmulator(pl.LightningModule):
             The updated parser with DNNEmulator options added.
         """
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--n_hidden", type=int, default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.1)
+        parser.add_argument("--n-hidden", type=int, default=128)
+        parser.add_argument("--learning-rate", type=float, default=0.1)
 
         return parent_parser
 
@@ -811,8 +812,8 @@ class NN5Emulator(pl.LightningModule):
             The updated parser with NNEmulator options added.
         """
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--n_hidden", type=int, default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.01)
+        parser.add_argument("--n-hidden", type=int, default=128)
+        parser.add_argument("--learning-rate", type=float, default=0.01)
 
         return parent_parser
 
@@ -1017,11 +1018,11 @@ class LegacyNNEmulator(pl.LightningModule):
             The updated parser with NNEmulator options added.
         """
         parser = parent_parser.add_argument_group("NNEmulator")
-        parser.add_argument("--n_hidden_1", type=int, default=128)
-        parser.add_argument("--n_hidden_2", type=int, default=128)
-        parser.add_argument("--n_hidden_3", type=int, default=128)
-        parser.add_argument("--n_hidden_4", type=int, default=128)
-        parser.add_argument("--learning_rate", type=float, default=0.01)
+        parser.add_argument("--n-hidden-1", type=int, default=128)
+        parser.add_argument("--n-hidden-2", type=int, default=128)
+        parser.add_argument("--n-hidden-3", type=int, default=128)
+        parser.add_argument("--n-hidden-4", type=int, default=128)
+        parser.add_argument("--learning-rate", type=float, default=0.01)
 
         return parent_parser
 

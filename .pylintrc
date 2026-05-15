@@ -1,5 +1,8 @@
 [MASTER]
-jobs=4 #number of processes to use
+jobs=1 #single-process: parallel mode trips an astroid const_factory recursion on torch/lightning brains
+init-hook=import sys; sys.setrecursionlimit(10000)
+ignore=pdd.py
+ignore-paths=.*pism_emulator/models/pdd\.py$
 [BASIC]
 good-names=nameOfYourProject #names to be considered ok
 [pre-commit-hook]
