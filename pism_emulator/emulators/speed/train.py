@@ -56,7 +56,7 @@ EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "LegacyNN": LegacyNNEmulator,
 }
 
-
+torch.set_float32_matmul_precision("medium")
 torch.use_deterministic_algorithms(True)
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 

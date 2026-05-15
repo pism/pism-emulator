@@ -48,7 +48,30 @@ from torch import Tensor
 from torch.utils.data import Dataset, get_worker_info
 from tqdm.auto import tqdm as _tqdm
 
-ID_RE: Final[re.Pattern[str]] = re.compile(r"(?:id|uq)_(?P<id>\d+)_")
+_UQ_RE: Final[re.Pattern[str]] = re.compile(r"uq_(?P<id>\d+)_")
+_ID_RE_LEGACY: Final[re.Pattern[str]] = re.compile(r"id_(?P<id>\d+)_")
+# Filenames in newer datasets often contain BOTH ``id_<N>_`` and ``uq_<M>_``;
+# in that case ``uq_<M>_`` is the meaningful run identifier, so try it first.
+ID_RE: Final[re.Pattern[str]] = re.compile(r"(?:uq|id)_(?P<id>\d+)_")
+
+
+def search_run_id(name: str) -> re.Match[str] | None:
+    """
+    Find a run-id substring in ``name``, preferring ``uq_<N>_`` over ``id_<N>_``.
+
+    Parameters
+    ----------
+    name : str
+        Filename (or basename) to search.
+
+    Returns
+    -------
+    re.Match or None
+        A match object with named group ``id``, or ``None`` if neither pattern is present.
+    """
+    return _UQ_RE.search(name) or _ID_RE_LEGACY.search(name)
+
+
 ID_COLUMN_CANDIDATES: Final[tuple[str, ...]] = ("uq", "id")
 
 
@@ -457,7 +480,7 @@ def id_key(path: str | Path) -> int:
     ValueError
         If the pattern is not found in the basename.
     """
-    m = ID_RE.search(Path(path).name)
+    m = search_run_id(Path(path).name)
     if m is None:
         raise ValueError(
             f"Could not parse id from {path!s} using pattern {ID_RE.pattern!r}"
@@ -488,7 +511,7 @@ def parse_id_from_path(p: str | Path) -> int:
     ValueError
         If the pattern is not found in the basename.
     """
-    m = ID_RE.search(Path(p).name)
+    m = search_run_id(Path(p).name)
     if not m:
         raise ValueError(
             f"Could not parse id from {p!s} using pattern {ID_RE.pattern!r}"
@@ -992,7 +1015,7 @@ class PISMDataset(Dataset):
 
     @staticmethod
     def _parse_id(path: str) -> int:
-        m = ID_RE.search(Path(path).name)
+        m = search_run_id(Path(path).name)
         if not m:
             raise ValueError(
                 f"Could not parse id from {path!r} using pattern {ID_RE.pattern!r}"
@@ -1481,7 +1504,7 @@ class LegacyPISMDataset(torch.utils.data.Dataset):
 
         ids: list[int] = []
         for f in training_files:
-            if (m := ID_RE.search(Path(f).name)) is None:
+            if (m := search_run_id(Path(f).name)) is None:
                 raise ValueError(
                     f"Could not find run id in filename {f!r} using pattern {ID_RE.pattern!r}"
                 )
@@ -1849,7 +1872,7 @@ class PISMInterpolatedDataset(Dataset):
         ValueError
             If the id cannot be parsed from the filename.
         """
-        m = ID_RE.search(Path(path).name)
+        m = search_run_id(Path(path).name)
         if not m:
             raise ValueError(
                 f"Could not parse id from {path!r} using pattern {ID_RE.pattern!r}"

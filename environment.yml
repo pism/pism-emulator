@@ -4,7 +4,7 @@ channels:
 dependencies:
   - mypy
   - pre-commit
-  - python=3.11.6
+  - python
   - wget
   - pip
   - pip:

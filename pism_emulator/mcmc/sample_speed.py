@@ -45,6 +45,8 @@ from pism_emulator.emulators.nnemulator import DNNEmulator, NNEmulator
 from pism_emulator.mcmc.mala import MALASamplerModule, run_sampling
 from pism_emulator.utils import param_keys_dict as keys_dict
 
+torch.set_float32_matmul_precision("medium")
+
 EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "NN": NNEmulator,
     "DNN": DNNEmulator,
@@ -157,11 +159,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     f = Figlet(font="standard")
     banner = f.renderText("pism-emulator")
-    rank_zero_info("=" * 80)
+    rank_zero_info("=" * 120)
     rank_zero_info(banner)
-    rank_zero_info("=" * 80)
+    rank_zero_info("=" * 120)
     rank_zero_info("MALA Sampler")
-    rank_zero_info("-" * 80)
+    rank_zero_info("-" * 120)
     rank_zero_info("")
 
     dataset = PISMDataset(
@@ -191,10 +193,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         map_location="cpu",
     )
     if dataset.target.Y_target_error is not None:
-        sigma = dataset.target.Y_target_error
+        sigma = torch.clamp(dataset.target.Y_target_error, min=1e-4)
     else:
-        sigma = 10
-    sigma = torch.clamp(sigma, min=1e-4)
+        sigma = torch.tensor(10.0)
 
     rho = 1.0 / (1e4**2)
     point_area = (dataset.target.grid_resolution) ** 2
@@ -307,13 +308,13 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         accept_t = cast(torch.Tensor, accept)
         sample_stats["accept"] = accept_t.detach().cpu().numpy()
 
-    idata = az.from_dict(
-        posterior=posterior,
-        prior=prior,
-        sample_stats=sample_stats if sample_stats else None,
-        coords=coords,
-        dims=dims,
-    )
+    groups: dict[str, dict[str, np.ndarray]] = {
+        "posterior": posterior,
+        "prior": prior,
+    }
+    if sample_stats:
+        groups["sample_stats"] = sample_stats
+    idata = az.from_dict(groups, coords=coords, dims=dims)
 
     # Save to Zarr (overwrite)
     out_dir = Path(posterior_dir)
@@ -321,29 +322,26 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     # Optional: cast to float32 to shrink size
     for grp in ("posterior", "prior"):
-        if hasattr(idata, grp):
-            ds = getattr(idata, grp)
-            setattr(idata, grp, ds.astype({v: "float32" for v in ds.data_vars}))
+        if grp in idata:
+            ds = idata[grp].to_dataset()
+            idata[grp] = ds.astype({v: "float32" for v in ds.data_vars})
 
     # Save + load
     out_nc = out_dir / f"X_posterior_model_{model_index}.nc"
-    az.to_netcdf(idata, out_nc)  # write
+    out_nc.unlink(missing_ok=True)  # avoid h5netcdf errors on stale/broken files
+    idata.to_netcdf(out_nc)  # write
 
     # Robust plotting: drop (near-)constant vars and use hist with fewer bins
-    az.style.use(["arviz-white", "arviz-greenish"])
+    az.style.use("arviz-tenui")
     with mpl.rc_context(rc=rcparams):
         # variance across chain & draw
         var_all = np.nanvar(arr_denorm, axis=(0, 1))
         keep = var_all > 1e-12
         if np.any(keep):
             var_names = [dataset.samples.X_keys[i] for i in np.flatnonzero(keep)]
-            axes = az.plot_trace(
-                idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
-            )  # <-- key fix: kind/hist_kwargs at top level
-            fig = axes.flatten()[0].get_figure()
-            fig.suptitle("Posterior Traces")
+            pc = az.plot_trace(idata, var_names=var_names)
             out_png = out_dir / f"X_posterior_model_{model_index}.trace.png"
-            plt.savefig(out_png, dpi=300, bbox_inches="tight")
+            pc.savefig(out_png, dpi=300, bbox_inches="tight")
             plt.close("all")
         else:
             rank_zero_info("All parameters are (near) constant; skipping trace plot.")

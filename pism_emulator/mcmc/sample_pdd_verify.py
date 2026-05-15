@@ -285,97 +285,35 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         accept_t = cast(torch.Tensor, accept)
         sample_stats["accept"] = accept_t.detach().cpu().numpy()
 
-    idata = az.from_dict(
-        posterior=posterior,
-        prior=prior,
-        sample_stats=sample_stats if sample_stats else None,
-    )
+    groups: dict[str, dict[str, np.ndarray]] = {
+        "posterior": posterior,
+        "prior": prior,
+    }
+    if sample_stats:
+        groups["sample_stats"] = sample_stats
+    idata = az.from_dict(groups)
 
-    # Optional: cast to float32 to shrink size
     for grp in ("posterior", "prior"):
-        if hasattr(idata, grp):
-            ds = getattr(idata, grp)
-            setattr(idata, grp, ds.astype({v: "float32" for v in ds.data_vars}))
+        if grp in idata:
+            ds = idata[grp].to_dataset()
+            idata[grp] = ds.astype({v: "float32" for v in ds.data_vars})
 
     # Save + load
     out_nc = posterior_dir / Path("X_posterior_model.nc")
-    az.to_netcdf(idata, out_nc)  # write
+    out_nc.unlink(missing_ok=True)
+    idata.to_netcdf(out_nc)
 
-    # Robust plotting: drop (near-)constant vars and use hist with fewer bins
-    az.style.use(["arviz-white", "arviz-greenish"])
+    az.style.use("arviz-tenui")
     with mpl.rc_context(rc=rcparams):
-        # variance across chain & draw
         var_all = np.nanvar(arr, axis=(0, 1))
         keep = var_all > 1e-12
         if np.any(keep):
             var_names = [X_keys[i] for i in np.flatnonzero(keep)]
-            axes = az.plot_trace(
-                idata, var_names=var_names, hist_kwargs={"bins": 50}, figsize=(6.4, 6.4)
-            )
-
-            for i, vname in enumerate(var_names):
-                hist_ax = axes[i, 0]  # histogram axis (usually column 1)
-                tv = true_vals.get(vname)
-
-                hist_ax.axvline(
-                    tv,
-                    linestyle=":",  # dotted
-                    linewidth=1.5,
-                    alpha=0.9,
-                )
-            if hasattr(idata, "prior"):
-                for i, vname in enumerate(var_names):
-                    hist_ax = axes[i, 0]  # histogram axis (usually column 1)
-
-                    # ---- PRIOR ----
-                    prior_vals = np.asarray(
-                        idata.prior[vname], dtype=np.float64
-                    ).ravel()
-                    prior_vals = prior_vals[np.isfinite(prior_vals)]
-                    if prior_vals.size < 2:
-                        continue
-
-                    # ---- POSTERIOR ----
-                    post_vals = np.asarray(
-                        idata.posterior[vname], dtype=np.float64
-                    ).ravel()
-                    post_vals = post_vals[np.isfinite(post_vals)]
-                    if post_vals.size < 2:
-                        continue
-
-                    # Common bins (important!)
-                    lo = min(prior_vals.min(), post_vals.min())
-                    hi = max(prior_vals.max(), post_vals.max())
-                    if lo == hi:
-                        continue
-                    bins = np.linspace(lo, hi, 31)
-
-                    prior_hist, edges = np.histogram(
-                        prior_vals, bins=bins, density=True
-                    )
-                    post_hist, _ = np.histogram(post_vals, bins=bins, density=True)
-                    centers = 0.5 * (edges[1:] + edges[:-1])
-
-                    # ---- SCALE PRIOR ----
-                    prior_max = prior_hist.max()
-                    post_max = post_hist.max()
-                    if prior_max > 0:
-                        scale = 5 * post_max / prior_max
-                    else:
-                        scale = 1.0
-
-                    # ---- PLOT ----
-                    hist_ax.plot(
-                        centers,
-                        scale * prior_hist,
-                        alpha=0.35,
-                        label="prior (scaled)",
-                    )
-
-            fig = axes.flatten()[0].get_figure()
-            fig.suptitle("Posterior Traces")
+            # True-value markers + prior-histogram overlays need a rewrite for arviz 1.x:
+            # PlotCollection has one axes per var (no separate histogram column).
+            pc = az.plot_trace(idata, var_names=var_names)
             out_png = posterior_dir / Path("posterior_trace.png")
-            plt.savefig(out_png, dpi=300, bbox_inches="tight")
+            pc.savefig(out_png, dpi=300, bbox_inches="tight")
             plt.close("all")
         else:
             rank_zero_info("All parameters are (near) constant; skipping trace plot.")

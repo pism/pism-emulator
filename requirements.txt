@@ -4,6 +4,8 @@ cf_xarray
 dask[distributed,dataframe]
 earthaccess
 h5netcdf
+h5py
+identify
 ipywidgets
 joblib
 lightning
