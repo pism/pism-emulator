@@ -8,6 +8,9 @@ and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.43.0]
 
+### Added
+- Sphinx documentation in `docs/` (same layout as pism-terra): getting started, the emulators, flow calibration with MALA, the PDD model, mass-loss calibration, the real-data sampler comparison, developer guides, the CLI and API reference, and release notes from this changelog. `.readthedocs.yaml` builds it on Read the Docs, and the `Docs` workflow checks it with warnings as errors.
+
 ### Changed
 - :warning: The MALA samplers (`sample-posterior-speed`, `sample-posterior-pdd*`) take `--proposal {manifold,fixed,legacy}` (`MALASamplerModule(proposal=...)`), replacing `metric_mode`. The default, `manifold`, is simplified manifold MALA: the proposal has a Langevin drift, and the Metropolis-Hastings ratio uses the geometry at the proposal for the reverse move (one Hessian per step). The old sampler reused the metric of the current state in both directions although the metric is recomputed at every accepted state, so it was not reversible and its posteriors were slightly biased (on a 2-D test target the mean was off by about 6 Monte Carlo standard errors). Posterior samples therefore differ from earlier runs. `legacy` restores the old sampler and reproduces earlier chains draw for draw; `delayed_accept` and `hess_refresh > 1` are only available with it.
 - `--proposal fixed` computes the Hessian metric once per chain, at its starting point (the MAP), and keeps it: MALA with a constant preconditioner, which is exact and needs one gradient instead of one Hessian per step. This is the cheap variant of the simplification the original sampler intended (a reused Hessian makes the proposal symmetric); the original recomputed the Hessian at every accepted state, which is what made it biased.

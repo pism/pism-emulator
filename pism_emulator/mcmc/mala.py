@@ -1729,7 +1729,7 @@ class ReparametrizedMALASamplerModule(
         *args
             Positional arguments. If provided, args[0] must be φ.
         **kwargs
-            Keyword arguments. Must contain φ if *args is empty.
+            Keyword arguments. Must contain φ if ``*args`` is empty.
 
         Returns
         -------
