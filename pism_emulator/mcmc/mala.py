@@ -28,6 +28,7 @@ import datetime as dt
 import math
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Literal, Optional, Sequence
 
@@ -151,16 +152,12 @@ class MALASamplerModule(pl.LightningModule):
         Beta prior shape parameter :math:`\\beta` for normalized parameters.
     nu : float, default=1.0
         Degrees of freedom of the Student-t likelihood.
-    metric_mode : {"manifold", "current"}, default="manifold"
-        Only with ``legacy_proposal=True``: reverse proposal metric. If
-        ``"manifold"``, compute geometry at the proposal :math:`x'` (with
-        delayed acceptance); if ``"current"``, reuse :math:`H(x)` for both
-        directions. The default sampler always uses the geometry at :math:`x'`.
     hess_refresh : int, default=1
-        Recompute the local geometry (gradient & Hessian) every ``N`` steps (``N >= 1``).
+        Only with ``proposal="legacy"``: recompute the local geometry every
+        ``N`` steps (``N >= 1``).
     delayed_accept : bool, default=False
-        Enable two-stage delayed acceptance to avoid computing geometry at
-        obviously poor proposals.
+        Only with ``proposal="legacy"``: two-stage delayed acceptance that
+        computes the geometry at the proposal only after a cheap first stage.
     adapt_method : {"dual", "ema"}, default="ema"
         Step-size adaptation during burn-in (dual-averaging à la NUTS/Stan, or
         exponentially weighted moving average).
@@ -171,7 +168,7 @@ class MALASamplerModule(pl.LightningModule):
     h_max : float, default=1.0
         Maximum allowed step size during adaptation.
     use_eig : bool, default=False
-        Only with ``legacy_proposal=True``: use linalg.eigh instead of the
+        Only with ``proposal="legacy"``: use linalg.eigh instead of the
         Newton-Schulz iteration for the metric. The default sampler always uses
         the exact eigendecomposition.
     acc_target : float, default=0.25
@@ -199,22 +196,26 @@ class MALASamplerModule(pl.LightningModule):
         used in the default exact‐Hessian path.
     seed : int or None, default=None
         Base RNG seed; the effective per-chain seed is derived from this value.
-    legacy_proposal : bool, default=False
-        Use the sampler as it was before v0.43: a proposal without Langevin
-        drift whose reverse density reuses the metric at the current state.
-        That kernel is not reversible (the metric changes at every accepted
-        state), so its samples are slightly biased; use it only to reproduce
-        earlier runs. ``metric_mode``, ``delayed_accept`` and ``hess_refresh > 1``
-        apply only to this proposal.
-    fixed_metric : bool, default=False
-        Compute the metric ``|H|`` once per chain, at its starting point (the MAP
-        in the ``sample-posterior-*`` tools), and keep it for every step. The
-        proposal is then MALA preconditioned with a constant matrix: still exact
-        (reversible), and it needs only a gradient per step instead of a
-        Hessian. It adapts less to posteriors whose curvature changes strongly
-        across their support. Not combinable with ``legacy_proposal``.
+    proposal : {"manifold", "fixed", "legacy"}, default="manifold"
+        How proposals are made; see :attr:`PROPOSALS`.
+
+        * ``"manifold"``: simplified manifold MALA. The metric ``|H|`` is
+          recomputed at every state, proposals have a Langevin drift, and the
+          reverse density uses the geometry at the proposal, so the chain is
+          exact. Costs one Hessian per step.
+        * ``"fixed"``: MALA preconditioned with the metric ``|H|`` computed once
+          per chain at its starting point (the MAP in the ``sample-posterior-*``
+          tools). Also exact, and costs one gradient per step, but adapts less to
+          posteriors whose curvature changes strongly across their support.
+        * ``"legacy"``: the sampler before v0.43, without drift and with a
+          reverse density that reuses the metric at the current state. Because
+          that metric is recomputed at every accepted state, the kernel is not
+          reversible and its samples are slightly biased; use it only to
+          reproduce earlier runs (draw for draw).
     **kwargs : Any
         Ignored. Included for forward compatibility with Lightning APIs.
+        ``metric_mode`` (removed in v0.43) is accepted with a warning and
+        ignored.
 
     Attributes
     ----------
@@ -275,6 +276,8 @@ class MALASamplerModule(pl.LightningModule):
     >>> chains = torch.stack([p["samples"] for p in preds])  # (C, S, D)
     """
 
+    PROPOSALS: tuple[str, ...] = ("manifold", "fixed", "legacy")
+
     def __init__(
         self,
         model: pl.LightningModule,
@@ -287,7 +290,6 @@ class MALASamplerModule(pl.LightningModule):
         alpha_b: float = 3.0,
         beta_b: float = 3.0,
         nu: float = 1.0,
-        metric_mode: Literal["manifold", "current"] = "manifold",
         hess_refresh: int = 1,
         delayed_accept: bool = False,
         adapt_method: Literal["dual", "ema"] = "ema",
@@ -307,8 +309,7 @@ class MALASamplerModule(pl.LightningModule):
         pbar_update_every: int = 10,
         q: int = 100,
         seed: int | None = None,
-        legacy_proposal: bool = False,
-        fixed_metric: bool = False,
+        proposal: Literal["manifold", "fixed", "legacy"] = "manifold",
         **kwargs: Any,
     ) -> None:
         super().__init__()
@@ -380,22 +381,28 @@ class MALASamplerModule(pl.LightningModule):
         self.delayed_accept: bool = bool(delayed_accept)
         self.hessian_counter: int = 0
         self.hess_refresh: int = int(hess_refresh)
-        self.metric_mode: Literal["manifold", "current"] = metric_mode
         self.pbar_update_every: int = int(pbar_update_every)
         self.samples: int = int(samples)
         self.show_progress: bool = show_progress
         self.use_eig: bool = use_eig
-        self.legacy_proposal: bool = bool(legacy_proposal)
-        self.fixed_metric: bool = bool(fixed_metric)
-        if self.fixed_metric and self.legacy_proposal:
-            raise ValueError("fixed_metric cannot be combined with legacy_proposal")
-        # metric of the current chain when fixed_metric is set (reset per chain)
-        self._fixed_geom: Optional[tuple[Tensor, Tensor, Tensor]] = None
-        if not self.legacy_proposal and (self.delayed_accept or self.hess_refresh != 1):
+        if proposal not in self.PROPOSALS:
+            raise ValueError(
+                f"proposal must be one of {self.PROPOSALS}, got {proposal!r}"
+            )
+        self.proposal: Literal["manifold", "fixed", "legacy"] = proposal
+        if proposal != "legacy" and (self.delayed_accept or self.hess_refresh != 1):
             raise ValueError(
                 "delayed_accept and hess_refresh != 1 are only supported with "
-                "legacy_proposal=True"
+                'proposal="legacy"'
             )
+        if "metric_mode" in kwargs:
+            warnings.warn(
+                "metric_mode was removed in v0.43 and is ignored; use proposal=",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        # metric of the current chain with proposal="fixed" (reset per chain)
+        self._fixed_geom: Optional[tuple[Tensor, Tensor, Tensor]] = None
 
     def configure_optimizers(self) -> None:
         """
@@ -524,7 +531,7 @@ class MALASamplerModule(pl.LightningModule):
         log-posterior, computed exactly by eigendecomposition
         (:meth:`_local_geometry_eig`). It replaces the Newton-Schulz square root
         of ``H @ H`` (:meth:`_local_geometry_newton_schulz`), which is kept only
-        for ``legacy_proposal=True``.
+        for ``proposal="legacy"``.
 
         Parameters
         ----------
@@ -542,7 +549,7 @@ class MALASamplerModule(pl.LightningModule):
         self, X: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         """
-        Compute the local geometry exactly as before ``legacy_proposal`` existed.
+        Compute the local geometry exactly as the sampler before v0.43 did.
 
         Parameters
         ----------
@@ -790,7 +797,7 @@ class MALASamplerModule(pl.LightningModule):
         Perform one sampler step.
 
         Dispatches to the simplified manifold MALA step (:meth:`_mmala_step`) or,
-        with ``legacy_proposal=True``, to the pre-fix proposal
+        with ``proposal="legacy"``, to the pre-fix proposal
         (:meth:`_legacy_step`).
 
         Parameters
@@ -813,7 +820,7 @@ class MALASamplerModule(pl.LightningModule):
             * ``alpha`` : acceptance probability used for the decision
             * ``neg_log_prob_next`` : negative log-posterior at ``X_next``
         """
-        if self.legacy_proposal:
+        if self.proposal == "legacy":
             return self._legacy_step(X, h, local)
         return self._mmala_step(X, h, local)
 
@@ -824,7 +831,8 @@ class MALASamplerModule(pl.LightningModule):
         """
         Return the geometry used by :meth:`_mmala_step` at ``X``.
 
-        Without ``fixed_metric`` this is :meth:`_local_geometry`. With it, the
+        With ``proposal="manifold"`` this is :meth:`_local_geometry`. With
+        ``proposal="fixed"``, the
         metric computed at the chain's first state is reused, and only the
         negative log-posterior and its gradient are evaluated at ``X``.
 
@@ -838,7 +846,7 @@ class MALASamplerModule(pl.LightningModule):
         tuple
             ``(log_pi, g, Hpos, Hinv, log_det_Hinv)``.
         """
-        if not self.fixed_metric:
+        if self.proposal != "fixed":
             return self._local_geometry(X)
         if self._fixed_geom is None:
             log_pi, g, Hpos, Hinv, log_det_Hinv = self._local_geometry(X)
@@ -870,7 +878,7 @@ class MALASamplerModule(pl.LightningModule):
         chain is reversible with respect to the posterior although the proposal
         covariance changes with position. The geometry at ``x'`` is reused as the
         current geometry when ``x'`` is accepted, so each step costs one Hessian.
-        With ``fixed_metric`` the metric is the one from the chain's first state,
+        With ``proposal="fixed"`` the metric is the one from the chain's first state,
         and each step costs one gradient (see :meth:`_step_geometry`).
 
         Parameters
@@ -930,10 +938,10 @@ class MALASamplerModule(pl.LightningModule):
         Tensor,
     ]:
         """
-        Perform one step of the pre-fix sampler (``legacy_proposal=True``).
+        Perform one step of the pre-fix sampler (``proposal="legacy"``).
 
         The proposal is ``x' ~ N(x, 2 h G(x)^-1)`` without drift, and the
-        reverse density reuses ``G(x)`` (``metric_mode="current"``) unless
+        reverse density reuses ``G(x)`` unless
         delayed acceptance is on. Because ``G`` is recomputed at each accepted
         state, this kernel does not satisfy detailed balance; it is kept only to
         reproduce earlier runs draw for draw.
@@ -974,7 +982,7 @@ class MALASamplerModule(pl.LightningModule):
         # forward q(x'|x) using H(x)
         logq_f = self._proposal_logpdf(Xp, X, H, log_det_Hinv, h, self._two_pi)
 
-        if not self.delayed_accept or self.metric_mode == "current":
+        if not self.delayed_accept:
             # reverse q(x|x') also using H(x)  (CURRENT metric variant)
             logq_r = self._proposal_logpdf(X, Xp, H, log_det_Hinv, h, self._two_pi)
             log_alpha = -log_pi_p + logq_r + log_pi - logq_f
@@ -1143,7 +1151,7 @@ class MALASamplerModule(pl.LightningModule):
 
         local = None
         self._fixed_geom = (
-            None  # fixed_metric: compute the metric at this chain's start
+            None  # proposal="fixed": compute the metric at this chain's start
         )
         acc_ema = acc_target
         if adapt_method == "dual":

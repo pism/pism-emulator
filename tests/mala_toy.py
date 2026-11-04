@@ -69,7 +69,6 @@ def make_sampler(reparam: bool = False, **kwargs: Any) -> MALASamplerModule:
     defaults: dict[str, Any] = {
         "alpha": 1.0,
         "nu": 4.0,
-        "metric_mode": "current",
         "delayed_accept": False,
         "h0": 0.5,
         "show_progress": False,

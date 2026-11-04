@@ -129,14 +129,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--use-eig", action="store_true")
     parser.add_argument(
-        "--legacy-proposal",
-        action="store_true",
-        help="Use the pre-v0.43 proposal (no drift, not reversible) to reproduce old runs",
-    )
-    parser.add_argument(
-        "--fixed-metric",
-        action="store_true",
-        help="Compute the Hessian metric once at the MAP and keep it (one gradient per step)",
+        "--proposal",
+        choices=MALA.PROPOSALS,
+        default="manifold",
+        help=(
+            "manifold: metric recomputed at every state (1 Hessian/step); "
+            "fixed: metric from the MAP kept (1 gradient/step); "
+            "legacy: pre-v0.43 sampler, biased, only to reproduce old runs"
+        ),
     )
     parser.add_argument("--thin", type=int, default=4)
     parser.add_argument("--years", nargs=2, default=["1980", "1989"])
@@ -264,11 +264,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         Y_true,
         sigma_hat,
         alpha=alpha,
-        metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
-        legacy_proposal=args.legacy_proposal,
-        fixed_metric=args.fixed_metric,
+        proposal=args.proposal,
         burn=burn,
         samples=samples,
         h0=0.1,

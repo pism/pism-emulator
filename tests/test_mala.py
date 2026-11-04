@@ -139,7 +139,7 @@ def test_lp_is_log_posterior_of_each_draw(legacy: bool) -> None:
     legacy : bool
         Use the legacy proposal.
     """
-    s = make_sampler(legacy_proposal=legacy)
+    s = make_sampler(proposal="legacy" if legacy else "manifold")
     res = run_chain(s, seed=0, burn=20, samples=60)
     assert torch.isfinite(res["lp"]).all()
     assert res["accept"].any()
@@ -155,9 +155,9 @@ def test_lp_is_log_posterior_of_each_draw(legacy: bool) -> None:
         ("eig", {"use_eig": True}),
     ],
 )
-def test_legacy_proposal_reproduces_old_sampler(name: str, kwargs: dict) -> None:
+def test_legacy_reproduces_old_sampler(name: str, kwargs: dict) -> None:
     """
-    Check that ``legacy_proposal=True`` reproduces the pre-fix chains draw for draw.
+    Check that ``proposal="legacy"`` reproduces the pre-fix chains draw for draw.
 
     The reparametrized sampler is not included: before the fix its likelihood
     applied phi -> X twice, so its old chains cannot (and should not) be
@@ -171,7 +171,7 @@ def test_legacy_proposal_reproduces_old_sampler(name: str, kwargs: dict) -> None
         Extra sampler options.
     """
     golden = torch.load(GOLDEN)[name]
-    s = make_sampler(legacy_proposal=True, **kwargs)
+    s = make_sampler(proposal="legacy", **kwargs)
     res = run_chain(s, seed=1234, burn=50, samples=150)
     torch.testing.assert_close(res["samples"], golden["samples"])
     torch.testing.assert_close(res["accept"], golden["accept"])
@@ -180,9 +180,9 @@ def test_legacy_proposal_reproduces_old_sampler(name: str, kwargs: dict) -> None
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "reparam, fixed_metric", [(False, False), (True, False), (False, True)]
+    "reparam, proposal", [(False, "manifold"), (True, "manifold"), (False, "fixed")]
 )
-def test_posterior_moments_match_exact(reparam: bool, fixed_metric: bool) -> None:
+def test_posterior_moments_match_exact(reparam: bool, proposal: str) -> None:
     """
     Check that four chains reproduce the exact posterior mean and sd.
 
@@ -190,14 +190,14 @@ def test_posterior_moments_match_exact(reparam: bool, fixed_metric: bool) -> Non
     ----------
     reparam : bool
         Use the reparametrized sampler.
-    fixed_metric : bool
-        Keep the metric of the chain's first state.
+    proposal : str
+        Sampler proposal.
     """
     mean, var = exact_moments()
     draws = torch.cat(
         [
             run_chain(
-                make_sampler(reparam=reparam, fixed_metric=fixed_metric),
+                make_sampler(reparam=reparam, proposal=proposal),
                 seed=c,
                 burn=500,
                 samples=3000,
@@ -209,9 +209,9 @@ def test_posterior_moments_match_exact(reparam: bool, fixed_metric: bool) -> Non
     torch.testing.assert_close(draws.std(0), var.sqrt(), rtol=0.08, atol=0)
 
 
-def test_fixed_metric_computes_one_hessian_per_chain() -> None:
-    """Check that fixed_metric evaluates the Hessian once per chain, lp stays exact."""
-    s = make_sampler(fixed_metric=True)
+def test_fixed_proposal_computes_one_hessian_per_chain() -> None:
+    """Check that proposal="fixed" evaluates the Hessian once per chain."""
+    s = make_sampler(proposal="fixed")
     for seed in (0, 1):
         s.hessian_counter = 0
         res = run_chain(s, seed=seed, burn=20, samples=80)
@@ -228,6 +228,8 @@ def test_new_sampler_rejects_unsupported_options() -> None:
         make_sampler(delayed_accept=True)
     with pytest.raises(ValueError):
         make_sampler(hess_refresh=5)
-    make_sampler(delayed_accept=True, hess_refresh=5, legacy_proposal=True)
+    make_sampler(delayed_accept=True, hess_refresh=5, proposal="legacy")
     with pytest.raises(ValueError):
-        make_sampler(fixed_metric=True, legacy_proposal=True)
+        make_sampler(proposal="exact")
+    with pytest.warns(DeprecationWarning):
+        make_sampler(metric_mode="current")
