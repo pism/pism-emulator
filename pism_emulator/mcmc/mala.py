@@ -171,8 +171,12 @@ class MALASamplerModule(pl.LightningModule):
         Only with ``proposal="legacy"``: use linalg.eigh instead of the
         Newton-Schulz iteration for the metric. The default sampler always uses
         the exact eigendecomposition.
-    acc_target : float, default=0.25
-        Target acceptance probability used by the adaptation logic.
+    acc_target : float or None, default=None
+        Acceptance rate the burn-in step-size adaptation aims for. None means
+        0.57 with ``proposal="fixed"`` (near the optimum for MALA with a good
+        preconditioner) and 0.25 otherwise. On an emulator with ReLU
+        activations the ``"manifold"`` sampler mixes far worse at 0.57, because
+        its local metric changes abruptly and only tiny steps are accepted.
     dual_t0 : float, default=10.0
         Dual-averaging stabilizer (see Hoffman & Gelman 2014).
     dual_kappa : float, default=0.75
@@ -297,7 +301,7 @@ class MALASamplerModule(pl.LightningModule):
         h_min: float = 1e-3,
         h_max: float = 1.0,
         use_eig: bool = False,
-        acc_target: float = 0.25,
+        acc_target: float | None = None,
         dual_t0: float = 10.0,
         dual_kappa: float = 0.75,
         dual_gamma: float = 0.05,
@@ -390,6 +394,9 @@ class MALASamplerModule(pl.LightningModule):
                 f"proposal must be one of {self.PROPOSALS}, got {proposal!r}"
             )
         self.proposal: Literal["manifold", "fixed", "legacy"] = proposal
+        if acc_target is None:
+            acc_target = 0.57 if proposal == "fixed" else 0.25
+        self.hparams["acc_target"] = float(acc_target)
         if proposal != "legacy" and (self.delayed_accept or self.hess_refresh != 1):
             raise ValueError(
                 "delayed_accept and hess_refresh != 1 are only supported with "

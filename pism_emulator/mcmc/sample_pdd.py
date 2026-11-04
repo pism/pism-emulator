@@ -148,8 +148,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument(
         "--acc-target",
         type=float,
-        default=0.25,
-        help="Acceptance rate the burn-in step-size adaptation aims for",
+        default=None,
+        help="Acceptance rate the burn-in adaptation aims for (default 0.57 with --proposal fixed, else 0.25)",
     )
     parser.add_argument("--thin", type=int, default=4)
     parser.add_argument("--years", nargs=2, default=["1980", "1989"])

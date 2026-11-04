@@ -222,6 +222,24 @@ def test_fixed_proposal_computes_one_hessian_per_chain() -> None:
         torch.testing.assert_close(res["lp"], expected, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.parametrize(
+    "proposal, expected", [("manifold", 0.25), ("fixed", 0.57), ("legacy", 0.25)]
+)
+def test_default_acceptance_target(proposal: str, expected: float) -> None:
+    """
+    Check the default acceptance target of each proposal, and that it can be set.
+
+    Parameters
+    ----------
+    proposal : str
+        Sampler proposal.
+    expected : float
+        Default target for that proposal.
+    """
+    assert make_sampler(proposal=proposal).hparams.acc_target == expected
+    assert make_sampler(proposal=proposal, acc_target=0.4).hparams.acc_target == 0.4
+
+
 def test_new_sampler_rejects_unsupported_options() -> None:
     """Delayed acceptance and stale metrics exist only for the legacy proposal."""
     with pytest.raises(ValueError):
