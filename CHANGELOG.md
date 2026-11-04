@@ -20,6 +20,8 @@ and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `DNNEmulator` no longer takes `--norm`, which was ignored, and its `depth` fallback is 4 as on the command line. The emulators log their validation losses once per epoch.
 - `pism-evaluate-emulator` and `pism_emulator.plotting` draw the observed and emulated speed fields with the `cmg.speed` colormap from [cmglaciology](https://pypi.org/project/cmglaciology/), which the environment files now install with pip (it is not on conda-forge).
 
+- Python 3.12 or newer is required (`>=3.12,<3.14`), and ArviZ 1.x. The posterior files use ArviZ 1.x's data-tree API, which is not available for Python 3.11, where conda-forge resolves ArviZ 0.23 and the `pism-sample-posterior-*` tools failed while writing their output.
+
 ### Fixed
 - `ReparametrizedMALASamplerModule` (`pism-sample-posterior-pdd-reparametrized*`) evaluated the likelihood at `phi_to_X(phi_to_X(phi))` instead of `phi_to_X(phi)`, so it sampled close to the prior. Results of earlier reparametrized runs are not valid and cannot be reproduced with `--proposal legacy`.
 - `find_MAP` (LBFGS) accumulated gradients across closure calls, so MAP starting points could be wrong.

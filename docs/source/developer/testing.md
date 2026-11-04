@@ -61,7 +61,7 @@ GitHub Actions run on every push and pull request:
 * - Workflow
   - Checks
 * - `test.yml`
-  - pytest on Python 3.11 and 3.13 in the conda environment
+  - pytest on Python 3.12 and 3.13 in the conda environment
 * - `static-analysis.yml`
   - pre-commit, pylint on the package, and a secrets scan
 * - `docs.yml`

@@ -3,7 +3,7 @@ name = "pism-emulator"
 maintainers = [{name = "Andy Aschwanden", email = "andy.aschwanden@gmail.com"}]
 description = """PISM Emulator and MALA MCMC Sampler"""
 readme = "README.md"
-requires-python = ">3.9"
+requires-python = ">=3.12"
 license = {text = "GPL 3.0"}
 classifiers = [
         "License :: OSI Approved :: Apache Software License",
@@ -92,7 +92,7 @@ exclude = [
 
 
 [tool.mypy]
-python_version = 3.11
+python_version = 3.12
 check_untyped_defs = "True"
 ignore_missing_imports = "True"
 warn_unused_ignores = "True"
@@ -103,7 +103,7 @@ exclude = ["data"]
 
 [tool.black]
 line-length = 88
-target-version = ['py311']
+target-version = ['py312']
 include = '\.pyi?$'
 exclude = '''
 /(

@@ -26,8 +26,9 @@ python -m pip install -e . --no-deps
 ```
 
 `--no-deps` keeps pip from installing a second copy of packages conda already
-provides. Python is pinned to `>=3.11,<3.14`, the versions all compiled
-dependencies (h5py, netCDF4, PyTorch) have conda-forge builds for.
+provides. Python is pinned to `>=3.12,<3.14`: ArviZ 1.x, whose data-tree format the
+posterior files use, needs Python 3.12, and 3.14 is not yet built for all
+compiled dependencies (h5py, netCDF4, PyTorch).
 
 ## NVIDIA GPUs
 

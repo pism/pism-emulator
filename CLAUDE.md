@@ -24,7 +24,7 @@ pip install -e . --no-deps
 ```
 
 For GPU support on CUDA systems, use `environment-cuda.yml` instead. Both environment
-files list every dependency explicitly (conda-forge, plus `cmglaciology` via pip because it is not on conda-forge; Python pinned `>=3.11,<3.14`);
+files list every dependency explicitly (conda-forge, plus `cmglaciology` via pip because it is not on conda-forge; Python pinned `>=3.12,<3.14`);
 `requirements.txt` is only used by `pyproject.toml` for pip-only installs, so keep the
 three files in sync when adding a dependency.
 
@@ -58,7 +58,7 @@ pre-commit run mypy --all-files
 **Enforced standards:**
 - **black**: Code formatting (line length: 88)
 - **isort**: Import sorting (profile: black)
-- **mypy**: Type checking (Python 3.11)
+- **mypy**: Type checking (Python 3.12)
 - **pylint**: Linting
 - **numpydoc**: Docstring validation
 
@@ -73,7 +73,7 @@ Sphinx + MyST site in `docs/` (same layout as pism-terra): `pip install -r docs/
 
 ## CI and Releases
 
-- GitHub Actions in `.github/workflows/`: `test.yml` (pytest on Python 3.11 and 3.13), `static-analysis.yml` (pre-commit, pylint, secrets scan), `changelog.yml` (every PR must edit `CHANGELOG.md` unless labelled `bumpless`), `labeled-pr.yml` (PRs into `release` need a `major`/`minor`/`patch`/`bumpless` label).
+- GitHub Actions in `.github/workflows/`: `test.yml` (pytest on Python 3.12 and 3.13), `static-analysis.yml` (pre-commit, pylint, secrets scan), `changelog.yml` (every PR must edit `CHANGELOG.md` unless labelled `bumpless`), `labeled-pr.yml` (PRs into `release` need a `major`/`minor`/`patch`/`bumpless` label).
 - Releases: merge a labelled PR from `main` into `release` -> `tag-version.yml` bumps the latest `vX.Y.Z` tag -> `release.yml` creates the GitHub release from the matching `## [X.Y.Z]` section of `CHANGELOG.md` and fast-forwards `main`. Both use the `CICD_PAT` repository secret.
 - The package version comes from git tags via `setuptools_scm`.
 

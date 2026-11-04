@@ -1,4 +1,4 @@
-arviz
+arviz>=1
 bokeh
 cf_xarray
 cmglaciology
