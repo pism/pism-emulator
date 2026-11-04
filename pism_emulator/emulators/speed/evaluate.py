@@ -35,6 +35,7 @@ import matplotlib as mpl
 import matplotlib.pylab as plt
 import numpy as np
 import torch
+from cmglaciology import cm as cmg
 from matplotlib.colors import LogNorm
 from matplotlib.figure import Figure
 from scipy.stats import pearsonr
@@ -239,7 +240,7 @@ def main():
 
     plot_glaciers = sorted(rng.choice(glaciers, size=4, replace=False))
     print(f"Plot gllaciers selected: {plot_glaciers}")
-    cmap = "viridis"
+    cmap = cmg.cmaps["speed"]  # cmglaciology "cmg.speed"
     fig = plt.figure(figsize=(6.4, 4.8), layout="constrained")
 
     # Outer layout: top block + bottom block (tweak height_ratios as you like)
