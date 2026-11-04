@@ -26,6 +26,7 @@ from typing import Any, Sequence
 
 import numpy as np
 import pylab as plt
+from cmglaciology import cm as cmg
 from matplotlib.colors import LogNorm
 
 
@@ -69,12 +70,13 @@ def plot_compare(
 
     Notes
     -----
-    - Speeds are shown with ``LogNorm(vmin=1, vmax=3000)``.
+    - Speeds are shown with the ``cmg.speed`` colormap (cmglaciology) and
+      ``LogNorm(vmin=1, vmax=3000)``.
     - Difference panel uses a symmetric linear colormap in ``[-50, 50]`` m/yr.
     - Two colorbars are added on the right: one for speed and one for difference.
     - The figure is saved as ``"test_comp.pdf"`` in the current working directory.
     """
-    cmap = "viridis"
+    cmap = cmg.cmaps["speed"]  # cmglaciology "cmg.speed"
     fig, axs = plt.subplots(
         nrows=3, ncols=1, sharex="col", sharey="row", figsize=(2.5, 8)
     )
