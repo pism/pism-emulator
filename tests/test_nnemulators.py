@@ -85,7 +85,7 @@ def nn_setup(Emulator: pl.LightningModule) -> torch.tensor:
     X = torch.rand(n_samples, n_parameters, dtype=torch.float32)
     Y = torch.rand(n_samples, n_grid_points, dtype=torch.float32)
 
-    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
+    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples), random_state=0)).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
