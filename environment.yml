@@ -2,10 +2,49 @@ name: pism-emulator
 channels:
   - conda-forge
 dependencies:
+  - python>=3.11,<3.14
+  - pip
+  # PyTorch (CPU / Apple MPS). For CUDA use environment-cuda.yml instead.
+  - pytorch
+  - torchvision
+  - torchaudio
+  - lightning
+  - torchmetrics
+  - tensorboard
+  # Scientific stack
+  - numpy
+  - scipy
+  - pandas
+  - scikit-learn
+  - joblib
+  - tqdm
+  - arviz
+  # I/O and geospatial
+  - xarray
+  - dask
+  - distributed
+  - netcdf4
+  - h5netcdf
+  - h5py
+  - zarr
+  - rioxarray
+  - cf-xarray
+  - pint-xarray
+  - earthaccess
+  # Plotting
+  - matplotlib
+  - seaborn
+  - bokeh
+  - pyfiglet
+  # Notebooks
+  - notebook
+  - ipywidgets
+  # Development
+  - pytest
+  - pylint
   - mypy
   - pre-commit
-  - python
+  - identify
   - wget
-  - pip
-  - pip:
-      - -r requirements.txt
+# Then install the package itself without letting pip touch conda packages:
+#   pip install -e . --no-deps

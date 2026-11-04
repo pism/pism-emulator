@@ -19,11 +19,14 @@ pism-emulator implements a two-step Bayesian calibration framework for ice sheet
 conda env create -f environment.yml
 conda activate pism-emulator
 
-# Install package in development mode
-pip install -e .
+# Install package in development mode (dependencies come from conda-forge)
+pip install -e . --no-deps
 ```
 
-For GPU support on CUDA systems, use `environment-cuda.yml` instead.
+For GPU support on CUDA systems, use `environment-cuda.yml` instead. Both environment
+files list every dependency explicitly (conda-forge only, Python pinned `>=3.11,<3.14`);
+`requirements.txt` is only used by `pyproject.toml` for pip-only installs, so keep the
+three files in sync when adding a dependency.
 
 ### Testing
 ```bash
@@ -63,6 +66,12 @@ pre-commit run mypy --all-files
 - Max line length: 120 characters (flake8, pylint) or 88 (black)
 - Tool configurations are in `pyproject.toml`
 - Many warnings are ignored in flake8 (E203, E501, W503, etc.) - see `[tool.flake8]`
+
+## CI and Releases
+
+- GitHub Actions in `.github/workflows/`: `test.yml` (pytest on Python 3.11 and 3.13), `static-analysis.yml` (pre-commit, pylint, secrets scan), `changelog.yml` (every PR must edit `CHANGELOG.md` unless labelled `bumpless`), `labeled-pr.yml` (PRs into `release` need a `major`/`minor`/`patch`/`bumpless` label).
+- Releases: merge a labelled PR from `main` into `release` -> `tag-version.yml` bumps the latest `vX.Y.Z` tag -> `release.yml` creates the GitHub release from the matching `## [X.Y.Z]` section of `CHANGELOG.md` and fast-forwards `main`. Both use the `CICD_PAT` repository secret.
+- The package version comes from git tags via `setuptools_scm`.
 
 ## Core Architecture
 
@@ -278,8 +287,7 @@ The complete two-step calibration process:
 ## GPU Acceleration
 
 ### CUDA Setup
-- Install PyTorch with CUDA support
-- Use `environment-cuda.yml` for conda environment
+- Use `environment-cuda.yml` (conda-forge `pytorch-gpu`; add `cuda-version=12.x` to match older drivers)
 - Set `--accelerator cuda` in command-line tools
 - Code includes CUDA-specific directives: `torch.backends.cudnn.conv.fp32_precision = "tf32"`
 
