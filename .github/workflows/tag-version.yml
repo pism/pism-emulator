@@ -6,13 +6,44 @@ on:
       - release
 
 jobs:
-  call-bump-version-workflow:
-    # Bumps the latest vX.Y.Z tag by the major/minor/patch label of the merged PR.
-    # Docs: https://github.com/ASFHyP3/actions#reusable-bump-versionyml
-    uses: ASFHyP3/actions/.github/workflows/reusable-bump-version.yml@v0.21.1
+  bump-version:
+    # Bumps the latest vX.Y.Z tag by the major/minor/patch label of the merged PR
+    # (a `bumpless` label, or none, tags nothing). Same logic as ASFHyP3's
+    # reusable-bump-version.yml, without bump2version, which fails on Python >= 3.15.
+    # The tag is pushed with CICD_PAT so that it triggers release.yml.
+    runs-on: ubuntu-latest
     permissions: {}
-    with:
-      user: Andy Aschwanden
-      email: andy.aschwanden@gmail.com
-    secrets:
-      USER_TOKEN: ${{ secrets.CICD_PAT }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.CICD_PAT }}
+
+      - name: Tag version
+        env:
+          GH_TOKEN: ${{ secrets.CICD_PAT }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          PR=$(gh api "repos/${REPO}/commits/${SHA}/pulls" --jq '.[0].number // empty')
+          if [ -z "${PR}" ]; then
+            echo "No pull request is associated with ${SHA}; nothing to tag."
+            exit 0
+          fi
+
+          BUMP_PART=$(gh pr view "${PR}" -R "${REPO}" --json labels --jq '.labels[].name' \
+            | grep -xE 'major|minor|patch|bumpless' | sort | head -1 || true)
+          if [ -z "${BUMP_PART}" ] || [ "${BUMP_PART}" = "bumpless" ]; then
+            echo "PR #${PR} is '${BUMP_PART:-unlabelled}'; nothing to tag."
+            exit 0
+          fi
+
+          CURRENT=$(git describe --tags --abbrev=0)
+          NEW=$(.github/scripts/next_version.sh "${CURRENT}" "${BUMP_PART}")
+          TAG_MSG=$(gh pr view "${PR}" -R "${REPO}" --json title --jq '.title')
+
+          git config user.name "Andy Aschwanden"
+          git config user.email "andy.aschwanden@gmail.com"
+          git tag -a "${NEW}" -m "${TAG_MSG}"
+          git push origin "${NEW}"
+          echo "Tagged ${NEW} (${BUMP_PART} bump of ${CURRENT}, PR #${PR}) and pushed it"
