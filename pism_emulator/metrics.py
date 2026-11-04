@@ -20,10 +20,13 @@
 Metrics Module.
 """
 
+from typing import Optional, Sequence, Union
+
 import torch
 from torch import Tensor
 from torchmetrics import Metric
 from torchmetrics.utilities.checks import _check_same_shape
+from torchmetrics.utilities.plot import _AX_TYPE, _PLOT_OUT_TYPE
 
 
 def _area_weighted_error_update(
@@ -198,6 +201,29 @@ class AreaWeightedError(Metric):
             :func:`_area_weighted_error_compute`.
         """
         return _area_weighted_error_compute(self.sum_weighted_error)
+
+    def plot(
+        self,
+        val: Optional[Union[Tensor, Sequence[Tensor]]] = None,
+        ax: Optional[_AX_TYPE] = None,
+    ) -> _PLOT_OUT_TYPE:
+        """
+        Plot one or several values of the metric with matplotlib.
+
+        Parameters
+        ----------
+        val : torch.Tensor or sequence of torch.Tensor, optional
+            A result of :meth:`compute` (or ``forward``), or a list of them to plot
+            as a curve. If None, :meth:`compute` is called and its result plotted.
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on. If None, a new figure is created.
+
+        Returns
+        -------
+        tuple of (matplotlib.figure.Figure, matplotlib.axes.Axes)
+            The figure and axes the metric was drawn on.
+        """
+        return self._plot(val, ax)
 
     @property
     def is_differentiable(self) -> bool:

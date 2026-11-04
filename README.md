@@ -16,14 +16,16 @@ Get pism-emulator source from GitHub:
     $ git clone git@github.com:pism/pism-emulator.git
     $ cd pism-emulator
 
-Optionally create Conda environment named *pism-emulator*:
+Create the Conda environment named *pism-emulator* (use `environment-cuda.yml` on Linux with an NVIDIA GPU):
 
     $ conda env create -f environment.yml
     $ conda activate pism-emulator
 
-Install pism-emulator:
+Install pism-emulator without letting pip replace the conda packages:
 
-    $ pip install .
+    $ pip install -e . --no-deps
+
+Without Conda, `pip install .` installs the dependencies listed in `requirements.txt`.
 
 
 ## Methods

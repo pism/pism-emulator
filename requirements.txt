@@ -25,6 +25,7 @@ seaborn
 tensorboard
 torch
 torchaudio
+torchmetrics
 torchvision
 tqdm
 xarray
