@@ -16,6 +16,7 @@ and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - `torchmetrics`, which the code imports, is now a declared dependency.
+- The release tagging job no longer uses bump2version, which fails on Python 3.15 (the runners' `3.x`); it bumps the version with a shell script (`.github/scripts/next_version.sh`).
 
 ## [0.41.2]
 
