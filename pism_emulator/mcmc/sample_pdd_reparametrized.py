@@ -268,7 +268,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     cols2 = list(cols)
     Y_true = torch.cat(cols2, dim=-1)
 
-    X_prior = torch.from_numpy(prior_df.values)
+    X_prior = torch.from_numpy(prior_df.to_numpy(copy=True))
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 

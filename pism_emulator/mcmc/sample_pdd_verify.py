@@ -211,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     noise = 0.05 * Y_true * torch.randn_like(Y_true)
     Y_true += noise
 
-    X_prior = torch.from_numpy(prior_df.values)
+    X_prior = torch.from_numpy(prior_df.to_numpy(copy=True))
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
