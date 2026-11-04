@@ -206,6 +206,13 @@ class MALASamplerModule(pl.LightningModule):
         state), so its samples are slightly biased; use it only to reproduce
         earlier runs. ``metric_mode``, ``delayed_accept`` and ``hess_refresh > 1``
         apply only to this proposal.
+    fixed_metric : bool, default=False
+        Compute the metric ``|H|`` once per chain, at its starting point (the MAP
+        in the ``sample-posterior-*`` tools), and keep it for every step. The
+        proposal is then MALA preconditioned with a constant matrix: still exact
+        (reversible), and it needs only a gradient per step instead of a
+        Hessian. It adapts less to posteriors whose curvature changes strongly
+        across their support. Not combinable with ``legacy_proposal``.
     **kwargs : Any
         Ignored. Included for forward compatibility with Lightning APIs.
 
@@ -301,6 +308,7 @@ class MALASamplerModule(pl.LightningModule):
         q: int = 100,
         seed: int | None = None,
         legacy_proposal: bool = False,
+        fixed_metric: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__()
@@ -378,6 +386,11 @@ class MALASamplerModule(pl.LightningModule):
         self.show_progress: bool = show_progress
         self.use_eig: bool = use_eig
         self.legacy_proposal: bool = bool(legacy_proposal)
+        self.fixed_metric: bool = bool(fixed_metric)
+        if self.fixed_metric and self.legacy_proposal:
+            raise ValueError("fixed_metric cannot be combined with legacy_proposal")
+        # metric of the current chain when fixed_metric is set (reset per chain)
+        self._fixed_geom: Optional[tuple[Tensor, Tensor, Tensor]] = None
         if not self.legacy_proposal and (self.delayed_accept or self.hess_refresh != 1):
             raise ValueError(
                 "delayed_accept and hess_refresh != 1 are only supported with "
@@ -804,6 +817,37 @@ class MALASamplerModule(pl.LightningModule):
             return self._legacy_step(X, h, local)
         return self._mmala_step(X, h, local)
 
+    @torch.enable_grad()
+    def _step_geometry(
+        self, X: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """
+        Return the geometry used by :meth:`_mmala_step` at ``X``.
+
+        Without ``fixed_metric`` this is :meth:`_local_geometry`. With it, the
+        metric computed at the chain's first state is reused, and only the
+        negative log-posterior and its gradient are evaluated at ``X``.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            State (requires grad).
+
+        Returns
+        -------
+        tuple
+            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)``.
+        """
+        if not self.fixed_metric:
+            return self._local_geometry(X)
+        if self._fixed_geom is None:
+            log_pi, g, Hpos, Hinv, log_det_Hinv = self._local_geometry(X)
+            self._fixed_geom = (Hpos.detach(), Hinv.detach(), log_det_Hinv.detach())
+            return log_pi, g, Hpos, Hinv, log_det_Hinv
+        log_pi = self.neg_log_prob(X)
+        g = torch.autograd.grad(log_pi, X)[0]
+        return (log_pi.detach(), g, *self._fixed_geom)
+
     def _mmala_step(
         self,
         X: Tensor,
@@ -826,6 +870,8 @@ class MALASamplerModule(pl.LightningModule):
         chain is reversible with respect to the posterior although the proposal
         covariance changes with position. The geometry at ``x'`` is reused as the
         current geometry when ``x'`` is accepted, so each step costs one Hessian.
+        With ``fixed_metric`` the metric is the one from the chain's first state,
+        and each step costs one gradient (see :meth:`_step_geometry`).
 
         Parameters
         ----------
@@ -843,7 +889,7 @@ class MALASamplerModule(pl.LightningModule):
             :meth:`_mala_step`.
         """
         if local is None:
-            local = self._local_geometry(X)
+            local = self._step_geometry(X)
         log_pi, g, H, Hinv, log_det_Hinv = local
 
         with torch.no_grad():
@@ -852,7 +898,7 @@ class MALASamplerModule(pl.LightningModule):
             Xp = (mu_f + L @ torch.randn_like(X)).detach()
         Xp.requires_grad_(True)
 
-        loc_p = self._local_geometry(Xp)
+        loc_p = self._step_geometry(Xp)
         log_pi_p, g_p, H_p, Hinv_p, log_det_Hinv_p = loc_p
         with torch.no_grad():
             mu_r = Xp - h * (Hinv_p @ g_p)
@@ -1096,6 +1142,9 @@ class MALASamplerModule(pl.LightningModule):
         acc_hist: list[Tensor] = []
 
         local = None
+        self._fixed_geom = (
+            None  # fixed_metric: compute the metric at this chain's start
+        )
         acc_ema = acc_target
         if adapt_method == "dual":
             n = 0

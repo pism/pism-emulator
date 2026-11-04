@@ -126,6 +126,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         action="store_true",
         help="Use the pre-v0.43 proposal (no drift, not reversible) to reproduce old runs",
     )
+    parser.add_argument(
+        "--fixed-metric",
+        action="store_true",
+        help="Compute the Hessian metric once at the MAP and keep it (one gradient per step)",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -206,6 +211,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         delayed_accept=False,
         hess_refresh=1,
         legacy_proposal=args.legacy_proposal,
+        fixed_metric=args.fixed_metric,
         burn=burn,
         samples=samples,
         h0=0.1,

@@ -179,8 +179,10 @@ def test_legacy_proposal_reproduces_old_sampler(name: str, kwargs: dict) -> None
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("reparam", [False, True])
-def test_posterior_moments_match_exact(reparam: bool) -> None:
+@pytest.mark.parametrize(
+    "reparam, fixed_metric", [(False, False), (True, False), (False, True)]
+)
+def test_posterior_moments_match_exact(reparam: bool, fixed_metric: bool) -> None:
     """
     Check that four chains reproduce the exact posterior mean and sd.
 
@@ -188,18 +190,36 @@ def test_posterior_moments_match_exact(reparam: bool) -> None:
     ----------
     reparam : bool
         Use the reparametrized sampler.
+    fixed_metric : bool
+        Keep the metric of the chain's first state.
     """
     mean, var = exact_moments()
     draws = torch.cat(
         [
-            run_chain(make_sampler(reparam=reparam), seed=c, burn=500, samples=3000)[
-                "samples"
-            ]
+            run_chain(
+                make_sampler(reparam=reparam, fixed_metric=fixed_metric),
+                seed=c,
+                burn=500,
+                samples=3000,
+            )["samples"]
             for c in range(4)
         ]
     )
     torch.testing.assert_close(draws.mean(0), mean, rtol=0, atol=0.01)
     torch.testing.assert_close(draws.std(0), var.sqrt(), rtol=0.08, atol=0)
+
+
+def test_fixed_metric_computes_one_hessian_per_chain() -> None:
+    """Check that fixed_metric evaluates the Hessian once per chain, lp stays exact."""
+    s = make_sampler(fixed_metric=True)
+    for seed in (0, 1):
+        s.hessian_counter = 0
+        res = run_chain(s, seed=seed, burn=20, samples=80)
+        assert s.hessian_counter == 1
+        assert res["accept"].any()
+        with torch.no_grad():
+            expected = torch.stack([-s.neg_log_prob(x) for x in res["samples"]])
+        torch.testing.assert_close(res["lp"], expected, rtol=1e-5, atol=1e-5)
 
 
 def test_new_sampler_rejects_unsupported_options() -> None:
@@ -209,3 +229,5 @@ def test_new_sampler_rejects_unsupported_options() -> None:
     with pytest.raises(ValueError):
         make_sampler(hess_refresh=5)
     make_sampler(delayed_accept=True, hess_refresh=5, legacy_proposal=True)
+    with pytest.raises(ValueError):
+        make_sampler(fixed_metric=True, legacy_proposal=True)
