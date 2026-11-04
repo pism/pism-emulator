@@ -9,7 +9,7 @@ jobs:
   call-bump-version-workflow:
     # Bumps the latest vX.Y.Z tag by the major/minor/patch label of the merged PR.
     # Docs: https://github.com/ASFHyP3/actions#reusable-bump-versionyml
-    uses: ASFHyP3/actions/.github/workflows/reusable-bump-version.yml@v0.21.1
+    uses: ASFHyP3/actions/.github/workflows/reusable-bump-version.yml@v0.22.0
     permissions: {}
     with:
       user: Andy Aschwanden
