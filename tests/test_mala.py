@@ -263,3 +263,5 @@ def test_new_sampler_rejects_unsupported_options() -> None:
         make_sampler(proposal="exact")
     with pytest.warns(DeprecationWarning):
         make_sampler(metric_mode="current")
+    with pytest.warns(UserWarning, match="use_eig has no effect"):
+        make_sampler(use_eig=True)

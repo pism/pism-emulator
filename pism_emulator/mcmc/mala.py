@@ -428,6 +428,14 @@ class MALASamplerModule(pl.LightningModule):
                 "delayed_accept and hess_refresh != 1 are only supported with "
                 'proposal="legacy"'
             )
+        if self.use_eig and proposal != "legacy":
+            warnings.warn(
+                f'use_eig has no effect with proposal="{proposal}", which always '
+                "uses the exact eigendecomposition; it only selects the metric of "
+                'proposal="legacy"',
+                UserWarning,
+                stacklevel=2,
+            )
         if "metric_mode" in kwargs:
             warnings.warn(
                 "metric_mode was removed in v0.43 and is ignored; use proposal=",

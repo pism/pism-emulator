@@ -65,7 +65,7 @@ $\exp\bigl(U(x) - U(x')\bigr)\, q(x \mid x') / q(x' \mid x)$.
   - The sampler before v0.43: no drift, and the reverse density reuses $G(x)$
     although $G$ is recomputed at every accepted state. Not reversible, so its
     samples are slightly biased; use it only to reproduce earlier runs (it does,
-    draw for draw). `delayed_accept` and `hess_refresh > 1` exist only here.
+    draw for draw). `delayed_accept`, `hess_refresh > 1` and `--use-eig` (PDD tools: exact metric instead of the old Newton–Schulz one) exist only here.
   - one Hessian per accepted step
   - 0.25
 ```

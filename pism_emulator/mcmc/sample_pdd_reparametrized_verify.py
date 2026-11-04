@@ -119,7 +119,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--result-dir", default="posterior")
-    parser.add_argument("--use-eig", action="store_true")
+    parser.add_argument(
+        "--use-eig",
+        action="store_true",
+        help=(
+            "Only with --proposal legacy: compute the metric by eigendecomposition "
+            "instead of Newton-Schulz (manifold and fixed always do)"
+        ),
+    )
     parser.add_argument(
         "--proposal",
         choices=MALA.PROPOSALS,
