@@ -128,6 +128,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--result-dir", default="posterior")
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--use-eig", action="store_true")
+    parser.add_argument(
+        "--legacy-proposal",
+        action="store_true",
+        help="Use the pre-v0.43 proposal (no drift, not reversible) to reproduce old runs",
+    )
     parser.add_argument("--thin", type=int, default=4)
     parser.add_argument("--years", nargs=2, default=["1980", "1989"])
     parser.add_argument("CLIMATEFILE", nargs=1)
@@ -257,6 +262,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
+        legacy_proposal=args.legacy_proposal,
         burn=burn,
         samples=samples,
         h0=0.1,

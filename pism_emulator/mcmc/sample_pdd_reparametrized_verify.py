@@ -120,6 +120,11 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--result-dir", default="posterior")
     parser.add_argument("--use-eig", action="store_true")
+    parser.add_argument(
+        "--legacy-proposal",
+        action="store_true",
+        help="Use the pre-v0.43 proposal (no drift, not reversible) to reproduce old runs",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -199,6 +204,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
+        legacy_proposal=args.legacy_proposal,
         burn=burn,
         samples=samples,
         h0=0.1,

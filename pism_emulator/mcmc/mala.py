@@ -152,9 +152,10 @@ class MALASamplerModule(pl.LightningModule):
     nu : float, default=1.0
         Degrees of freedom of the Student-t likelihood.
     metric_mode : {"manifold", "current"}, default="manifold"
-        Reverse proposal metric. If ``"manifold"``, compute geometry at the
-        proposal :math:`x'`; if ``"current"``, reuse :math:`H(x)` for both
-        directions.
+        Only with ``legacy_proposal=True``: reverse proposal metric. If
+        ``"manifold"``, compute geometry at the proposal :math:`x'` (with
+        delayed acceptance); if ``"current"``, reuse :math:`H(x)` for both
+        directions. The default sampler always uses the geometry at :math:`x'`.
     hess_refresh : int, default=1
         Recompute the local geometry (gradient & Hessian) every ``N`` steps (``N >= 1``).
     delayed_accept : bool, default=False
@@ -170,7 +171,9 @@ class MALASamplerModule(pl.LightningModule):
     h_max : float, default=1.0
         Maximum allowed step size during adaptation.
     use_eig : bool, default=False
-        Use linalg.eigh to compute :math:`H(x)`.
+        Only with ``legacy_proposal=True``: use linalg.eigh instead of the
+        Newton-Schulz iteration for the metric. The default sampler always uses
+        the exact eigendecomposition.
     acc_target : float, default=0.25
         Target acceptance probability used by the adaptation logic.
     dual_t0 : float, default=10.0
@@ -196,6 +199,13 @@ class MALASamplerModule(pl.LightningModule):
         used in the default exact‐Hessian path.
     seed : int or None, default=None
         Base RNG seed; the effective per-chain seed is derived from this value.
+    legacy_proposal : bool, default=False
+        Use the sampler as it was before v0.43: a proposal without Langevin
+        drift whose reverse density reuses the metric at the current state.
+        That kernel is not reversible (the metric changes at every accepted
+        state), so its samples are slightly biased; use it only to reproduce
+        earlier runs. ``metric_mode``, ``delayed_accept`` and ``hess_refresh > 1``
+        apply only to this proposal.
     **kwargs : Any
         Ignored. Included for forward compatibility with Lightning APIs.
 
@@ -290,6 +300,7 @@ class MALASamplerModule(pl.LightningModule):
         pbar_update_every: int = 10,
         q: int = 100,
         seed: int | None = None,
+        legacy_proposal: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__()
@@ -366,6 +377,12 @@ class MALASamplerModule(pl.LightningModule):
         self.samples: int = int(samples)
         self.show_progress: bool = show_progress
         self.use_eig: bool = use_eig
+        self.legacy_proposal: bool = bool(legacy_proposal)
+        if not self.legacy_proposal and (self.delayed_accept or self.hess_refresh != 1):
+            raise ValueError(
+                "delayed_accept and hess_refresh != 1 are only supported with "
+                "legacy_proposal=True"
+            )
 
     def configure_optimizers(self) -> None:
         """
@@ -416,7 +433,9 @@ class MALASamplerModule(pl.LightningModule):
         torch.Tensor
             Scalar tensor with the negative log-posterior.
         """
-        Y_pred = self.forward(X)
+        # Call the model directly: subclasses such as ReparametrizedMALASamplerModule
+        # override forward() to take phi, but X here is already in parameter space.
+        Y_pred = self.model(X, add_mean=True)
         r = Y_pred - self.Y_target
         t = r / self.sigma_hat
         nu = self.nu
@@ -482,8 +501,52 @@ class MALASamplerModule(pl.LightningModule):
         log_det_Hinv = torch.sum(torch.log(1.0 / lam_p))
         return log_pi, g, Hpos, Hinv, log_det_Hinv
 
-    @torch.enable_grad()
     def _local_geometry(
+        self, X: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """
+        Compute the local geometry at ``X`` used by the sampler.
+
+        The metric is ``|H|``, the absolute value of the Hessian of the negative
+        log-posterior, computed exactly by eigendecomposition
+        (:meth:`_local_geometry_eig`). It replaces the Newton-Schulz square root
+        of ``H @ H`` (:meth:`_local_geometry_newton_schulz`), which is kept only
+        for ``legacy_proposal=True``.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (requires grad).
+
+        Returns
+        -------
+        tuple
+            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)``.
+        """
+        return self._local_geometry_eig(X)
+
+    def _legacy_geometry(
+        self, X: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """
+        Compute the local geometry exactly as before ``legacy_proposal`` existed.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (requires grad).
+
+        Returns
+        -------
+        tuple
+            ``(log_pi, g, Hpos, Hinv, log_det_Hinv)``.
+        """
+        if self.use_eig:
+            return self._local_geometry_eig(X)
+        return self._local_geometry_newton_schulz(X)
+
+    @torch.enable_grad()
+    def _local_geometry_newton_schulz(
         self, X: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -704,10 +767,18 @@ class MALASamplerModule(pl.LightningModule):
         h: float,
         local: Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]] = None,
     ) -> tuple[
-        Tensor, Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]], int, float
+        Tensor,
+        Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]],
+        int,
+        float,
+        Tensor,
     ]:
         """
-        Perform one mMALA/DA-mMALA step.
+        Perform one sampler step.
+
+        Dispatches to the simplified manifold MALA step (:meth:`_mmala_step`) or,
+        with ``legacy_proposal=True``, to the pre-fix proposal
+        (:meth:`_legacy_step`).
 
         Parameters
         ----------
@@ -721,12 +792,120 @@ class MALASamplerModule(pl.LightningModule):
         Returns
         -------
         tuple
-            ``(X_next, local_next, accepted, alpha)`` where:
+            ``(X_next, local_next, accepted, alpha, neg_log_prob_next)`` where:
 
             * ``X_next`` : next state (possibly unchanged on reject)
-            * ``local_next`` : geometry tuple at the accepted state or ``None`` if invalidated
+            * ``local_next`` : geometry tuple at ``X_next`` or ``None`` if invalidated
             * ``accepted`` : 1 if accepted else 0
             * ``alpha`` : acceptance probability used for the decision
+            * ``neg_log_prob_next`` : negative log-posterior at ``X_next``
+        """
+        if self.legacy_proposal:
+            return self._legacy_step(X, h, local)
+        return self._mmala_step(X, h, local)
+
+    def _mmala_step(
+        self,
+        X: Tensor,
+        h: float,
+        local: Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]] = None,
+    ) -> tuple[
+        Tensor,
+        Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]],
+        int,
+        float,
+        Tensor,
+    ]:
+        """
+        Perform one simplified manifold MALA step.
+
+        With ``G(x) = |H(x)|`` the metric at ``x`` and ``U = -log pi``, the
+        proposal is ``x' ~ N(mu(x), 2 h G(x)^-1)`` with Langevin drift
+        ``mu(x) = x - h G(x)^-1 grad U(x)``. The Metropolis-Hastings ratio uses the
+        reverse density ``q(x | x')`` built from the geometry at ``x'``, so the
+        chain is reversible with respect to the posterior although the proposal
+        covariance changes with position. The geometry at ``x'`` is reused as the
+        current geometry when ``x'`` is accepted, so each step costs one Hessian.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (leaf tensor with ``requires_grad=True``).
+        h : float
+            Current step size.
+        local : tuple or None, optional
+            Cached local geometry at ``X``.
+
+        Returns
+        -------
+        tuple
+            ``(X_next, local_next, accepted, alpha, neg_log_prob_next)``; see
+            :meth:`_mala_step`.
+        """
+        if local is None:
+            local = self._local_geometry(X)
+        log_pi, g, H, Hinv, log_det_Hinv = local
+
+        with torch.no_grad():
+            mu_f = X - h * (Hinv @ g)
+            L = torch.linalg.cholesky(2.0 * h * Hinv)
+            Xp = (mu_f + L @ torch.randn_like(X)).detach()
+        Xp.requires_grad_(True)
+
+        loc_p = self._local_geometry(Xp)
+        log_pi_p, g_p, H_p, Hinv_p, log_det_Hinv_p = loc_p
+        with torch.no_grad():
+            mu_r = Xp - h * (Hinv_p @ g_p)
+            logq_f = self._proposal_logpdf(Xp, mu_f, H, log_det_Hinv, h, self._two_pi)
+            logq_r = self._proposal_logpdf(
+                X, mu_r, H_p, log_det_Hinv_p, h, self._two_pi
+            )
+            log_alpha = -log_pi_p + log_pi + logq_r - logq_f
+            alpha = (
+                torch.exp(torch.clamp(log_alpha, max=0.0))
+                if torch.isfinite(log_alpha)
+                else X.new_zeros(())
+            )
+        self._step_count += 1
+        if torch.rand(()) <= alpha:
+            return Xp.detach().requires_grad_(True), loc_p, 1, float(alpha), log_pi_p
+        return X, local, 0, float(alpha), log_pi
+
+    def _legacy_step(
+        self,
+        X: Tensor,
+        h: float,
+        local: Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]] = None,
+    ) -> tuple[
+        Tensor,
+        Optional[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]],
+        int,
+        float,
+        Tensor,
+    ]:
+        """
+        Perform one step of the pre-fix sampler (``legacy_proposal=True``).
+
+        The proposal is ``x' ~ N(x, 2 h G(x)^-1)`` without drift, and the
+        reverse density reuses ``G(x)`` (``metric_mode="current"``) unless
+        delayed acceptance is on. Because ``G`` is recomputed at each accepted
+        state, this kernel does not satisfy detailed balance; it is kept only to
+        reproduce earlier runs draw for draw.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Current state (leaf tensor with ``requires_grad=True``).
+        h : float
+            Current step size.
+        local : tuple or None, optional
+            Cached local geometry at ``X``.
+
+        Returns
+        -------
+        tuple
+            ``(X_next, local_next, accepted, alpha, neg_log_prob_next)``; see
+            :meth:`_mala_step`.
         """
         # refresh metric at x if needed
         if (
@@ -734,10 +913,7 @@ class MALASamplerModule(pl.LightningModule):
             or (self.hess_refresh == 1)
             or (self._step_count % self.hess_refresh == 0)
         ):
-            if self.use_eig:
-                local = self._local_geometry_eig(X)
-            else:
-                local = self._local_geometry(X)
+            local = self._legacy_geometry(X)
         log_pi, _, H, Hinv, log_det_Hinv = local
 
         # Propose
@@ -762,14 +938,17 @@ class MALASamplerModule(pl.LightningModule):
                 else X.new_zeros(())
             )
             accept = torch.rand(()) <= alpha
-            if accept:
-                X = Xp.detach().requires_grad_(True)
-                local = None  # recompute metric at new point next step
-                s = 1
-            else:
-                s = 0
             self._step_count += 1
-            return X, local, s, float(alpha.detach())
+            if accept:
+                # recompute metric at new point next step
+                return (
+                    Xp.detach().requires_grad_(True),
+                    None,
+                    1,
+                    float(alpha.detach()),
+                    log_pi_p.detach(),
+                )
+            return X, local, 0, float(alpha.detach()), log_pi
 
         # Delayed-acceptance (manifold)
         logq_r_cheap = self._proposal_logpdf(X, Xp, H, log_det_Hinv, h, self._two_pi)
@@ -781,10 +960,10 @@ class MALASamplerModule(pl.LightningModule):
         )
         if torch.rand(()) > a1:
             self._step_count += 1
-            return X, local, 0, float(a1.detach())
+            return X, local, 0, float(a1.detach()), log_pi
 
         # compute geometry at x' only if stage-1 accepted
-        loc_p = self._local_geometry(Xp)
+        loc_p = self._legacy_geometry(Xp)
         _, _, H_p, _, log_det_Hinv_p = loc_p
         logq_r_true = self._proposal_logpdf(X, Xp, H_p, log_det_Hinv_p, h, self._two_pi)
         # correction gate
@@ -794,15 +973,16 @@ class MALASamplerModule(pl.LightningModule):
             if torch.isfinite(log_alpha_corr)
             else X.new_zeros(())
         )
-        if torch.rand(()) <= a2:
-            X = Xp.detach().requires_grad_(True)
-            local = loc_p
-            s = 1
-        else:
-            s = 0
-
         self._step_count += 1
-        return X, local, s, float((a1 * a2).detach())
+        if torch.rand(()) <= a2:
+            return (
+                Xp.detach().requires_grad_(True),
+                loc_p,
+                1,
+                float((a1 * a2).detach()),
+                log_pi_p.detach(),
+            )
+        return X, local, 0, float((a1 * a2).detach()), log_pi
 
     # ------------------------------------------------------------------ #
     # MAP search                                                         #
@@ -843,6 +1023,7 @@ class MALASamplerModule(pl.LightningModule):
                 Loss tensor.
             """
             self.zero_grad(set_to_none=True)
+            X.grad = None  # X is not a module parameter; LBFGS needs a fresh grad
             loss = self.neg_log_prob(X)
             loss.backward()
             return loss
@@ -925,13 +1106,10 @@ class MALASamplerModule(pl.LightningModule):
 
         dev = X.device
         for t in range(total):
-            X, local, s, _ = self._mala_step(X, h, local)
+            X, local, s, _, U_t = self._mala_step(X, h, local)
 
-            # log posterior (as tensor; avoid .item() inside loop)
-            if local is not None and len(local) >= 1:
-                lp_t = (-local[0]).detach()
-            else:
-                lp_t = torch.tensor(float("nan"), device=dev)
+            # log posterior of the state after this step (accepted or kept)
+            lp_t = (-U_t).detach()
 
             lp_hist.append(lp_t.to(torch.float32))
             h_hist.append(torch.tensor(h, device=dev, dtype=torch.float32))
@@ -1581,6 +1759,7 @@ class ReparametrizedMALASamplerModule(
                 Loss value (negative log posterior).
             """
             self.zero_grad(set_to_none=True)
+            phi.grad = None  # phi is not a module parameter; LBFGS needs a fresh grad
             loss = self.neg_log_prob(phi)
             if not torch.isfinite(loss):
                 return torch.tensor(1e10, device=loss.device, dtype=loss.dtype)

@@ -17,14 +17,14 @@ classifiers = [
 dynamic = ["dependencies", "version"]
 
 [project.scripts]
-train-emulator = "pism_emulator.emulators.speed.train:main"
-evaluate-emulator = "pism_emulator.emulators.speed.evaluate:main"
-sample-posterior-speed = "pism_emulator.mcmc.sample_speed:cli"
-sample-posterior-pdd = "pism_emulator.mcmc.sample_pdd:cli"
-sample-posterior-pdd-reparametrized = "pism_emulator.mcmc.sample_pdd_reparametrized:cli"
-sample-posterior-pdd-verify = "pism_emulator.mcmc.sample_pdd_verify:cli"
-sample-posterior-pdd-reparametrized-verify = "pism_emulator.mcmc.sample_pdd_reparametrized_verify:cli"
-plot-posterior = "pism_emulator.mcmc.plot_posterior:cli"
+pism-train-emulator = "pism_emulator.emulators.speed.train:main"
+pism-evaluate-emulator = "pism_emulator.emulators.speed.evaluate:main"
+pism-sample-posterior-speed = "pism_emulator.mcmc.sample_speed:cli"
+pism-sample-posterior-pdd = "pism_emulator.mcmc.sample_pdd:cli"
+pism-sample-posterior-pdd-reparametrized = "pism_emulator.mcmc.sample_pdd_reparametrized:cli"
+pism-sample-posterior-pdd-verify = "pism_emulator.mcmc.sample_pdd_verify:cli"
+pism-sample-posterior-pdd-reparametrized-verify = "pism_emulator.mcmc.sample_pdd_reparametrized_verify:cli"
+pism-plot-posterior = "pism_emulator.mcmc.plot_posterior:cli"
 
 [tool.setuptools.packages.find]
 include = ["pism_emulator*"]
@@ -41,6 +41,9 @@ py-modules = ["pism_emulator"]
 
 [tool.setuptools_scm]
 
+
+[tool.pytest.ini_options]
+markers = ["slow: long-running statistical tests"]
 
 [tool.flake8]
 # https://pep8.readthedocs.io/en/latest/intro.html#error-codes
