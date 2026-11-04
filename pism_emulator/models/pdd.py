@@ -1149,7 +1149,7 @@ class PDD(pl.LightningModule):
         normtemp = temp / (sqrt2 * stdv)
         calovgreve = stdv / torch.sqrt(
             torch.tensor(2.0 * torch.pi, device=temp.device)
-        ) * torch.exp(-(normtemp**2)) + temp * 0.5 * (1.0 - torch.erf(-normtemp))
+        ) * torch.exp(-(normtemp**2)) + temp * 0.5 * torch.erfc(-normtemp)
         teff = torch.where(stdv == 0.0, positivepart, calovgreve)
         return torch.clamp(teff, min=0.0) * 365.242198781
 
