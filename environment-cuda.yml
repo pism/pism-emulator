@@ -49,5 +49,8 @@ dependencies:
   - pre-commit
   - identify
   - wget
+  # Not on conda-forge; pure Python (matplotlib, numpy), so pip is safe here
+  - pip:
+      - cmglaciology
 # Then install the package itself without letting pip touch conda packages:
 #   pip install -e . --no-deps

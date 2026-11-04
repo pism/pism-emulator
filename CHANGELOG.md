@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [PEP 440](https://www.python.org/dev/peps/pep-0440/)
 and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0]
+
+### Changed
+- `pism-evaluate-emulator` draws the observed and emulated speed fields with the `cmg.speed` colormap from [cmglaciology](https://pypi.org/project/cmglaciology/), which the environment files now install with pip (it is not on conda-forge).
+
 ## [0.42.0]
 
 ### Changed
