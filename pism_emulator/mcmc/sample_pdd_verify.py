@@ -137,6 +137,12 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         default=1.0,
         help="Largest step size the burn-in adaptation may reach",
     )
+    parser.add_argument(
+        "--acc-target",
+        type=float,
+        default=0.25,
+        help="Acceptance rate the burn-in step-size adaptation aims for",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -219,7 +225,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         burn=burn,
         samples=samples,
         h0=0.1,
-        acc_target=0.25,
+        acc_target=args.acc_target,
         h_max=args.h_max,
         use_eig=use_eig,
     )
