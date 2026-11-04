@@ -297,7 +297,8 @@ def main():
 
     svd_dir = Path("svd_cache")
     svd_dir.mkdir(parents=True, exist_ok=True)
-    svd_cache = svd_dir / Path("svd.h5")
+    # one file per inputs/settings: ensemble members differ in their omegas
+    svd_cache = svd_dir / f"eig_{dm.eig_cache_key(q=q, cutoff=cutoff)}.pt"
     dm.prepare_data(cutoff=cutoff, q=q, cache_path=svd_cache)
     dm.setup(stage="fit")
     V_hat = dm.eig.V_hat
