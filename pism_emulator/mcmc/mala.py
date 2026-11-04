@@ -47,6 +47,32 @@ tqdm.set_lock(tqdm.get_lock())
 _TQDM_NONFATAL = (AttributeError, ValueError, OSError)
 
 
+def _eigh(H: Tensor) -> tuple[Tensor, Tensor]:
+    """
+    Eigendecompose a symmetric matrix on any device.
+
+    :func:`torch.linalg.eigh` is not implemented for Apple's MPS backend, so for
+    MPS tensors the (small, parameter-sized) matrix is decomposed on the CPU and
+    the result moved back.
+
+    Parameters
+    ----------
+    H : torch.Tensor
+        Symmetric matrix, shape ``(d, d)``.
+
+    Returns
+    -------
+    eigenvalues : torch.Tensor
+        Eigenvalues in ascending order, on ``H``'s device.
+    eigenvectors : torch.Tensor
+        Eigenvectors as columns, on ``H``'s device.
+    """
+    if H.device.type == "mps":
+        lam, Q = torch.linalg.eigh(H.cpu())  # pylint: disable=not-callable
+        return lam.to(H.device), Q.to(H.device)
+    return torch.linalg.eigh(H)  # pylint: disable=not-callable
+
+
 class ChainInitDataset(Dataset):
     """
     Dataset of initial states for running multiple MCMC chains.
@@ -519,7 +545,7 @@ class MALASamplerModule(pl.LightningModule):
         H = 0.5 * (H + H.T)
 
         # Eigen decomposition (symmetric)
-        lam, Q = torch.linalg.eigh(H)
+        lam, Q = _eigh(H)
         lam = lam.real
         Q = Q.real
         lam_p = torch.sqrt(lam * lam + self._eps_eig)

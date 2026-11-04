@@ -240,6 +240,18 @@ def test_default_acceptance_target(proposal: str, expected: float) -> None:
     assert make_sampler(proposal=proposal, acc_target=0.4).hparams.acc_target == 0.4
 
 
+@pytest.mark.skipif(
+    not torch.backends.mps.is_available(), reason="needs Apple's MPS backend"
+)
+def test_local_geometry_on_mps() -> None:
+    """Check that the metric works on MPS, where torch.linalg.eigh is missing."""
+    s = make_sampler().to("mps")
+    x = torch.tensor([0.4, 0.6], device="mps", requires_grad=True)
+    _, _, Hpos, Hinv, _ = s._local_geometry(x)
+    assert Hpos.device.type == "mps"
+    torch.testing.assert_close((Hpos @ Hinv).cpu(), torch.eye(2), rtol=1e-4, atol=1e-4)
+
+
 def test_new_sampler_rejects_unsupported_options() -> None:
     """Delayed acceptance and stale metrics exist only for the legacy proposal."""
     with pytest.raises(ValueError):
