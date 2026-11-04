@@ -271,10 +271,10 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     S_prior_total, D = X_prior.shape
     C_prior = C  # match posterior chains
-    assert S_prior_total % C_prior == 0, "prior samples must split evenly across chains"
+    # split the prior draws evenly across chains, dropping the remainder
     S_prior = S_prior_total // C_prior
 
-    X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
+    X_prior_reshaped = X_prior[: C_prior * S_prior].reshape(C_prior, S_prior, D)
 
     prior = {
         name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)

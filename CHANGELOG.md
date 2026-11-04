@@ -22,6 +22,7 @@ and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `train-emulator` reused one eigenglacier cache (`svd_cache/svd.h5`) for every ensemble member, so members 1..N trained on member 0's Dirichlet weights; it also reused stale bases after changing `q`, `cutoff` or the data.
 - The eigenglacier `cutoff` kept one mode fewer than needed and could keep none.
 - The eigh eigenglacier path ignored `q` and could produce NaN from round-off negative eigenvalues; `LegacyPISMDataModule`'s eigh path raised `IndexError`.
+- `sample-posterior-speed` crashed after sampling whenever `--chains` > 1, while writing the ArviZ file (the prior was split across chains but given the posterior's draw coordinate), so the chains were lost. The `sample-posterior-pdd*` tools failed an assertion when the chain count did not divide their 10,000 prior draws.
 - `PISMDataModule` loaders crashed with `num_workers=0` (`persistent_workers` needs workers); `pin_memory` is used only with CUDA.
 
 ## [0.42.0]

@@ -289,13 +289,16 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         name: arr_denorm[:, :, i] for i, name in enumerate(dataset.samples.X_keys)
     }
 
-    S_prior_total, D = X_prior.shape
-    C_prior = C  # match posterior chains
-    assert S_prior_total % C_prior == 0, "prior samples must split evenly across chains"
-    S_prior = S_prior_total // C_prior
+    # The prior group shares the posterior's (chain, draw) coordinates, so give it
+    # the same shape. Prior draws are i.i.d., so taking (and if needed cycling
+    # through) the first chains * draws of them is fine.
+    C_prior, S_prior = arr.shape[0], arr.shape[1]
+    X_prior_np = np.asarray(X_prior)
+    D = X_prior_np.shape[-1]
+    X_prior_np = X_prior_np[np.arange(C_prior * S_prior) % X_prior_np.shape[0]]
 
     X_prior_reshaped = (
-        X_prior.reshape(C_prior, S_prior, D) * X_std[None, None, :]
+        X_prior_np.reshape(C_prior, S_prior, D) * X_std[None, None, :]
         + X_mean[None, None, :]
     )
 
