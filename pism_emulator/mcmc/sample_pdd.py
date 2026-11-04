@@ -139,6 +139,12 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
             "legacy: pre-v0.43 sampler, biased, only to reproduce old runs"
         ),
     )
+    parser.add_argument(
+        "--h-max",
+        type=float,
+        default=1.0,
+        help="Largest step size the burn-in adaptation may reach",
+    )
     parser.add_argument("--thin", type=int, default=4)
     parser.add_argument("--years", nargs=2, default=["1980", "1989"])
     parser.add_argument("CLIMATEFILE", nargs=1)
@@ -277,6 +283,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         samples=samples,
         h0=0.1,
         acc_target=0.25,
+        h_max=args.h_max,
         use_eig=use_eig,
         reflect_boundaries=False,
     )

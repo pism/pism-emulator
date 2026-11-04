@@ -131,6 +131,12 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
             "legacy: pre-v0.43 sampler, biased, only to reproduce old runs"
         ),
     )
+    parser.add_argument(
+        "--h-max",
+        type=float,
+        default=1.0,
+        help="Largest step size the burn-in adaptation may reach",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -214,6 +220,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         samples=samples,
         h0=0.1,
         acc_target=0.25,
+        h_max=args.h_max,
         use_eig=use_eig,
     )
 
