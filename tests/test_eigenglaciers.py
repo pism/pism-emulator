@@ -4,6 +4,7 @@ Tests for the eigenglacier basis and the data loaders in ``pism_emulator.datamod
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 
@@ -28,15 +29,18 @@ def _data(seed: int = 0, rank: int = 4) -> tuple[torch.Tensor, ...]:
     tuple of torch.Tensor
         ``(X, F, omegas, omegas_0)``.
     """
+    # Everything is seeded and in float64, so the comparisons below do not depend
+    # on the global RNG state or on float32 round-off of the BLAS in use.
     g = torch.Generator().manual_seed(seed)
-    scales = torch.tensor([10.0, 4.0, 2.0, 1.0])[:rank]
-    F = (torch.randn(N_SAMPLES, rank, generator=g) * scales) @ torch.randn(
-        rank, N_GRID, generator=g
-    )
-    F = F + 0.01 * torch.randn(N_SAMPLES, N_GRID, generator=g)
-    X = torch.randn(N_SAMPLES, 3, generator=g)
-    omegas = torch.distributions.Dirichlet(torch.ones(N_SAMPLES)).sample().unsqueeze(1)
-    omegas_0 = torch.full((N_SAMPLES, 1), 1.0 / N_SAMPLES)
+    kw = {"generator": g, "dtype": torch.float64}
+    scales = torch.tensor([10.0, 4.0, 2.0, 1.0], dtype=torch.float64)[:rank]
+    F = (torch.randn(N_SAMPLES, rank, **kw) * scales) @ torch.randn(rank, N_GRID, **kw)
+    F = F + 0.01 * torch.randn(N_SAMPLES, N_GRID, **kw)
+    X = torch.randn(N_SAMPLES, 3, **kw)
+    omegas = torch.from_numpy(
+        np.random.default_rng(seed).dirichlet(np.ones(N_SAMPLES))
+    ).unsqueeze(1)
+    omegas_0 = torch.full((N_SAMPLES, 1), 1.0 / N_SAMPLES, dtype=torch.float64)
     return X, F, omegas, omegas_0
 
 
