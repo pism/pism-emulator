@@ -24,7 +24,7 @@ pip install -e . --no-deps
 ```
 
 For GPU support on CUDA systems, use `environment-cuda.yml` instead. Both environment
-files list every dependency explicitly (conda-forge only, Python pinned `>=3.11,<3.14`);
+files list every dependency explicitly (conda-forge, plus `cmglaciology` via pip because it is not on conda-forge; Python pinned `>=3.11,<3.14`);
 `requirements.txt` is only used by `pyproject.toml` for pip-only installs, so keep the
 three files in sync when adding a dependency.
 
