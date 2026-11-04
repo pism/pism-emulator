@@ -9,6 +9,8 @@ moments can be computed exactly by quadrature on a grid.
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from torch import Tensor, nn
 
@@ -48,7 +50,7 @@ class LinearModel(nn.Module):
         return X @ self.A.T
 
 
-def make_sampler(reparam: bool = False, **kwargs) -> MALASamplerModule:
+def make_sampler(reparam: bool = False, **kwargs: Any) -> MALASamplerModule:
     """
     Build a sampler for the toy target.
 
@@ -64,14 +66,14 @@ def make_sampler(reparam: bool = False, **kwargs) -> MALASamplerModule:
     MALASamplerModule
         The sampler.
     """
-    defaults = dict(
-        alpha=1.0,
-        nu=4.0,
-        metric_mode="current",
-        delayed_accept=False,
-        h0=0.5,
-        show_progress=False,
-    )
+    defaults: dict[str, Any] = {
+        "alpha": 1.0,
+        "nu": 4.0,
+        "metric_mode": "current",
+        "delayed_accept": False,
+        "h0": 0.5,
+        "show_progress": False,
+    }
     defaults.update(kwargs)
     cls = ReparametrizedMALASamplerModule if reparam else MALASamplerModule
     return cls(LinearModel(), X_MIN, X_MAX, Y_TARGET, SIGMA, **defaults)
@@ -106,7 +108,11 @@ def run_chain(
     sampler.burn, sampler.samples = burn, samples
     sampler.hparams.burn, sampler.hparams.samples = burn, samples
     if x0 is None:
-        x0 = torch.zeros(2) if isinstance(sampler, ReparametrizedMALASamplerModule) else torch.full((2,), 0.5)
+        x0 = (
+            torch.zeros(2)
+            if isinstance(sampler, ReparametrizedMALASamplerModule)
+            else torch.full((2,), 0.5)
+        )
     torch.manual_seed(seed)
     return sampler.predict_step((torch.tensor([0]), x0.unsqueeze(0)), 0)
 
@@ -122,8 +128,10 @@ def exact_moments(n: int = 801) -> tuple[Tensor, Tensor]:
 
     Returns
     -------
-    mean, var : torch.Tensor
-        Shape ``(2,)`` each.
+    mean : torch.Tensor
+        Posterior mean, shape ``(2,)``.
+    var : torch.Tensor
+        Posterior variance, shape ``(2,)``.
     """
     s = make_sampler()
     g = torch.linspace(0.0, 1.0, n + 2, dtype=torch.float64)[1:-1]
