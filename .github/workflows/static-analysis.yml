@@ -5,7 +5,7 @@ on: push
 jobs:
   call-secrets-analysis-workflow:
     # Docs: https://github.com/ASFHyP3/actions
-    uses: ASFHyP3/actions/.github/workflows/reusable-secrets-analysis.yml@v0.21.1
+    uses: ASFHyP3/actions/.github/workflows/reusable-secrets-analysis.yml@v0.22.0
     permissions:
       contents: read
 
@@ -18,8 +18,8 @@ jobs:
       # pylint runs in its own job below, pytest in test.yml.
       SKIP: pylint,pytest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
       - uses: pre-commit/action@v3.0.1
 
   pylint:
@@ -27,7 +27,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # tags, for the setuptools_scm version
 

@@ -19,6 +19,8 @@
 Test emulators.
 """
 
+from argparse import ArgumentParser
+
 import lightning as pl
 import numpy as np
 import torch
@@ -83,7 +85,7 @@ def nn_setup(Emulator: pl.LightningModule) -> torch.tensor:
     X = torch.rand(n_samples, n_parameters, dtype=torch.float32)
     Y = torch.rand(n_samples, n_grid_points, dtype=torch.float32)
 
-    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples))).T
+    omegas = torch.Tensor(dirichlet.rvs(np.ones(n_samples), random_state=0)).T
     omegas = omegas.type_as(X)
     omegas_0 = torch.ones_like(omegas) / len(omegas)
 
@@ -133,3 +135,12 @@ def test_emulator_equivalence():
     mse = mean_squared_error(Y_e, Y_de)
 
     assert mse <= 5e-3
+
+
+def test_dnn_defaults_and_args() -> None:
+    """DNN CLI args match the model's fallbacks, and --norm (unused) is gone."""
+    args = DNNEmulator.add_model_specific_args(ArgumentParser()).parse_args([])
+    assert not hasattr(args, "norm")
+    V_hat, F_mean, area = torch.randn(7, 3), torch.zeros(7), torch.ones(7) / 7
+    model = DNNEmulator(2, V_hat, F_mean, area)
+    assert len(model.blocks) == args.depth == 4

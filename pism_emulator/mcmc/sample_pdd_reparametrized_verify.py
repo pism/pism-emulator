@@ -119,7 +119,36 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--result-dir", default="posterior")
-    parser.add_argument("--use-eig", action="store_true")
+    parser.add_argument(
+        "--use-eig",
+        action="store_true",
+        help=(
+            "Only with --proposal legacy: compute the metric by eigendecomposition "
+            "instead of Newton-Schulz (manifold and fixed always do)"
+        ),
+    )
+    parser.add_argument(
+        "--proposal",
+        choices=MALA.PROPOSALS,
+        default="manifold",
+        help=(
+            "manifold: metric recomputed at every state (1 Hessian/step); "
+            "fixed: metric from the MAP kept (1 gradient/step); "
+            "legacy: pre-v0.43 sampler, biased, only to reproduce old runs"
+        ),
+    )
+    parser.add_argument(
+        "--h-max",
+        type=float,
+        default=1.0,
+        help="Largest step size the burn-in adaptation may reach",
+    )
+    parser.add_argument(
+        "--acc-target",
+        type=float,
+        default=None,
+        help="Acceptance rate the burn-in adaptation aims for (default 0.57 with --proposal fixed, else 0.25)",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -181,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     noise = 0.05 * Y_true * torch.randn_like(Y_true)
     Y_true += noise
 
-    X_prior = torch.from_numpy(prior_df.values)
+    X_prior = torch.from_numpy(prior_df.to_numpy(copy=True))
     X_min = X_prior.cpu().numpy().min(axis=0)
     X_max = X_prior.cpu().numpy().max(axis=0)
 
@@ -196,13 +225,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         Y_true,
         sigma_hat,
         alpha=alpha,
-        metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
+        proposal=args.proposal,
         burn=burn,
         samples=samples,
         h0=0.1,
-        acc_target=0.25,
+        acc_target=args.acc_target,
+        h_max=args.h_max,
         use_eig=use_eig,
     )
 
@@ -230,10 +260,10 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
 
     S_prior_total, D = X_prior.shape
     C_prior = C  # match posterior chains
-    assert S_prior_total % C_prior == 0, "prior samples must split evenly across chains"
+    # split the prior draws evenly across chains, dropping the remainder
     S_prior = S_prior_total // C_prior
 
-    X_prior_reshaped = X_prior.reshape(C_prior, S_prior, D)
+    X_prior_reshaped = X_prior[: C_prior * S_prior].reshape(C_prior, S_prior, D)
 
     prior = {
         name: X_prior_reshaped[:, :, i]  # -> (C_prior, S_prior)

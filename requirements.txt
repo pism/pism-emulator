@@ -1,6 +1,7 @@
-arviz
+arviz>=1
 bokeh
 cf_xarray
+cmglaciology
 dask[distributed,dataframe]
 earthaccess
 h5netcdf

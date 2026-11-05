@@ -24,7 +24,7 @@ pip install -e . --no-deps
 ```
 
 For GPU support on CUDA systems, use `environment-cuda.yml` instead. Both environment
-files list every dependency explicitly (conda-forge only, Python pinned `>=3.11,<3.14`);
+files list every dependency explicitly (conda-forge, plus `cmglaciology` via pip because it is not on conda-forge; Python pinned `>=3.12,<3.14`);
 `requirements.txt` is only used by `pyproject.toml` for pip-only installs, so keep the
 three files in sync when adding a dependency.
 
@@ -58,7 +58,7 @@ pre-commit run mypy --all-files
 **Enforced standards:**
 - **black**: Code formatting (line length: 88)
 - **isort**: Import sorting (profile: black)
-- **mypy**: Type checking (Python 3.11)
+- **mypy**: Type checking (Python 3.12)
 - **pylint**: Linting
 - **numpydoc**: Docstring validation
 
@@ -67,9 +67,13 @@ pre-commit run mypy --all-files
 - Tool configurations are in `pyproject.toml`
 - Many warnings are ignored in flake8 (E203, E501, W503, etc.) - see `[tool.flake8]`
 
+## Documentation
+
+Sphinx + MyST site in `docs/` (same layout as pism-terra): `pip install -r docs/requirements.txt`, then `cd docs && make html`. The `Docs` workflow builds it with warnings as errors; Read the Docs uses `.readthedocs.yaml` (CPU-only PyTorch, then `requirements.txt`). New public symbols go into the autosummary tables in `docs/source/reference/api.md`.
+
 ## CI and Releases
 
-- GitHub Actions in `.github/workflows/`: `test.yml` (pytest on Python 3.11 and 3.13), `static-analysis.yml` (pre-commit, pylint, secrets scan), `changelog.yml` (every PR must edit `CHANGELOG.md` unless labelled `bumpless`), `labeled-pr.yml` (PRs into `release` need a `major`/`minor`/`patch`/`bumpless` label).
+- GitHub Actions in `.github/workflows/`: `test.yml` (pytest on Python 3.12 and 3.13), `static-analysis.yml` (pre-commit, pylint, secrets scan), `changelog.yml` (every PR must edit `CHANGELOG.md` unless labelled `bumpless`), `labeled-pr.yml` (PRs into `release` need a `major`/`minor`/`patch`/`bumpless` label).
 - Releases: merge a labelled PR from `main` into `release` -> `tag-version.yml` bumps the latest `vX.Y.Z` tag -> `release.yml` creates the GitHub release from the matching `## [X.Y.Z]` section of `CHANGELOG.md` and fast-forwards `main`. Both use the `CICD_PAT` repository secret.
 - The package version comes from git tags via `setuptools_scm`.
 
@@ -174,7 +178,7 @@ The package provides several entry points (defined in `pyproject.toml`):
 
 ### Training Emulators
 ```bash
-train-emulator \
+pism-train-emulator \
     --data-dir path/to/pism/outputs \
     --emulator-dir path/to/save/emulators \
     --target-file data/observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc \
@@ -187,14 +191,14 @@ train-emulator \
 
 ### Evaluating Emulators
 ```bash
-evaluate-emulator \
+pism-evaluate-emulator \
     --emulator-dir path/to/emulators \
     --model-index 0
 ```
 
 ### Sampling Posterior (Speed)
 ```bash
-sample-posterior-speed \
+pism-sample-posterior-speed \
     --emulator-dir path/to/emulators \
     --target-file data/observed_speeds/greenland_vel_mosaic250_v1_g1800m.nc \
     --samples 10000 \
@@ -206,7 +210,7 @@ sample-posterior-speed \
 
 ### Sampling Posterior (PDD)
 ```bash
-sample-posterior-pdd \
+pism-sample-posterior-pdd \
     --samples 10000 \
     --burn 1000 \
     --chains 4 \
@@ -214,16 +218,16 @@ sample-posterior-pdd \
     CLIMATEFILE.nc
 
 # Reparametrized variant
-sample-posterior-pdd-reparametrized [same options]
+pism-sample-posterior-pdd-reparametrized [same options]
 
 # Verification variants (for debugging/testing)
-sample-posterior-pdd-verify [same options]
-sample-posterior-pdd-reparametrized-verify [same options]
+pism-sample-posterior-pdd-verify [same options]
+pism-sample-posterior-pdd-reparametrized-verify [same options]
 ```
 
 ### Plotting Posterior
 ```bash
-plot-posterior \
+pism-plot-posterior \
     --posterior-file path/to/posterior.nc
 ```
 
@@ -268,12 +272,12 @@ The complete two-step calibration process:
 
 1. **Train Speed Emulators:**
    ```bash
-   train-emulator --data-dir data/training --emulator-dir emulators
+   pism-train-emulator --data-dir data/training --emulator-dir emulators
    ```
 
 2. **Sample Speed Posterior:**
    ```bash
-   sample-posterior-speed --emulator-dir emulators MODEL.ckpt
+   pism-sample-posterior-speed --emulator-dir emulators MODEL.ckpt
    ```
 
 3. **Run High-Fidelity Model:** Use posterior samples to initialize new PISM ensemble

@@ -1616,6 +1616,7 @@ class PISMInterpolatedDataset(Dataset):
     those cells for each ensemble run.
 
     The dataset supports:
+
     * feature normalization of parameters ``X`` (standard score per column),
     * response/target transforms via ``y_transform`` (applied consistently to both
       training responses and the target vector),
