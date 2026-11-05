@@ -139,8 +139,9 @@ def test_prepare_data_without_arguments_keeps_basis() -> None:
     dm = PISMDataModule(X, F, om, om0)
     dm.prepare_data(q=6, svd_lowrank=False)
     V_hat = dm.eig.V_hat
+    assert V_hat is not None and V_hat.shape[1] == 6
     dm.prepare_data()  # what Trainer.fit(..., datamodule=dm) does
-    assert dm.eig.V_hat is V_hat and V_hat.shape[1] == 6
+    assert dm.eig.V_hat is V_hat
 
 
 def test_loaders_work_without_worker_processes() -> None:
