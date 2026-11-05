@@ -21,8 +21,9 @@ Data Module.
 
 from __future__ import annotations
 
+import hashlib
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 
@@ -109,6 +110,9 @@ class EigCache:
         Per-node mean over samples with shape ``(N_nodes,)``.
     eigs_vals : torch.Tensor or None, default=None
         Vector of eigenvalues (or squared singular values) with length ``q``.
+    key : str or None, default=None
+        Hash of the inputs and settings the basis was computed from
+        (see :meth:`PISMDataModule.eig_cache_key`).
     lock : threading.Lock
         Mutual-exclusion lock used to guard one-time computation in concurrent
         contexts (e.g., multiple workers or ranks).
@@ -119,7 +123,8 @@ class EigCache:
     F_bar: Tensor | None = None
     F_mean: Tensor | None = None
     eigs_vals: Tensor | None = None
-    lock: Lock = Lock()
+    key: str | None = None
+    lock: Lock = field(default_factory=Lock)
 
 
 class PISMDataModule(pl.LightningDataModule):
@@ -286,8 +291,9 @@ class PISMDataModule(pl.LightningDataModule):
             num_workers=self.cfg.num_workers,
             worker_init_fn=seed_worker,
             generator=self._dl_generator,
-            persistent_workers=True,
-            pin_memory=True,
+            # DataLoader rejects persistent workers without worker processes
+            persistent_workers=self.cfg.num_workers > 0,
+            pin_memory=torch.cuda.is_available(),
         )
 
     def train_dataloader(self) -> DataLoader:
@@ -323,6 +329,36 @@ class PISMDataModule(pl.LightningDataModule):
 
     # -------------------- Eigenglaciers --------------------
 
+    def eig_cache_key(
+        self, *, q: int = 10, cutoff: float | None = None, svd_lowrank: bool = True
+    ) -> str:
+        """
+        Hash the inputs and settings that determine the eigenglacier basis.
+
+        Parameters
+        ----------
+        q : int, optional
+            Target rank when ``cutoff`` is None.
+        cutoff : float, optional
+            Explained-variance cutoff.
+        svd_lowrank : bool, optional
+            Whether the low-rank SVD is used.
+
+        Returns
+        -------
+        str
+            A 16-character hex digest of ``F``, ``omegas``, ``q``, ``cutoff`` and
+            ``svd_lowrank``. Different ensemble members (different Dirichlet
+            ``omegas``) get different keys.
+        """
+        h = hashlib.sha1()
+        for t in (self.cfg.F, self.cfg.omegas):
+            a = t.detach().cpu().contiguous()
+            h.update(str((tuple(a.shape), str(a.dtype))).encode())
+            h.update(a.numpy().tobytes())
+        h.update(repr((int(q), cutoff, bool(svd_lowrank))).encode())
+        return h.hexdigest()[:16]
+
     def get_eigenglaciers(
         self,
         *,
@@ -352,8 +388,9 @@ class PISMDataModule(pl.LightningDataModule):
             If False, form the weighted covariance matrix and use
             :func:`torch.linalg.eigh`. Default is True.
         cache_path : str or pathlib.Path, optional
-            If provided, attempt to load cached tensors from this path. If the
-            file does not exist, computed results are saved to this location.
+            If provided, load cached tensors from this path when the file was
+            computed from the same inputs and settings (same
+            :meth:`eig_cache_key`); otherwise compute them and save them there.
 
         Returns
         -------
@@ -374,19 +411,21 @@ class PISMDataModule(pl.LightningDataModule):
         * When ``cutoff`` is provided, the effective rank is determined by the
           cumulative explained variance fraction.
         """
-        if self.eig.ready:
+        key = self.eig_cache_key(q=q, cutoff=cutoff, svd_lowrank=svd_lowrank)
+        if self.eig.ready and self.eig.key == key:
             return self.eig.V_hat, self.eig.F_bar, self.eig.F_mean, self.eig.eigs_vals
 
         if cache_path is not None:
             cache = Path(cache_path)
-            if cache.exists():
-                pack = torch.load(cache, map_location="cpu")
+            pack = torch.load(cache, map_location="cpu") if cache.exists() else None
+            if pack is not None and pack.get("key") == key:
                 self.eig = EigCache(
                     ready=True,
                     V_hat=pack["V_hat"],
                     F_bar=pack["F_bar"],
                     F_mean=pack["F_mean"],
                     eigs_vals=pack["eigs_vals"],
+                    key=key,
                 )
                 return (
                     self.eig.V_hat,
@@ -394,9 +433,14 @@ class PISMDataModule(pl.LightningDataModule):
                     self.eig.F_mean,
                     self.eig.eigs_vals,
                 )
+            if pack is not None:
+                rank_zero_info(
+                    f"Eigenglacier cache {cache} was computed from other inputs; "
+                    "recomputing"
+                )
 
         with self.eig.lock:
-            if self.eig.ready:
+            if self.eig.ready and self.eig.key == key:
                 return (
                     self.eig.V_hat,
                     self.eig.F_bar,
@@ -420,10 +464,15 @@ class PISMDataModule(pl.LightningDataModule):
             else:
                 S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar
                 lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
-                lamda = lamda.flip(0)
-                V = V.flip(1)
+                lamda = lamda.flip(0)[:q_r]
+                V = V.flip(1)[:, :q_r]
+            # round-off can make the smallest eigenvalues slightly negative
+            lamda = torch.clamp(lamda, min=0.0)
             if cutoff is not None:
-                cutoff_index = torch.sum(torch.cumsum(lamda / lamda.sum(), 0) < cutoff)
+                # fewest modes whose cumulative variance fraction reaches cutoff
+                frac = torch.cumsum(lamda / lamda.sum(), 0)
+                cutoff_index = int(torch.searchsorted(frac, torch.tensor(cutoff))) + 1
+                cutoff_index = min(max(cutoff_index, 1), lamda.numel())
                 lamda_truncated = lamda.detach()[:cutoff_index]
                 rank_zero_info(
                     "Generating eigenglaciers using the first "
@@ -445,11 +494,12 @@ class PISMDataModule(pl.LightningDataModule):
                         "F_bar": F_bar.cpu(),
                         "F_mean": F_mean.cpu(),
                         "eigs_vals": lamda.cpu(),
+                        "key": key,
                     },
                     cache_path,
                 )
 
-            self.eig = EigCache(True, V_hat, F_bar, F_mean, lamda)
+            self.eig = EigCache(True, V_hat, F_bar, F_mean, lamda, key=key)
             return V_hat, F_bar, F_mean, lamda
 
 
@@ -635,7 +685,7 @@ class PDDDataModule(pl.LightningDataModule):
             batch_size=self.cfg.batch_size,
             shuffle=shuffle,
             num_workers=self.cfg.num_workers,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             worker_init_fn=seed_worker,
             generator=self._dl_generator,
         )
@@ -804,7 +854,7 @@ class LegacyPISMDataModule(
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             worker_init_fn=seed_worker,
             generator=self._dl_generator,
         )
@@ -814,7 +864,7 @@ class LegacyPISMDataModule(
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             worker_init_fn=seed_worker,
             generator=self._dl_generator,
         )
@@ -824,7 +874,7 @@ class LegacyPISMDataModule(
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             worker_init_fn=seed_worker,
             generator=self._dl_generator,
         )
@@ -912,7 +962,9 @@ class LegacyPISMDataModule(
             S = F_bar.T @ torch.diag(omegas.squeeze()) @ F_bar  # Eq. 27
 
             lamda, V = torch.linalg.eigh(S)  # pylint: disable=not-callable
-            lamda = lamda[:, 0].squeeze()
+            # eigh returns ascending eigenvalues; keep the q largest
+            lamda = torch.clamp(lamda.flip(0)[:q], min=0.0)
+            V = V.flip(1)[:, :q]
 
         rank_zero_info(f"...using the first {q} eigen values")
         V = V.detach()

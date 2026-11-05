@@ -2,7 +2,7 @@ name: pism-emulator
 channels:
   - conda-forge
 dependencies:
-  - python>=3.11,<3.14
+  - python>=3.12,<3.14
   - pip
   # PyTorch with CUDA from conda-forge. The pytorch/nvidia channels are no longer
   # updated, and mixing them with conda-forge breaks the solve. Add e.g.
@@ -21,7 +21,7 @@ dependencies:
   - scikit-learn
   - joblib
   - tqdm
-  - arviz
+  - arviz>=1  # DataTree API; needs Python >= 3.12
   # I/O and geospatial
   - xarray
   - dask

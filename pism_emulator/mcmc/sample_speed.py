@@ -108,6 +108,28 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--alpha", type=float, default=0.01)
     parser.add_argument("--burn", type=int, default=1000)
     parser.add_argument("--chains", type=int, default=1)
+    parser.add_argument(
+        "--proposal",
+        choices=MALASamplerModule.PROPOSALS,
+        default="manifold",
+        help=(
+            "manifold: metric recomputed at every state (1 Hessian/step); "
+            "fixed: metric from the MAP kept (1 gradient/step); "
+            "legacy: pre-v0.43 sampler, biased, only to reproduce old runs"
+        ),
+    )
+    parser.add_argument(
+        "--h-max",
+        type=float,
+        default=1.0,
+        help="Largest step size the burn-in adaptation may reach",
+    )
+    parser.add_argument(
+        "--acc-target",
+        type=float,
+        default=None,
+        help="Acceptance rate the burn-in adaptation aims for (default 0.57 with --proposal fixed, else 0.25)",
+    )
     parser.add_argument("--emulator-dir", default="emulator_ensemble")
     parser.add_argument("--model-index", type=int, default=0)
     parser.add_argument("--samples", type=int, default=10_000)
@@ -221,13 +243,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         Y_target,
         sigma_hat,
         alpha=alpha,
-        metric_mode="current",
         delayed_accept=False,
         hess_refresh=1,
+        proposal=args.proposal,
         burn=burn,
         samples=samples,
         h0=0.1,
-        acc_target=0.25,
+        acc_target=args.acc_target,
+        h_max=args.h_max,
     )
 
     X_map = sampler.find_MAP(
@@ -279,13 +302,16 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         name: arr_denorm[:, :, i] for i, name in enumerate(dataset.samples.X_keys)
     }
 
-    S_prior_total, D = X_prior.shape
-    C_prior = C  # match posterior chains
-    assert S_prior_total % C_prior == 0, "prior samples must split evenly across chains"
-    S_prior = S_prior_total // C_prior
+    # The prior group shares the posterior's (chain, draw) coordinates, so give it
+    # the same shape. Prior draws are i.i.d., so taking (and if needed cycling
+    # through) the first chains * draws of them is fine.
+    C_prior, S_prior = arr.shape[0], arr.shape[1]
+    X_prior_np = np.asarray(X_prior)
+    D = X_prior_np.shape[-1]
+    X_prior_np = X_prior_np[np.arange(C_prior * S_prior) % X_prior_np.shape[0]]
 
     X_prior_reshaped = (
-        X_prior.reshape(C_prior, S_prior, D) * X_std[None, None, :]
+        X_prior_np.reshape(C_prior, S_prior, D) * X_std[None, None, :]
         + X_mean[None, None, :]
     )
 

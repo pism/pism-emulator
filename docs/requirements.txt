@@ -1,0 +1,13 @@
+# Documentation toolchain (Sphinx + MyST, same stack as pism-terra).
+# Install into the conda environment with
+#   python -m pip install -r docs/requirements.txt
+sphinx
+pydata-sphinx-theme
+sphinx-book-theme
+sphinx-design
+sphinx-autodoc-typehints
+sphinx-copybutton
+sphinxcontrib-bibtex
+myst-nb
+numpydoc
+sphinx-autobuild

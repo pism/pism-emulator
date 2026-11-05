@@ -1,0 +1,28 @@
+/* Light overrides to nudge pydata-sphinx-theme toward the xDEM look. */
+
+/* Slightly wider sidebar for our longer section titles. */
+.bd-sidebar-primary {
+    width: 17rem;
+}
+
+/* Logo: keep readable on dark backgrounds via inverted background only on the
+   navbar brand, not on every occurrence of the image. */
+.navbar-brand img {
+    max-height: 64px;
+}
+
+/* Code blocks: tighter line height. */
+.highlight pre {
+    line-height: 1.35;
+}
+
+/* TODO admonitions: warm orange to make stub content obvious. */
+.admonition.todo,
+div.admonition[data-admonition="todo"] {
+    border-left-color: #fb8500;
+}
+.admonition.todo .admonition-title,
+div.admonition[data-admonition="todo"] .admonition-title {
+    background-color: rgba(251, 133, 0, 0.12);
+    color: #fb8500;
+}

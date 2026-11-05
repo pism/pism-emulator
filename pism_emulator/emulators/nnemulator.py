@@ -29,7 +29,7 @@ import lightning as pl
 import torch
 from torch import Tensor, nn
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import ExponentialLR, _LRScheduler
+from torch.optim.lr_scheduler import ExponentialLR, LRScheduler
 
 from pism_emulator.metrics import AreaWeightedError, area_weighted_error
 
@@ -213,7 +213,7 @@ class DNNEmulator(pl.LightningModule):
             Common keys include:
 
             * ``width`` : int, hidden width (default 128)
-            * ``depth`` : int, number of residual blocks (default 3)
+            * ``depth`` : int, number of residual blocks (default 4)
             * ``dropout`` : float, dropout probability (default 0.5)
             * ``activation`` : {"relu","silu","gelu"}, activation function (default "relu")
             * ``learning_rate`` : float, optimizer learning rate (default 1e-2)
@@ -251,7 +251,7 @@ class DNNEmulator(pl.LightningModule):
         )
 
         width: int = int(self.hparams.get("width", 128))
-        depth: int = int(self.hparams.get("depth", 3))
+        depth: int = int(self.hparams.get("depth", 4))
         p_drop: float = float(self.hparams.get("dropout", 0.5))
         activation: str = str(self.hparams.get("activation", "relu"))
 
@@ -336,9 +336,6 @@ class DNNEmulator(pl.LightningModule):
         parser.add_argument("--depth", type=int, default=4)
         parser.add_argument("--dropout", type=float, default=0.5)
         parser.add_argument(
-            "--norm", type=str, default="batch", choices=["batch", "layer", "none"]
-        )
-        parser.add_argument(
             "--activation", type=str, default="relu", choices=["relu", "silu", "gelu"]
         )
         parser.add_argument("--learning-rate", type=float, default=1e-2)
@@ -349,7 +346,7 @@ class DNNEmulator(pl.LightningModule):
 
     def configure_optimizers(
         self,
-    ) -> tuple[list[Optimizer], list[dict[str, _LRScheduler]]]:
+    ) -> tuple[list[Optimizer], list[dict[str, LRScheduler]]]:
         """
         Configure optimizer and learning-rate scheduler.
 
@@ -357,7 +354,7 @@ class DNNEmulator(pl.LightningModule):
         -------
         list[torch.optim.Optimizer]
             List containing the configured optimizer.
-        list[dict[str, torch.optim.lr_scheduler._LRScheduler]]
+        list[dict[str, torch.optim.lr_scheduler.LRScheduler]]
             List containing a scheduler configuration dictionary compatible with Lightning.
         """
         opt = torch.optim.Adam(
@@ -419,22 +416,9 @@ class DNNEmulator(pl.LightningModule):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
 
-        self.log(
-            "train_loss",
-            self.train_ae(f_pred, f, o, self.area),
-            sync_dist=True,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
-        self.log(
-            "test_loss",
-            self.test_ae(f_pred, f, o_0, self.area),
-            sync_dist=True,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+        # accumulate; on_validation_epoch_end logs the epoch totals once
+        self.train_ae.update(f_pred, f, o, self.area)
+        self.test_ae.update(f_pred, f, o_0, self.area)
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
     def on_validation_epoch_end(self) -> None:
@@ -624,16 +608,9 @@ class NNEmulator(pl.LightningModule):
         f_pred = self.forward(x)
         area = self.area
 
-        self.log(
-            "train_loss",
-            self.train_ae(f_pred, f, o, area),
-            sync_dist=True,
-        )
-        self.log(
-            "test_loss",
-            self.test_ae(f_pred, f, o_0, area),
-            sync_dist=True,
-        )
+        # accumulate; on_validation_epoch_end logs the epoch totals once
+        self.train_ae.update(f_pred, f, o, area)
+        self.test_ae.update(f_pred, f, o_0, area)
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
@@ -843,16 +820,9 @@ class NN5Emulator(pl.LightningModule):
         f_pred = self.forward(x)
         area = self.area
 
-        self.log(
-            "train_loss",
-            self.train_ae(f_pred, f, o, area),
-            sync_dist=True,
-        )
-        self.log(
-            "test_loss",
-            self.test_ae(f_pred, f, o_0, area),
-            sync_dist=True,
-        )
+        # accumulate; on_validation_epoch_end logs the epoch totals once
+        self.train_ae.update(f_pred, f, o, area)
+        self.test_ae.update(f_pred, f, o_0, area)
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
@@ -1050,8 +1020,9 @@ class LegacyNNEmulator(pl.LightningModule):
         x, f, o, o_0 = batch
         f_pred = self.forward(x)
 
-        self.log("train_loss", self.train_ae(f_pred, f, o, self.area))
-        self.log("test_loss", self.test_ae(f_pred, f, o_0, self.area))
+        # accumulate; on_validation_epoch_end logs the epoch totals once
+        self.train_ae.update(f_pred, f, o, self.area)
+        self.test_ae.update(f_pred, f, o_0, self.area)
 
         return {"x": x, "f": f, "f_pred": f_pred, "o": o, "o_0": o_0}
 
