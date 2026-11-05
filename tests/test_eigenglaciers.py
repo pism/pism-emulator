@@ -133,6 +133,17 @@ def test_cache_is_keyed_by_inputs(tmp_path: Path) -> None:
     assert torch.load(cache)["key"] == c.eig_cache_key(q=4)
 
 
+def test_prepare_data_without_arguments_keeps_basis() -> None:
+    """Check that Lightning's argument-less prepare_data() keeps the basis."""
+    X, F, om, om0 = _data()
+    dm = PISMDataModule(X, F, om, om0)
+    dm.prepare_data(q=6, svd_lowrank=False)
+    V_hat = dm.eig.V_hat
+    assert V_hat is not None and V_hat.shape[1] == 6
+    dm.prepare_data()  # what Trainer.fit(..., datamodule=dm) does
+    assert dm.eig.V_hat is V_hat
+
+
 def test_loaders_work_without_worker_processes() -> None:
     """Check that num_workers=0 (the default, needed on MPS) builds working loaders."""
     X, F, om, om0 = _data()

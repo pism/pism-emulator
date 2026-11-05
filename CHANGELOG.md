@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [PEP 440](https://www.python.org/dev/peps/pep-0440/)
 and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.1]
+
+### Fixed
+- `pism-train-emulator` computed the eigenglacier basis twice: `Trainer.fit(..., datamodule=dm)` calls `prepare_data()` again without arguments, which computed a second, unused basis with the default `q=10`. `PISMDataModule.prepare_data()` without arguments now keeps the basis it already has.
+- Emulator training diverged on Apple's MPS backend for large grids (e.g. 1800 m Greenland, 650k cells). MPS float32 matrix products with an inner dimension above 2^15 can be 2-60 % wrong, and the backward pass of the eigenglacier projection `coeffs @ V_hat.T` is such a product. All emulators now reconstruct fields through `project_basis`, which on MPS computes that gradient as one batched product over blocks of 2^15 cells; other devices are unchanged.
+
 ## [0.43.0]
 
 ### Added
