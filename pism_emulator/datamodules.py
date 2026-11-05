@@ -233,9 +233,13 @@ class PISMDataModule(pl.LightningDataModule):
 
         Notes
         -----
-        Lightning calls this hook once per node. Computed tensors are stored in
-        :attr:`eig` for use in :meth:`setup`.
+        Computed tensors are stored in :attr:`eig` for use in :meth:`setup`.
+        ``Trainer.fit(..., datamodule=dm)`` calls this hook again without
+        arguments; when a basis has already been computed, that call keeps it
+        instead of computing a new one with the default settings.
         """
+        if not kwargs and self.eig.ready:
+            return
         V_hat, F_bar, F_mean, eigs_vals = self.get_eigenglaciers(**kwargs)
         self.eig.V_hat, self.eig.F_bar, self.eig.F_mean, self.eig.eigs_vals = (
             V_hat,
