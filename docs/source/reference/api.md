@@ -16,6 +16,7 @@ generates one page per symbol under `generated/`.
     NN5Emulator
     LegacyNNEmulator
     MLPBlock
+    project_basis
 ```
 
 ## Data

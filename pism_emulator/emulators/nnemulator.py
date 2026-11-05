@@ -61,6 +61,141 @@ def _kaiming_init(module: nn.Module) -> None:
             nn.init.zeros_(module.bias)
 
 
+#: Longest matmul inner dimension for which every MPS float32 result tested was correct.
+MPS_MAX_INNER_DIM = 2**15
+#: Number of grid cells per block in the MPS-safe gradient of the projection.
+MPS_PROJECTION_CHUNK = MPS_MAX_INNER_DIM
+_BLOCK_CACHE_ATTR = "_pism_basis_blocks"
+
+
+def _basis_blocks(V_hat: Tensor, chunk: int) -> Tensor:
+    """
+    Return ``V_hat`` zero-padded and reshaped into blocks of ``chunk`` rows.
+
+    The result is cached on the tensor and rebuilt when it changes in place
+    (e.g. :meth:`~torch.nn.Module.load_state_dict`). Moving a module to another
+    device creates a new buffer, so the cache never crosses devices.
+
+    Parameters
+    ----------
+    V_hat : torch.Tensor
+        Basis matrix with shape ``(n_nodes, n_eigenglaciers)``.
+    chunk : int
+        Rows per block.
+
+    Returns
+    -------
+    torch.Tensor
+        Tensor with shape ``(n_blocks, chunk, n_eigenglaciers)``, where the rows
+        past ``n_nodes`` are zero.
+    """
+    key = (V_hat._version, chunk)  # pylint: disable=protected-access
+    cached = getattr(V_hat, _BLOCK_CACHE_ATTR, None)
+    if cached is None or cached[0] != key:
+        n_nodes, q = V_hat.shape
+        n_blocks = -(-n_nodes // chunk)
+        with torch.no_grad():
+            blocks = torch.nn.functional.pad(
+                V_hat.detach(), (0, 0, 0, n_blocks * chunk - n_nodes)
+            ).reshape(n_blocks, chunk, q)
+        cached = (key, blocks)
+        setattr(V_hat, _BLOCK_CACHE_ATTR, cached)
+    return cached[1]
+
+
+class _BlockedProjection(torch.autograd.Function):  # pylint: disable=abstract-method
+    """``coeffs @ V_hat.T`` whose gradient sums over blocks of grid cells."""
+
+    @staticmethod
+    def forward(ctx, coeffs, V_hat, blocks):  # pylint: disable=arguments-differ
+        """
+        Plain product; its inner dimension is ``n_eigenglaciers``, which is safe.
+
+        Parameters
+        ----------
+        ctx : torch.autograd.function.FunctionCtx
+            Autograd context.
+        coeffs : torch.Tensor
+            Coefficients, shape ``(..., n_eigenglaciers)``.
+        V_hat : torch.Tensor
+            Basis, shape ``(n_nodes, n_eigenglaciers)``.
+        blocks : torch.Tensor
+            ``V_hat`` as returned by :func:`_basis_blocks`.
+
+        Returns
+        -------
+        torch.Tensor
+            ``coeffs @ V_hat.T``, shape ``(..., n_nodes)``.
+        """
+        ctx.save_for_backward(blocks)
+        return coeffs @ V_hat.T
+
+    @staticmethod
+    def backward(ctx, grad_out):  # pylint: disable=arguments-differ
+        """
+        Compute ``grad_out @ V_hat`` as one batched product over blocks.
+
+        The ops are differentiable, so second derivatives (e.g. the sampler's
+        Hessian) work as well.
+
+        Parameters
+        ----------
+        ctx : torch.autograd.function.FunctionCtx
+            Autograd context.
+        grad_out : torch.Tensor
+            Gradient with respect to the output, shape ``(..., n_nodes)``.
+
+        Returns
+        -------
+        tuple
+            Gradient with respect to ``coeffs``, and ``None`` for the basis.
+        """
+        (blocks,) = ctx.saved_tensors
+        n_blocks, chunk, q = blocks.shape
+        lead, n_nodes = grad_out.shape[:-1], grad_out.shape[-1]
+        g = grad_out.reshape(-1, n_nodes)
+        g = torch.nn.functional.pad(g, (0, n_blocks * chunk - n_nodes))
+        g = g.reshape(g.shape[0], n_blocks, chunk).transpose(0, 1)
+        grad_coeffs = torch.bmm(g, blocks).sum(0).reshape(*lead, q)
+        return grad_coeffs, None, None
+
+
+def project_basis(coeffs: Tensor, V_hat: Tensor, chunk: int | None = None) -> Tensor:
+    """
+    Reconstruct fields from eigenglacier coefficients, ``coeffs @ V_hat.T``.
+
+    On Apple's MPS backend, float32 matrix products with more than one row and an
+    inner dimension above ``2**15`` can return results that are 2-60 % wrong (seen
+    with torch 2.13 on macOS 26, M2 Max). The forward product is safe (its inner
+    dimension is the number of eigenglaciers), but its gradient
+    ``grad_out @ V_hat`` has the number of grid cells as inner dimension, so on
+    large grids emulator training diverges on MPS. There the gradient is computed
+    as a single batched product over blocks of :data:`MPS_PROJECTION_CHUNK` cells,
+    which keeps every reduction below the limit. All other devices, and grids of at
+    most :data:`MPS_MAX_INNER_DIM` cells, use the plain product.
+
+    Parameters
+    ----------
+    coeffs : torch.Tensor
+        Coefficients with shape ``(..., n_eigenglaciers)``.
+    V_hat : torch.Tensor
+        Basis matrix with shape ``(n_nodes, n_eigenglaciers)``.
+    chunk : int or None, optional
+        Grid cells per block. ``None`` (default) uses blocks only on MPS when
+        ``n_nodes > MPS_MAX_INNER_DIM``; an integer forces them on any device.
+
+    Returns
+    -------
+    torch.Tensor
+        Reconstructed fields with shape ``(..., n_nodes)``.
+    """
+    if chunk is None:
+        if V_hat.device.type != "mps" or V_hat.shape[0] <= MPS_MAX_INNER_DIM:
+            return coeffs @ V_hat.T
+        chunk = MPS_PROJECTION_CHUNK
+    return _BlockedProjection.apply(coeffs, V_hat, _basis_blocks(V_hat, chunk))
+
+
 class MLPBlock(nn.Module):
     """
     Feed-forward MLP block used in residual MLP emulators.
@@ -311,7 +446,7 @@ class DNNEmulator(pl.LightningModule):
         for block in self.blocks:
             z = block(z) + z
         coeffs = self.head(z)
-        F_pred = coeffs @ self.V_hat.T
+        F_pred = project_basis(coeffs, self.V_hat)
         if add_mean:
             F_pred = F_pred + self.F_mean
         return F_pred
@@ -556,9 +691,9 @@ class NNEmulator(pl.LightningModule):
         z_5 = self.l_5(z_4)
 
         if add_mean:
-            F_pred = z_5 @ self.V_hat.T + self.F_mean
+            F_pred = project_basis(z_5, self.V_hat) + self.F_mean
         else:
-            F_pred = z_5 @ self.V_hat.T
+            F_pred = project_basis(z_5, self.V_hat)
         return F_pred
 
     @staticmethod
@@ -768,9 +903,9 @@ class NN5Emulator(pl.LightningModule):
         z_6 = self.l_6(z_5)
 
         if add_mean:
-            F_pred = z_6 @ self.V_hat.T + self.F_mean
+            F_pred = project_basis(z_6, self.V_hat) + self.F_mean
         else:
-            F_pred = z_6 @ self.V_hat.T
+            F_pred = project_basis(z_6, self.V_hat)
         return F_pred
 
     @staticmethod
@@ -966,9 +1101,9 @@ class LegacyNNEmulator(pl.LightningModule):
 
         z_5 = self.l_5(z_4)
         if add_mean:
-            F_pred = z_5 @ self.V_hat.T + self.F_mean
+            F_pred = project_basis(z_5, self.V_hat) + self.F_mean
         else:
-            F_pred = z_5 @ self.V_hat.T
+            F_pred = project_basis(z_5, self.V_hat)
 
         return F_pred
 
