@@ -142,6 +142,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
     )
     parser.add_argument("--target-var", type=str, default="velsurf_mag")
     parser.add_argument("--target-error-var", type=str, default="velsurf_mag_error")
+    parser.add_argument(
+        "--target-mask-var",
+        type=str,
+        default="landice",
+        help="Ice mask in the target file; cells where it is 0 are left out. "
+        "Ignored when the file has no such variable; 'none' disables it. "
+        "Use the same value for training, evaluation and sampling.",
+    )
     parser.add_argument("--y-lim", type=float, nargs=2, default=[1, 10e3])
     parser.add_argument("--y-transform", default="log10")
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
@@ -194,6 +202,9 @@ def main(argv: Sequence[str] | None = None) -> dict[str, Any]:
         target_file=target_file,
         target_corr_threshold=0,
         target_error_var=target_error_var,
+        target_mask_var=(
+            None if args.target_mask_var.lower() == "none" else args.target_mask_var
+        ),
         target_var=target_var,
         y_lim=y_lim,
         y_transform=y_transform,

@@ -13,8 +13,10 @@ ensemble:
 - one NetCDF file per PISM run, with `id_<N>_` in the file name
   (files without that pattern are skipped);
 - a CSV of parameter values with an `id` column matching those `<N>`;
-- the observed field (and its error) on the same grid, which also defines the
-  mask of cells used.
+- the observed field (and its error), interpolated to the model grid, which
+  also defines the mask of cells used: cells without observations, and cells
+  where the ice mask `--target-mask-var` (default `landice`) is 0, are left out.
+  Targets without that variable (e.g. the Greenland mosaics) are not masked.
 
 The parameters are standardised (`X_mean`, `X_std`); the responses are
 transformed with `--y-transform` and clamped to `--y-lim`:
@@ -117,6 +119,51 @@ with normalised cell areas $a_j$
 weights $\omega$ are drawn from a flat Dirichlet distribution with seed `k`, so
 training `k = 0, 1, …, K-1` yields a bootstrap ensemble of emulators. During
 validation, `train_loss` uses these weights and `test_loss` uniform weights.
+
+## Several glaciers
+
+One emulator can be trained on many glaciers at once. The emulator and the
+sampler do not know about glaciers: each ensemble member becomes one long vector
+made of every glacier's ice cells, one glacier after another.
+{class}`~pism_emulator.glaciers.GlacierIndex` records where each glacier sits in
+that vector, so evaluation and plots can map it back to each glacier's grid.
+
+```bash
+pism-train-emulator --emulator DNN --emulator-dir emulators \
+    --glacier-dir 2026_11_s4f_iceflow_calib \
+    --target-template 'glacier_s4f_input/{rgi_id}/input/obs_{rgi_id}.nc' \
+    --target-var v --y-lim 1 100e3
+```
+
+- Every `RGI*` subdirectory of `--glacier-dir` is a glacier, with its ensemble
+  output in `output/state/state_*_uq_*.nc` (`--state-glob`) and its parameters
+  in `output/uq.csv`. Glaciers without output or observations are skipped;
+  `--glaciers` picks a subset.
+- Members are matched by their `uq_<N>` id. A member that failed on any glacier
+  is dropped on all of them, so every training row covers every glacier
+  (`<emulator-dir>/members.csv` shows which runs exist where). All glaciers must
+  give a member the same parameters.
+- Each glacier's observations are interpolated to its own model grid and
+  masked with `landice`. When the target file has no `<target-var>_error`, the
+  speed error is derived from `vx`, `vy`, `vx_error` and `vy_error`.
+- Every cell is weighted by its area, so larger glaciers count more. The
+  response transform and the parameter scaling are fitted on all glaciers
+  together.
+- Training writes `<emulator-dir>/glacier_index.nc` and one eigenglacier figure
+  per glacier in `<emulator-dir>/eigenglaciers/`.
+
+`pism-evaluate-emulator-glaciers --emulator-dir emulators` rebuilds the dataset
+with the settings stored in the checkpoints, checks it against
+`glacier_index.nc`, and writes to `<emulator-dir>/evaluation/`: area-weighted
+RMSE, MAE, bias, $R^2$, Pearson $r$ and median relative error for every
+emulator and for their ensemble mean, for all glaciers and per glacier, in m/yr
+and in the transformed space (`stats_by_glacier.csv`, `stats_overall.csv`); the
+RMSE and bias per member and glacier (`stats_by_member.csv`); per glacier, the
+same figure as `pism-evaluate-emulator` (`speed_emulator_<RGI id>.pdf`: PISM,
+emulated and relative-error maps for four members, with their parameters and fit,
+and the glacier's score below); and an emulator-vs-PISM scatter plot coloured by
+glacier. The statistics are in-sample: training uses
+bootstrap weights over all members, not a held-out split.
 
 ## Evaluation
 

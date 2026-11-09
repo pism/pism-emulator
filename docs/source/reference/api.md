@@ -38,6 +38,19 @@ generates one page per symbol under `generated/`.
 ```
 
 ```{eval-rst}
+.. currentmodule:: pism_emulator.glaciers
+
+.. autosummary::
+    :toctree: generated/
+
+    MultiGlacierDataset
+    GlacierIndex
+    GlacierBlock
+    GlacierSpec
+    discover_glaciers
+```
+
+```{eval-rst}
 .. currentmodule:: pism_emulator.datamodules
 
 .. autosummary::
@@ -144,6 +157,7 @@ generates one page per symbol under `generated/`.
 
     plot_compare
     plot_eigenglaciers
+    plot_glacier_eigenglaciers
     plot_legacy_eigenglaciers
 ```
 

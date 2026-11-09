@@ -179,6 +179,14 @@ def main():
     )
     parser.add_argument("--target-var", type=str, default="velsurf_mag")
     parser.add_argument("--target-error-var", type=str, default="velsurf_mag_error")
+    parser.add_argument(
+        "--target-mask-var",
+        type=str,
+        default="landice",
+        help="Ice mask in the target file; cells where it is 0 are left out. "
+        "Ignored when the file has no such variable; 'none' disables it. "
+        "Use the same value for training, evaluation and sampling.",
+    )
     parser.add_argument("--sample-size", type=int, default=80)
     parser.add_argument("--y-lim", nargs=2, type=float, default=[1, 10e3])
     parser.add_argument("--y-transform", default="log10")
@@ -218,6 +226,9 @@ def main():
         target_file=target_file,
         target_var=target_var,
         target_error_var=target_error_var,
+        target_mask_var=(
+            None if args.target_mask_var.lower() == "none" else args.target_mask_var
+        ),
         y_transform=y_transform,
         y_lim=y_lim,
     )
