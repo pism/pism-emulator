@@ -27,7 +27,7 @@ import os
 import re
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from glob import glob
 from os.path import join
 from pathlib import Path
@@ -670,6 +670,46 @@ def _read_one_nc4(
     return cast(NDArray[np.float32], out)
 
 
+def _apply_ice_mask(
+    mask: xr.DataArray,
+    dtgt: xr.Dataset,
+    var: str | None,
+    ref_da: xr.DataArray,
+) -> xr.DataArray:
+    """
+    Also mask cells where the target's ice mask ``var`` is ``0`` or missing.
+
+    Parameters
+    ----------
+    mask : xarray.DataArray
+        Boolean mask on the reference grid (``True`` = left out).
+    dtgt : xarray.Dataset
+        Target dataset.
+    var : str or None
+        Ice mask variable (e.g. ``"landice"``); ``None`` disables masking.
+    ref_da : xarray.DataArray
+        2-D field on the reference (model) grid; its last two dims are ``(y, x)``.
+
+    Returns
+    -------
+    xarray.DataArray
+        The updated mask; unchanged when ``var`` is ``None`` or absent.
+    """
+    if not var:
+        return mask
+    if var not in dtgt:
+        rank_zero_info(f"   No '{var}' in target file; ice-free cells are not masked")
+        return mask
+    ry, rx = ref_da.dims[-2], ref_da.dims[-1]
+    ice_da = dtgt[var].squeeze(drop=True)
+    iy, ix = ice_da.dims[-2], ice_da.dims[-1]
+    if (iy, ix) != (ry, rx):
+        ice_da = ice_da.rename({iy: ry, ix: rx})
+    ice = ice_da.interp_like(ref_da, method="nearest").fillna(0) > 0
+    rank_zero_info(f"   Ice mask '{var}': {int(ice.sum())} of {ice.size} cells are ice")
+    return xr.where(ice, mask, True)
+
+
 @dataclass
 class TargetData:
     """
@@ -746,6 +786,8 @@ class SamplesData:
         Number of unmasked nodes per response (``Y.shape[1]``).
     normed_area : torch.Tensor
         Normalized per-node area weights of shape ``(n_nodes,)`` that sum to 1.
+    ids : list[int]
+        Run id of each row of ``X`` and ``Y`` (empty when not recorded).
     """
 
     X: torch.Tensor  # (nruns, nparams) (normalized if requested)
@@ -757,6 +799,7 @@ class SamplesData:
     n_samples: int
     n_grid_points: int
     normed_area: torch.Tensor  # (nnodes,)
+    ids: list[int] = field(default_factory=list)  # run id of each row of X/Y
 
 
 @dataclass
@@ -784,6 +827,9 @@ class DatasetConfig:
         Optional per-node uncertainty variable in the target file.
     target_corr_threshold : float, default=25.0
         Threshold applied to ``target_corr_var``; values below this are masked.
+    target_mask_var : str or None, default="landice"
+        Optional ice mask in the target file; cells where it is ``0`` or missing
+        are masked. Ignored when the variable is absent or set to ``None``.
     normalize_x : bool, default=True
         If ``True``, z-score normalize feature columns (per column mean/std).
     log_y : bool, default=True
@@ -811,6 +857,7 @@ class DatasetConfig:
     target_corr_var: str = "thickness"
     target_error_var: str = "velsurf_mag_error"
     target_corr_threshold: float = 25.0
+    target_mask_var: str | None = "landice"
     normalize_x: bool = True
     log_y: bool = False
     y_transform: YTransformName | None = None
@@ -1651,6 +1698,11 @@ class PISMInterpolatedDataset(Dataset):
     target_corr_threshold : float, optional
         Threshold applied to ``target_corr_var`` when present. Cells with
         ``target_corr_var < target_corr_threshold`` are masked. Default is 25.0.
+    target_mask_var : str or None, optional
+        Ice mask variable in ``target_file`` (e.g. ``landice``). Cells where it is
+        ``0`` or missing are masked, so ice-free cells do not enter training.
+        Ignored, with a log message, when the target file has no such variable;
+        ``None`` disables it. Default is ``"landice"``.
     normalize_x : bool, optional
         If True, standardize ``X`` using mean/std over the retained samples.
         Default is True.
@@ -1710,6 +1762,7 @@ class PISMInterpolatedDataset(Dataset):
         target_corr_var: str = "thickness",
         target_error_var: str = "velsurf_mag_error",
         target_corr_threshold: float = 25.0,
+        target_mask_var: str | None = "landice",
         normalize_x: bool = True,
         y_transform: YTransformName | None = None,
         y_transform_kwargs: dict[str, object] | None = None,
@@ -1752,6 +1805,9 @@ class PISMInterpolatedDataset(Dataset):
         target_corr_threshold : float, optional
             Threshold applied to ``target_corr_var`` when present. Cells with
             ``target_corr_var < target_corr_threshold`` are masked. Default is 25.0.
+        target_mask_var : str or None, optional
+            Ice mask variable in ``target_file``; cells where it is ``0`` or missing
+            are masked. Default is ``"landice"``.
         normalize_x : bool, optional
             If True, standardize ``X`` using mean/std over the retained samples.
             Default is True.
@@ -1816,6 +1872,7 @@ class PISMInterpolatedDataset(Dataset):
             target_corr_var=target_corr_var,
             target_error_var=target_error_var,
             target_corr_threshold=float(target_corr_threshold),
+            target_mask_var=target_mask_var,
             normalize_x=bool(normalize_x),
             y_lim=tuple(y_lim),
             y_transform=y_transform if y_transform is not None else "none",
@@ -1889,7 +1946,8 @@ class PISMInterpolatedDataset(Dataset):
         2. Opens the target file and interpolates ``target_var`` to the reference grid
            using :meth:`xarray.DataArray.interp_like`.
         3. Constructs a boolean mask from NaNs and, if present, masks additional
-           cells where ``target_corr_var < target_corr_threshold``.
+           cells where ``target_corr_var < target_corr_threshold`` and cells where
+           the ice mask ``target_mask_var`` is ``0`` (nearest-neighbour sampled).
         4. Builds sparse indices (2D and 1D) for non-masked grid cells and vectorizes
            the interpolated target field at those cells.
         5. Optionally extracts and vectorizes target error and correlation fields.
@@ -1955,6 +2013,8 @@ class PISMInterpolatedDataset(Dataset):
                 corr_da = corr_da.rename({cy: ref_y_dim, cx: ref_x_dim})
             corr_interp = corr_da.interp_like(ref_da, method="nearest")
             mask = xr.where(corr_interp < cfg.target_corr_threshold, True, mask)
+
+        mask = _apply_ice_mask(mask, dtgt, cfg.target_mask_var, ref_da.squeeze())
 
         mask_np = mask.compute().values.astype(bool)
 
@@ -2169,4 +2229,5 @@ class PISMInterpolatedDataset(Dataset):
             n_samples=n_samples,
             n_grid_points=n_grid_points,
             normed_area=normed_area,
+            ids=[int(i) for i in keep_ids],
         )

@@ -352,3 +352,81 @@ def plot_legacy_eigenglaciers(
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     fig.savefig(fig_dir / f"eigenglaciers_{model_index}.pdf")
+
+
+def plot_glacier_eigenglaciers(
+    index: Any,
+    V_hat: Any,
+    lamda: Any,
+    out_dir: str | Path,
+    model_index: int = 0,
+    n_modes: int = 6,
+) -> list[Path]:
+    """
+    Plot the leading eigenglaciers of a multi-glacier emulator, one figure per glacier.
+
+    The rows of ``V_hat`` belonging to a glacier are mapped back to its grid
+    with ``index.to_2d``. Each mode uses one symmetric colour range for all
+    glaciers, so the figures can be compared.
+
+    Parameters
+    ----------
+    index : pism_emulator.glaciers.GlacierIndex
+        Layout of the stacked node vector.
+    V_hat : array-like
+        Eigenglaciers, shape ``(n_nodes, q)``.
+    lamda : array-like
+        Eigenvalues, shape ``(q,)``.
+    out_dir : str or pathlib.Path
+        Directory for the figures (created if needed).
+    model_index : int, optional
+        Emulator number, used in the file names.
+    n_modes : int, optional
+        Number of modes to plot.
+
+    Returns
+    -------
+    list[pathlib.Path]
+        The written files.
+    """
+    V = V_hat.detach().cpu().numpy() if hasattr(V_hat, "detach") else np.asarray(V_hat)
+    lam = (
+        lamda.detach().cpu().numpy() if hasattr(lamda, "detach") else np.asarray(lamda)
+    )
+    n_modes = min(n_modes, V.shape[1])
+    share = 100 * lam / lam.sum()
+    vmax = [float(np.nanpercentile(np.abs(V[:, k]), 99)) or 1.0 for k in range(n_modes)]
+    ncols = min(3, n_modes)
+    nrows = -(-n_modes // ncols)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    written = []
+    for b in index.blocks:
+        extent = (b.x[0], b.x[-1], b.y[0], b.y[-1])
+        aspect = (b.ny / b.nx) if b.nx else 1.0
+        fig, axs = plt.subplots(
+            nrows,
+            ncols,
+            figsize=(2.4 * ncols, 2.4 * nrows * aspect + 0.6),
+            squeeze=False,
+        )
+        for k, ax in enumerate(axs.ravel()):
+            ax.axis("off")
+            if k >= n_modes:
+                continue
+            im = ax.imshow(
+                index.to_2d(V[:, k], b.rgi_id),
+                origin="lower",
+                extent=extent,
+                cmap="twilight_shifted",
+                vmin=-vmax[k],
+                vmax=vmax[k],
+            )
+            ax.set_title(rf"mode {k}: $\Lambda$={share[k]:.1f}%", fontsize=7)
+        fig.colorbar(im, ax=axs, shrink=0.6, label="eigenglacier (transformed units)")
+        fig.suptitle(b.rgi_id, fontsize=8)
+        path = out / f"eigenglaciers_{model_index}_{b.rgi_id}.pdf"
+        fig.savefig(path)
+        plt.close(fig)
+        written.append(path)
+    return written

@@ -84,12 +84,14 @@ Sphinx + MyST site in `docs/` (same layout as pism-terra): `pip install -r docs/
 ```
 pism_emulator/
 ├── datasets.py         # Dataset classes for loading PISM outputs
+├── glaciers.py         # Multi-glacier dataset, discovery and GlacierIndex
 ├── datamodules.py      # PyTorch Lightning DataModules
 ├── emulators/
 │   ├── nnemulator.py   # Neural network emulator models
 │   └── speed/
 │       ├── train.py    # Training script for speed emulators
-│       └── evaluate.py # Evaluation script
+│       ├── evaluate.py # Evaluation script
+│       └── evaluate_glaciers.py # Multi-glacier evaluation (per glacier stats)
 ├── mcmc/
 │   ├── mala.py         # MALA sampler implementation
 │   ├── sample_speed.py # Speed parameter sampling
@@ -188,6 +190,18 @@ pism-train-emulator \
 ```
 
 **Available emulators:** `NN`, `NN5`, `DNN`, `LegacyNN`
+
+### Training on Several Glaciers
+```bash
+pism-train-emulator --emulator DNN --emulator-dir emulators \
+    --glacier-dir ~/base/pism-terra/2026_11_s4f_iceflow_calib \
+    --target-template '~/base/pism-terra/glacier_s4f_input/{rgi_id}/input/obs_{rgi_id}.nc' \
+    --target-var v --y-lim 1 100e3
+pism-evaluate-emulator-glaciers --emulator-dir emulators
+```
+Members missing on any glacier are dropped everywhere; `glacier_index.nc` in the
+emulator directory maps the stacked node vector back to each glacier's grid.
+Ice-free cells are masked with the target's `landice` (`--target-mask-var`).
 
 ### Evaluating Emulators
 ```bash

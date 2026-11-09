@@ -6,7 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [PEP 440](https://www.python.org/dev/peps/pep-0440/)
 and uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.43.1]
+## [0.44.0]
+
+### Added
+- One emulator can be trained on many glaciers: `pism-train-emulator --glacier-dir DIR --target-template '.../{rgi_id}/.../obs_{rgi_id}.nc'` stacks every glacier's ice cells into one vector per ensemble member (`pism_emulator.glaciers.MultiGlacierDataset`). Members are matched by run id and a member that failed on any glacier is dropped on all of them; cells are weighted by area; a missing speed error is derived from `vx`/`vy` and their errors. Training writes `glacier_index.nc`, `members.csv` and per-glacier eigenglacier figures.
+- `pism-evaluate-emulator-glaciers`: statistics (RMSE, MAE, bias, R², Pearson r, median relative error) of every emulator and their ensemble mean, for all glaciers and per glacier, per-member errors, per-glacier maps and a scatter plot.
+- `--training-var` option of `pism-train-emulator`.
+- `PISMInterpolatedDataset` masks ice-free cells with an ice mask from the target file (`target_mask_var`, default `landice`; cells where it is 0 are left out). Glacier observation files define the speed everywhere, so without this the single-glacier emulators trained on ice-free cells too (e.g. RGI2000-v7.0-C-01-03383: 68,328 cells instead of 12,926 ice cells). `pism-train-emulator`, `pism-evaluate-emulator` and `pism-sample-posterior-speed` take `--target-mask-var` (`none` disables it). Targets without the variable, such as the Greenland mosaics, are unchanged.
 
 ### Fixed
 - `pism-train-emulator` computed the eigenglacier basis twice: `Trainer.fit(..., datamodule=dm)` calls `prepare_data()` again without arguments, which computed a second, unused basis with the default `q=10`. `PISMDataModule.prepare_data()` without arguments now keeps the basis it already has.

@@ -47,7 +47,13 @@ from pism_emulator.emulators.nnemulator import (
     NN5Emulator,
     NNEmulator,
 )
-from pism_emulator.plotting import plot_eigenglaciers
+from pism_emulator.glaciers import (
+    DEFAULT_STATE_GLOB,
+    GLACIER_INDEX_FILE,
+    MultiGlacierDataset,
+    discover_glaciers,
+)
+from pism_emulator.plotting import plot_eigenglaciers, plot_glacier_eigenglaciers
 
 EMULATORS: Mapping[str, type[pl.LightningModule]] = {
     "NN": NNEmulator,
@@ -212,8 +218,38 @@ def main():
     )
     parser.add_argument("--target-var", type=str, default="velsurf_mag")
     parser.add_argument("--target-error-var", type=str, default="velsurf_mag_error")
+    parser.add_argument(
+        "--target-mask-var",
+        type=str,
+        default="landice",
+        help="Ice mask in the target file; cells where it is 0 are left out. "
+        "Ignored when the file has no such variable; 'none' disables it. "
+        "Use the same value for training, evaluation and sampling.",
+    )
     parser.add_argument("--y-lim", type=float, nargs=2, default=[1, 10e3])
     parser.add_argument("--y-transform", default="log10")
+    parser.add_argument("--training-var", type=str, default="velsurf_mag")
+    parser.add_argument(
+        "--glacier-dir",
+        default=None,
+        help="Train on all glaciers in this directory (one RGI* subdirectory per "
+        "glacier) instead of TRAINING_FILES; needs --target-template. Each "
+        "glacier's samples come from its own uq.csv (--samples-file is ignored).",
+    )
+    parser.add_argument(
+        "--target-template",
+        default=None,
+        help="Observation file of a glacier with {rgi_id} as placeholder, e.g. "
+        "'glacier_s4f_input/{rgi_id}/input/obs_{rgi_id}.nc'.",
+    )
+    parser.add_argument(
+        "--glaciers", nargs="+", default=None, help="Only use these glaciers."
+    )
+    parser.add_argument(
+        "--state-glob",
+        default=DEFAULT_STATE_GLOB,
+        help="Ensemble output of a glacier, relative to its directory.",
+    )
     parser.add_argument("TRAINING_FILES", nargs="*", help="PISM netCDF files")
 
     Emulator = EMULATORS[tmp.emulator]
@@ -252,17 +288,42 @@ def main():
 
     callbacks: list = [EpochProgressBar(desc="Training")]
 
-    dataset = PISMDataset(
-        training_files=training_files,
-        samples_file=samples_file,
-        target_file=target_file,
-        target_var=target_var,
-        target_error_var=target_error_var,
-        engine=engine,
-        y_lim=y_lim,
-        y_transform=y_transform,
-        parallel=True,
+    target_mask_var = (
+        None if args.target_mask_var.lower() == "none" else args.target_mask_var
     )
+    if args.glacier_dir:
+        if not args.target_template:
+            parser.error("--glacier-dir needs --target-template")
+        dataset: PISMDataset | MultiGlacierDataset = MultiGlacierDataset(
+            discover_glaciers(
+                args.glacier_dir,
+                args.target_template,
+                state_glob=args.state_glob,
+                glaciers=args.glaciers,
+            ),
+            training_var=args.training_var,
+            target_var=target_var,
+            target_error_var=target_error_var,
+            target_mask_var=target_mask_var,
+            engine=engine,
+            y_lim=y_lim,
+            y_transform=y_transform,
+            parallel=True,
+        )
+    else:
+        dataset = PISMDataset(
+            training_files=training_files,
+            samples_file=samples_file,
+            target_file=target_file,
+            training_var=args.training_var,
+            target_var=target_var,
+            target_error_var=target_error_var,
+            target_mask_var=target_mask_var,
+            engine=engine,
+            y_lim=y_lim,
+            y_transform=y_transform,
+            parallel=True,
+        )
     X = dataset.samples.X
     F = dataset.samples.Y
     area = dataset.samples.normed_area
@@ -303,7 +364,15 @@ def main():
     dm.setup(stage="fit")
     V_hat = dm.eig.V_hat
     F_mean = dm.eig.F_mean
-    plot_eigenglaciers(dataset, dm, model_index, emulator_dir, q=q)
+    if isinstance(dataset, MultiGlacierDataset):
+        dataset.index.save(emulator_dir / GLACIER_INDEX_FILE)
+        dataset.member_table().to_csv(emulator_dir / "members.csv")
+        lamda = dm.eig.eigs_vals
+        plot_glacier_eigenglaciers(
+            dataset.index, V_hat, lamda, emulator_dir / "eigenglaciers", model_index
+        )
+    else:
+        plot_eigenglaciers(dataset, dm, model_index, emulator_dir, q=q)
 
     dl = dm.train_dataloader()
     rank_zero_info(

@@ -18,10 +18,19 @@ The full list lives in `pyproject.toml`'s `[project.scripts]`.
     `--y-transform`/`--y-lim`, `--max-epochs`, `--batch-size`,
     `--accelerator`/`--devices`/`--strategy`, plus the architecture's own
     options (`--width`, `--depth`, `--dropout`, `--activation`,
-    `--learning-rate`, …). Writes `<emulator-dir>/emulator/emulator_N.ckpt`.
+    `--learning-rate`, …). `--target-mask-var` (default `landice`) leaves out
+    ice-free cells. Writes `<emulator-dir>/emulator/emulator_N.ckpt`.
 * - `pism-evaluate-emulator`
   - Compare trained emulators (`EMULATOR_FILES`) with PISM on a random subset
     of the ensemble (`--sample-size`): maps and error statistics.
+* - `pism-train-emulator --glacier-dir DIR --target-template T`
+  - Train one emulator on all glaciers of `DIR` (`--glaciers`, `--state-glob`);
+    see {doc}`../features/emulators`. Writes `glacier_index.nc` and
+    `members.csv` next to the checkpoints.
+* - `pism-evaluate-emulator-glaciers`
+  - Evaluate a multi-glacier emulator ensemble (`--emulator-dir`): statistics
+    for all glaciers and per glacier, per-member errors, maps and a scatter plot
+    in `<emulator-dir>/evaluation/`.
 ```
 
 ## Posterior sampling
