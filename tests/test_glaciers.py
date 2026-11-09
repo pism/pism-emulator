@@ -294,7 +294,8 @@ def test_train_and_evaluate_cli(glaciers: dict, tmp_path: Path, monkeypatch) -> 
     out = emu / "evaluation"
     for name in ("stats_by_glacier.csv", "stats_overall.csv", "stats_by_member.csv"):
         assert (out / name).is_file()
-    assert (out / "maps_RGI-A.pdf").is_file() and (out / "scatter.png").is_file()
+    assert (out / "speed_emulator_RGI-A.pdf").is_file()
+    assert (out / "scatter.png").is_file()
     assert set(table.emulator) == {"emulator_0", "emulator_1", "ensemble_mean"}
     assert set(table.glacier) == {"all", "RGI-A", "RGI-B"}
     by_member = pd.read_csv(out / "stats_by_member.csv")

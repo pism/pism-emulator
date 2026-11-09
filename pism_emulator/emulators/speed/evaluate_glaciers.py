@@ -29,7 +29,8 @@ Outputs (in ``--out-dir``, default ``EMULATOR_DIR/evaluation``):
 * ``stats_by_glacier.csv``: one row per emulator, glacier (or ``all``) and space
 * ``stats_overall.csv``: the ``all`` rows of the above
 * ``stats_by_member.csv``: ensemble-mean RMSE and bias per member and glacier
-* ``maps_<RGI id>.pdf``: observed speed, PISM, emulator and their difference
+* ``speed_emulator_<RGI id>.pdf``: PISM, emulator and relative error for a few
+  members, with their parameters and fit
 * ``scatter.png``: emulator vs PISM, coloured by glacier
 """
 
@@ -56,6 +57,18 @@ from pism_emulator.glaciers import (
     MultiGlacierDataset,
     discover_glaciers,
 )
+from pism_emulator.utils import param_keys_dict
+
+#: Matplotlib style of the evaluation figures (as in ``pism-evaluate-emulator``).
+RCPARAMS = {
+    "axes.linewidth": 0.15,
+    "xtick.major.size": 2.0,
+    "xtick.major.width": 0.15,
+    "ytick.major.size": 2.0,
+    "ytick.major.width": 0.15,
+    "hatch.linewidth": 0.15,
+    "font.size": 6,
+}
 
 #: Dataset settings read from the checkpoint when not given on the command line.
 SETTINGS = (
@@ -213,78 +226,169 @@ def member_table(
     return pd.DataFrame(rows)
 
 
+def _member_text(
+    keys: Sequence[str], x: np.ndarray, st: dict[str, float]
+) -> tuple[str, str]:
+    """
+    Text blocks with a member's parameters and its fit.
+
+    Parameters
+    ----------
+    keys : sequence of str
+        Parameter names.
+    x : numpy.ndarray
+        Parameter values (physical units).
+    st : dict[str, float]
+        Statistics from :func:`weighted_stats`.
+
+    Returns
+    -------
+    tuple[str, str]
+        Parameter lines and fit lines.
+    """
+    params = "\n".join(f"{param_keys_dict.get(k, k)}: {v:.3f}" for k, v in zip(keys, x))
+    fit = (
+        f"MAE = {st['mae']:.1f} m/yr\nMBE = {st['bias']:.1f} m/yr\n"
+        f"RMSE = {st['rmse']:.0f} m/yr\nr = {st['pearson_r']:.3f}"
+    )
+    return params, fit
+
+
 def plot_maps(
     index: GlacierIndex,
-    obs: np.ndarray,
     true: np.ndarray,
     pred: np.ndarray,
+    X: np.ndarray,
+    keys: Sequence[str],
     ids: Sequence[int],
-    rows: Sequence[int],
-    y_lim: Sequence[float],
+    area: np.ndarray,
     out_dir: Path,
-) -> None:
+    n_members: int = 4,
+    seed: int = 2021,
+) -> list[Path]:
     """
-    Per glacier: observed speed, and PISM, emulator and difference for some members.
+    Per glacier: PISM, emulator and relative error for a few members.
+
+    The layout follows ``pism-evaluate-emulator``: one column per member with
+    rows *True*, *Predicted* and *Error* (relative, ±20 %), the member's
+    parameters and its fit on this glacier below, and the score over all members
+    of this glacier in the footer. Speeds use ``cmg.speed`` on a log scale from 1
+    to 1000 m/yr.
 
     Parameters
     ----------
     index : GlacierIndex
         Layout of the node vector.
-    obs : numpy.ndarray
-        Observed speed, shape ``(n_nodes,)``.
     true, pred : numpy.ndarray
         PISM and emulator speeds, shape ``(n_members, n_nodes)``.
+    X : numpy.ndarray
+        Parameters of the members in physical units, shape ``(n_members, n_params)``.
+    keys : sequence of str
+        Parameter names.
     ids : sequence of int
-        Member ids of the rows of ``true``/``pred``.
-    rows : sequence of int
-        Rows to plot.
-    y_lim : sequence of float
-        Speed range of the colour scale.
+        Member ids of the rows.
+    area : numpy.ndarray
+        Node weights.
     out_dir : pathlib.Path
         Output directory.
+    n_members : int, optional
+        Number of members (columns) to show.
+    seed : int, optional
+        Seed of the random choice of members.
+
+    Returns
+    -------
+    list[pathlib.Path]
+        The written files.
     """
+    rng = np.random.default_rng(seed)
+    k = min(n_members, len(ids))
+    rows = sorted(rng.choice(len(ids), size=k, replace=False).tolist())
     cmap = cmg.cmaps["speed"]
-    for b in index.blocks:
-        s = b.nodes
-        vmax = float(
-            np.nanpercentile(np.concatenate([obs[s], true[:, s].ravel()]), 99.5)
-        )
-        norm = LogNorm(vmin=max(y_lim[0], 1e-1), vmax=max(vmax, 10 * y_lim[0]))
-        dmax = float(np.nanpercentile(np.abs(pred[:, s] - true[:, s]), 99)) or 1.0
-        extent = (b.x[0], b.x[-1], b.y[0], b.y[-1])
-        fig, axs = plt.subplots(
-            len(rows),
-            4,
-            figsize=(8, 2.0 * len(rows) * b.ny / b.nx + 0.8),
-            squeeze=False,
-        )
-        for i, r in enumerate(rows):
-            panels = [
-                (obs[s] if i == 0 else None, "Observed", norm, cmap),
-                (true[r, s], f"PISM, member {ids[r]}", norm, cmap),
-                (pred[r, s], "Emulator", norm, cmap),
-                (pred[r, s] - true[r, s], "Emulator - PISM", None, "RdBu_r"),
-            ]
-            for j, (ax, (vals, title, nrm, cm)) in enumerate(zip(axs[i], panels)):
-                ax.axis("off")
-                if vals is None:
-                    continue
-                kw: dict[str, Any] = (
-                    {"norm": nrm} if nrm is not None else {"vmin": -dmax, "vmax": dmax}
+    written = []
+    with plt.rc_context(RCPARAMS):
+        for b in index.blocks:
+            s = b.nodes
+            fig = plt.figure(figsize=(6.4, 4.8), layout="constrained")
+            outer = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[1, 0.4])
+            gs_top = outer[0].subgridspec(
+                3,
+                k + 2,
+                width_ratios=[0.12, *([1] * k), 0.06],
+                wspace=0.025,
+                hspace=0.025,
+            )
+            axs = np.array(
+                [
+                    [fig.add_subplot(gs_top[r, c + 1]) for c in range(k)]
+                    for r in range(3)
+                ]
+            )
+            for r, title in enumerate(["True", "Predicted", "Error"]):
+                lab = fig.add_subplot(gs_top[r, 0])
+                lab.axis("off")
+                lab.text(
+                    1.0,
+                    0.5,
+                    title,
+                    transform=lab.transAxes,
+                    ha="right",
+                    va="center",
+                    fontsize=8,
                 )
-                im = ax.imshow(
-                    index.to_2d(vals, b.rgi_id),
-                    origin="lower",
-                    extent=extent,
-                    cmap=cm,
-                    **kw,
+            gs_bot = outer[1].subgridspec(
+                1, k + 1, width_ratios=[0.12, *([1] * k)], wspace=0.025
+            )
+            axs_bot = [fig.add_subplot(gs_bot[0, c + 1]) for c in range(k)]
+
+            im_log = im_rel = None
+            for c, r in enumerate(rows):
+                t2 = index.to_2d(true[r, s], b.rgi_id)
+                p2 = index.to_2d(pred[r, s], b.rgi_id)
+                im_log = axs[0, c].imshow(
+                    t2, origin="lower", cmap=cmap, norm=LogNorm(vmin=1e0, vmax=1e3)
                 )
-                ax.set_title(title, fontsize=7)
-                if (i == 0 and j == 2) or j == 3:
-                    fig.colorbar(im, ax=ax, shrink=0.7, label="m/yr")
-        fig.suptitle(b.rgi_id, fontsize=8)
-        fig.savefig(out_dir / f"maps_{b.rgi_id}.pdf")
-        plt.close(fig)
+                axs[1, c].imshow(
+                    p2, origin="lower", cmap=cmap, norm=LogNorm(vmin=1e0, vmax=1e3)
+                )
+                im_rel = axs[2, c].imshow(
+                    (p2 - t2) / t2, origin="lower", vmin=-0.2, vmax=0.2, cmap="coolwarm"
+                )
+                axs[0, c].set_title(f"member {ids[r]}", fontsize=7)
+                params, fit = _member_text(
+                    keys,
+                    X[r],
+                    weighted_stats(pred[r : r + 1, s], true[r : r + 1, s], area[s]),
+                )
+                axs_bot[c].text(
+                    0.2, 0.75, params, c="k", transform=axs_bot[c].transAxes
+                )
+                axs_bot[c].text(0.2, 0.2, fit, c="k", transform=axs_bot[c].transAxes)
+            for ax in [*axs.ravel(), *axs_bot]:
+                ax.set_axis_off()
+            if im_log is not None and im_rel is not None:
+                cb1 = fig.colorbar(
+                    im_log, cax=fig.add_subplot(gs_top[0:2, k + 1]), extend="both"
+                )
+                cb1.set_label("m/yr (log scale)")
+                cb2 = fig.colorbar(
+                    im_rel, cax=fig.add_subplot(gs_top[2, k + 1]), extend="both"
+                )
+                cb2.set_label("Relative error")
+            st = weighted_stats(pred[:, s], true[:, s], area[s])
+            fig.suptitle(b.rgi_id, fontsize=8)
+            fig.supxlabel(
+                f"Mean Score ({len(ids)} members): MAE={st['mae']:.2f} m/yr, "
+                f"MBE={st['bias']:.2f} m/yr, RMSE={st['rmse']:.0f} m/yr, "
+                f"Pearson r={st['pearson_r']:.2f}, r²={st['r2']:.2f}",
+                y=0.01,
+                fontsize=6,
+            )
+            path = out_dir / f"speed_emulator_{b.rgi_id}.pdf"
+            fig.savefig(path)
+            plt.close(fig)
+            written.append(path)
+    return written
 
 
 def plot_scatter(
@@ -341,7 +445,7 @@ def _parser() -> ArgumentParser:
     parser.add_argument(
         "--out-dir", default=None, help="Default: EMULATOR_DIR/evaluation"
     )
-    parser.add_argument("--n-plot-members", type=int, default=3)
+    parser.add_argument("--n-plot-members", type=int, default=4)
     parser.add_argument("--glacier-dir", default=None)
     parser.add_argument("--target-template", default=None)
     parser.add_argument("--glaciers", nargs="+", default=None)
@@ -515,9 +619,18 @@ def run(argv: Sequence[str] | None = None) -> pd.DataFrame:
         out_dir / "stats_by_member.csv", index=False
     )
 
-    obs = phys(dataset.Y_target.numpy()[None])[0]
-    rows = list(range(min(args.n_plot_members, len(ids))))
-    plot_maps(index, obs, true_p, preds_p[best], ids, rows, y_lim, out_dir)
+    X_raw = (X * dataset.samples.X_std + dataset.samples.X_mean).numpy()
+    plot_maps(
+        index,
+        true_p,
+        preds_p[best],
+        X_raw,
+        dataset.samples.X_keys,
+        ids,
+        area,
+        out_dir,
+        n_members=args.n_plot_members,
+    )
     plot_scatter(index, true_p, preds_p[best], out_dir / "scatter.png")
 
     show = table[(table.emulator == best) & (table.space == "m/yr")]

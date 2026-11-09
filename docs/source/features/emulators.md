@@ -158,9 +158,11 @@ with the settings stored in the checkpoints, checks it against
 RMSE, MAE, bias, $R^2$, Pearson $r$ and median relative error for every
 emulator and for their ensemble mean, for all glaciers and per glacier, in m/yr
 and in the transformed space (`stats_by_glacier.csv`, `stats_overall.csv`); the
-RMSE and bias per member and glacier (`stats_by_member.csv`); maps of observed,
-PISM, emulated and difference speeds per glacier; and an emulator-vs-PISM
-scatter plot coloured by glacier. The statistics are in-sample: training uses
+RMSE and bias per member and glacier (`stats_by_member.csv`); per glacier, the
+same figure as `pism-evaluate-emulator` (`speed_emulator_<RGI id>.pdf`: PISM,
+emulated and relative-error maps for four members, with their parameters and fit,
+and the glacier's score below); and an emulator-vs-PISM scatter plot coloured by
+glacier. The statistics are in-sample: training uses
 bootstrap weights over all members, not a held-out split.
 
 ## Evaluation
