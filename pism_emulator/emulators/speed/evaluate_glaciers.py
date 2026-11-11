@@ -46,7 +46,6 @@ import pandas as pd
 import pylab as plt
 import torch
 from cmglaciology import cm as cmg
-from matplotlib.colors import LogNorm
 
 from pism_emulator.datasets import YTransformName, inverse_y_transform_np
 from pism_emulator.emulators.speed.train import EMULATORS
@@ -272,7 +271,7 @@ def plot_maps(
     The layout follows ``pism-evaluate-emulator``: one column per member with
     rows *True*, *Predicted* and *Error* (relative, ±20 %), the member's
     parameters and its fit on this glacier below, and the score over all members
-    of this glacier in the footer. Speeds use ``cmg.speed`` on a log scale from 1
+    of this glacier in the footer. Speeds use ``cmg.speed`` on a scale from 1
     to 1000 m/yr.
 
     Parameters
@@ -346,11 +345,9 @@ def plot_maps(
                 t2 = index.to_2d(true[r, s], b.rgi_id)
                 p2 = index.to_2d(pred[r, s], b.rgi_id)
                 im_log = axs[0, c].imshow(
-                    t2, origin="lower", cmap=cmap, norm=LogNorm(vmin=1e0, vmax=1e3)
+                    t2, origin="lower", cmap=cmap, vmin=1e0, vmax=1e3
                 )
-                axs[1, c].imshow(
-                    p2, origin="lower", cmap=cmap, norm=LogNorm(vmin=1e0, vmax=1e3)
-                )
+                axs[1, c].imshow(p2, origin="lower", cmap=cmap, vmin=1e0, vmax=1e3)
                 im_rel = axs[2, c].imshow(
                     (p2 - t2) / t2, origin="lower", vmin=-0.2, vmax=0.2, cmap="coolwarm"
                 )
